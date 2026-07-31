@@ -1,0 +1,25 @@
+{
+  "name": "ytproxy",
+  "version": "1.0.0",
+  "description": "YouTube senza pubblicità",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ytproxy.app",
+    "productName": "YTProxy",
+    "directories": { "output": "dist-electron" },
+    "files": ["electron/**", "server/**", "frontend/dist/**"],
+    "mac": { "category": "public.app-category.entertainment" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" }
+  }
+}
