@@ -4,6 +4,7 @@ import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
 import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
+import { useChannelAvatars } from "../hooks/useChannelAvatars";
 
 export default function VideoPage({ videoId, navigate }) {
   const [info, setInfo] = useState(null);
@@ -24,6 +25,12 @@ export default function VideoPage({ videoId, navigate }) {
 
   // Cast state
   const isCasting = cast?.connected && cast?.currentMedia?.videoId === videoId;
+
+  // Logo del canale: /api/watch non lo include (yt-dlp dà solo la copertina del
+  // video), quindi lo risolviamo con lo stesso hook delle card, passandogli il
+  // singolo video come lista di uno.
+  const channelAsList = useMemo(() => (info?.channel_id ? [info] : []), [info]);
+  const channelAvatar = useChannelAvatars(channelAsList)[info?.channel_id];
 
   // I metadati (titolo/descrizione/correlati) arrivano con /api/watch, ma il
   // player NON aspetta più questa chiamata: l'URL del player (/api/mux) si
@@ -311,7 +318,11 @@ export default function VideoPage({ videoId, navigate }) {
               {/* Canale a sinistra, azioni a destra sulla stessa riga — come YouTube */}
               <div className="video-meta-row">
                 <div className="channel-row">
-                  <div className="channel-avatar">{(info.channel || "?")[0]}</div>
+                  <div className="channel-avatar">
+                    {channelAvatar
+                      ? <img src={channelAvatar} alt={info.channel} referrerPolicy="no-referrer" />
+                      : (info.channel || "?")[0]}
+                  </div>
                   <div>
                     <div className="channel-name">{info.channel}</div>
                     <div className="channel-subs">{formatViews(info.views)}</div>
@@ -410,7 +421,7 @@ export default function VideoPage({ videoId, navigate }) {
                       <div key={c.id} style={{ display: "flex", gap: 12 }}>
                         <div className="channel-avatar" style={{ width: 36, height: 36, fontSize: 13, flexShrink: 0, overflow: "hidden" }}>
                           {c.author_thumbnail
-                            ? <img src={c.author_thumbnail} alt={c.author} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ? <img src={c.author_thumbnail} alt={c.author} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                             : (c.author || "?").replace("@", "")[0]}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
