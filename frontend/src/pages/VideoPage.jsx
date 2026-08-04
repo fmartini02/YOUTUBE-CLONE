@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { api, formatDuration, formatViews, formatDate, timeAgo, isCastableOrigin } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
+import VideoPlayer from "../components/VideoPlayer";
 import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
+
+const THEATER_KEY = "ytproxy_theater";
 
 export default function VideoPage({ videoId, navigate }) {
   const [info, setInfo] = useState(null);
@@ -17,24 +20,29 @@ export default function VideoPage({ videoId, navigate }) {
   const [subtitleLangs, setSubtitleLangs] = useState([]);
   const [subtitleLang, setSubtitleLang] = useState("");
   const [subtitleSize, setSubtitleSize] = useState("normal");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const playerWrapRef = useRef(null);
+  // Modalità cinema: la scelta vale per tutti i video, come su YouTube, quindi
+  // sopravvive al cambio pagina e al riavvio.
+  const [theater, setTheater] = useState(() => localStorage.getItem(THEATER_KEY) === "1");
   const { addToast, ToastContainer } = useToast();
   const cast = useCastContext();
 
   // Cast state
   const isCasting = cast?.connected && cast?.currentMedia?.videoId === videoId;
 
-  // I metadati (titolo/descrizione/correlati) arrivano con /api/watch, ma il
-  // player NON aspetta più questa chiamata: l'URL del player (/api/mux) si
+  // I metadati (titolo/descrizione/durata/correlati) arrivano con /api/watch,
+  // ma il player NON aspetta questa chiamata: l'URL del flusso (/api/mux) si
   // costruisce subito da videoId+quality, senza bisogno di sapere nient'altro.
   // Prima erano in serie (aspetta i metadati, POI fai partire il player) e il
   // video restava fermo per il tempo di entrambe le richieste sommate.
+  //
+  // Non dipende da `quality`: nessuno di questi campi cambia con la qualità, e
+  // rifare l'estrazione ad ogni cambio azzerava `info` — cioè la durata, cioè
+  // la barra di avanzamento — per il tempo della richiesta.
   useEffect(() => {
     if (!videoId) return;
     setInfo(null);
 
-    api.watch(videoId, quality).then(data => {
+    api.watch(videoId).then(data => {
       setInfo(data);
       // Salva in cronologia
       api.addHistory({ id: videoId, title: data.title, channel: data.channel, thumbnail: data.thumbnail }).catch(() => {});
@@ -45,7 +53,7 @@ export default function VideoPage({ videoId, navigate }) {
     }).catch(() => {
       addToast("Errore nel caricamento dei dettagli del video");
     });
-  }, [videoId, quality]);
+  }, [videoId]);
 
   // Commenti: chiamata separata (non dipende da 'quality') e non bloccante —
   // parte in parallelo, il player non aspetta che finisca.
@@ -68,31 +76,12 @@ export default function VideoPage({ videoId, navigate }) {
     api.subtitleLanguages(videoId).then(d => setSubtitleLangs(d.languages || [])).catch(() => {});
   }, [videoId]);
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      playerWrapRef.current?.requestFullscreen().catch(() => {});
-    }
+  function toggleTheater() {
+    setTheater(t => {
+      localStorage.setItem(THEATER_KEY, t ? "0" : "1");
+      return !t;
+    });
   }
-
-  // Il tag <video> ha un suo bottone nativo per lo schermo intero (nei
-  // controlli standard del browser, distinto dal nostro ⛶ nell'overlay): se
-  // l'utente usa QUELLO, va a schermo intero solo il <video>, e l'overlay con
-  // ingranaggio/sottotitoli — che vive nel contenitore attorno — sparisce.
-  // Se rileviamo che è andato a schermo intero solo il video, lo correggiamo
-  // passando al contenitore, così l'overlay resta sempre raggiungibile.
-  useEffect(() => {
-    function onFullscreenChange() {
-      const wrap = playerWrapRef.current;
-      const videoEl = wrap?.querySelector("video");
-      if (wrap && videoEl && document.fullscreenElement === videoEl) {
-        document.exitFullscreen().then(() => wrap.requestFullscreen().catch(() => {}));
-      }
-    }
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, []);
 
   async function handleCast() {
     if (!cast) return;
@@ -150,13 +139,13 @@ export default function VideoPage({ videoId, navigate }) {
 
   return (
     <div className="video-page">
-      <div className="video-page-layout">
+      <div className={`video-page-layout${theater ? " theater" : ""}`}>
         <div className="video-main">
 
           {/* ── Player / Cast state ────────────────── */}
-          <div className="player-wrap" ref={playerWrapRef}>
-            {isCasting ? (
-              /* Schermata "in cast" — il video va sulla TV */
+          {isCasting ? (
+            <div className="player-wrap">
+              {/* Schermata "in cast" — il video va sulla TV */}
               <div style={{
                 aspectRatio: "16/9", background: "#000",
                 display: "flex", flexDirection: "column",
@@ -179,108 +168,28 @@ export default function VideoPage({ videoId, navigate }) {
                   <button className="action-btn" onClick={cast.stopCast}>✕ Interrompi</button>
                 </div>
               </div>
-            ) : (
-              // Nessuna attesa dei metadati: l'URL si costruisce subito da
-              // videoId+quality. Lo spinner di caricamento è quello nativo
-              // del browser (attributo controls) mentre bufferizza.
-              <>
-                <video
-                  key={`${videoId}-${quality}`}
-                  src={api.muxUrl(videoId, quality)}
-                  controls autoPlay
-                  className={`subtitle-size-${subtitleSize}`}
-                  style={{ width: "100%", aspectRatio: "16/9", maxHeight: "88vh", display: "block", background: "#000" }}
-                  onError={() => addToast("Errore stream — ricarica la pagina")}
-                >
-                  {subtitleLang && (
-                    <track
-                      key={subtitleLang}
-                      kind="subtitles"
-                      src={api.subtitleUrl(videoId, subtitleLang)}
-                      srcLang={subtitleLang}
-                      label={subtitleLangs.find(l => l.code === subtitleLang)?.name || subtitleLang}
-                      default
-                    />
-                  )}
-                </video>
+            </div>
+          ) : (
+            /* Il player non aspetta i metadati: l'URL del flusso si costruisce
+               subito da videoId+quality. La durata arriva dopo, con /api/watch,
+               e serve solo alla barra di avanzamento. */
+            <VideoPlayer
+              videoId={videoId}
+              quality={quality}
+              onQualityChange={setQuality}
+              duration={info?.duration}
+              subtitleLangs={subtitleLangs}
+              subtitleLang={subtitleLang}
+              onSubtitleLangChange={setSubtitleLang}
+              subtitleSize={subtitleSize}
+              onSubtitleSizeChange={setSubtitleSize}
+              theater={theater}
+              onToggleTheater={toggleTheater}
+              onError={() => addToast("Errore stream — ricarica la pagina")}
+              onNotice={addToast}
+            />
+          )}
 
-                {/* Overlay qualità/sottotitoli: vive DENTRO lo stesso elemento
-                    che va a schermo intero (player-wrap), a differenza del
-                    vecchio menu qualità esterno che spariva in fullscreen. */}
-                <div className="player-settings">
-                  <button
-                    className="player-settings-btn"
-                    onClick={() => setSettingsOpen(o => !o)}
-                    title="Impostazioni"
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>settings</span>
-                  </button>
-                  <button className="player-settings-btn" onClick={toggleFullscreen} title="Schermo intero">
-                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>fullscreen</span>
-                  </button>
-                </div>
-
-                {settingsOpen && (
-                  <>
-                    <div className="player-settings-backdrop" onClick={() => setSettingsOpen(false)} />
-                    <div className="player-settings-menu">
-                      <div className="player-settings-section">
-                        <div className="player-settings-label">Qualità</div>
-                        {[["best", "Migliore qualità"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["360", "360p"]].map(([v, l]) => (
-                          <div
-                            key={v}
-                            className={`player-settings-item${quality === v ? " active" : ""}`}
-                            onClick={() => { setQuality(v); setSettingsOpen(false); }}
-                          >
-                            {l}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="player-settings-section">
-                        <div className="player-settings-label">Sottotitoli</div>
-                        <div
-                          className={`player-settings-item${!subtitleLang ? " active" : ""}`}
-                          onClick={() => { setSubtitleLang(""); setSettingsOpen(false); }}
-                        >
-                          Off
-                        </div>
-                        {subtitleLangs.map(l => (
-                          <div
-                            key={l.code}
-                            className={`player-settings-item${subtitleLang === l.code ? " active" : ""}`}
-                            onClick={() => { setSubtitleLang(l.code); setSettingsOpen(false); }}
-                          >
-                            {l.name}{l.auto ? " (auto)" : ""}
-                          </div>
-                        ))}
-                        {subtitleLangs.length === 0 && (
-                          <div className="player-settings-item" style={{ color: "var(--text3)", cursor: "default" }}>
-                            Nessun sottotitolo disponibile
-                          </div>
-                        )}
-                      </div>
-
-                      {subtitleLang && (
-                        <div className="player-settings-section">
-                          <div className="player-settings-label">Dimensione sottotitoli</div>
-                          {[["small", "Piccoli"], ["normal", "Normali"], ["large", "Grandi"]].map(([v, l]) => (
-                            <div
-                              key={v}
-                              className={`player-settings-item${subtitleSize === v ? " active" : ""}`}
-                              onClick={() => setSubtitleSize(v)}
-                            >
-                              {l}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
 
           {/* ── Controls bar ───────────────────────── */}
           <div className="player-controls">
