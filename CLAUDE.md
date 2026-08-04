@@ -46,16 +46,16 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 
 ### Riproduzione: tre selettori di formato, tre scopi
 
-`_progressive_format_selector` / `_adaptive_format_selector` / `_cast_format_selector` in `main.py` non sono intercambiabili — i docstring spiegano il perché (player `<video>` che non gestisce flussi separati, Chromecast che non decodifica AV1/Opus). Il player reale usa **`/api/mux`**: ffmpeg unisce al volo video+audio adattivi in un MP4 frammentato (`-c copy`, `frag_duration` 1s). Conseguenza da tenere a mente: niente `Content-Length`/Range, quindi **non si può cercare in avanti oltre il buffer**. `/api/watch` resta per i metadati (e restituisce anche uno stream progressivo di riserva).
+`_progressive_format_selector` / `_adaptive_format_selector` / `_cast_format_selector` in `main.py` non sono intercambiabili — i docstring spiegano il perché (player `<video>` che non gestisce flussi separati, Chromecast che non decodifica AV1/Opus). Il player reale usa **`/api/mux`**: ffmpeg unisce al volo video+audio adattivi in un MP4 frammentato (`-c copy`, `frag_duration` 1s). Conseguenza da tenere a mente: niente `Content-Length`/Range, quindi il `<video>` da solo non sa cercare oltre il buffer. Il seek si fa con il parametro **`start`**: il player riapre il flusso dal secondo richiesto (ffmpeg `-ss` prima degli input, più `-copypriorss 0` per non partire dal keyframe precedente) e mostra `start + currentTime` — vedi `VideoPlayer.jsx`, che per questo ha una barra e dei controlli propri invece di quelli nativi. `/api/watch` resta per i metadati (e restituisce anche uno stream progressivo di riserva).
 
 ### Due autenticazioni indipendenti, entrambe facoltative
 
 | | A cosa serve | Dove |
 |---|---|---|
 | `data/cookies.txt` | Feed home reale e feed iscrizioni reale (via yt-dlp) | upload manuale o import automatico dal browser (`/api/cookies/import`, gestisce i percorsi snap su Linux) |
+| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) + lettura/pubblicazione commenti | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
 
 Sui cookie c'è una trappola che vale la pena ricordare: contano solo quelli di **prima parte sul dominio `youtube.com`** (`SID`, `__Secure-1PSID`, `LOGIN_INFO`, `SAPISID`). Essere loggati su `google.com` non basta — un profilo browser loggato su Google ma che non ha mai aperto YouTube produce un `cookies.txt` di decine di cookie in cui YouTube ti vede comunque anonimo, quindi feed vuoti. `_youtube_auth_cookies()` in `auth.py` è il controllo che distingue i due casi, e `get_cookie_status()` lo espone come `logged_in`.
-| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
 
 Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
 
@@ -65,7 +65,7 @@ Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
 - Correlati: `/api/related/<id>` legge il "Mix" di YouTube (playlist `RD<id>`) con lo stesso `LazyFeed` — si estende con continuazioni quasi senza fine, quindi regge lo scroll infinito della sidebar.
 - Iscrizioni: feed cookie di YouTube (cache 5 min) → cache su disco aggiornata ogni ora da `sync.py` → fetch a caldo ridotto (15 canali) se la cache è ancora vuota.
 
-`LazyFeed` (in `auth.py`) tiene vivo il generatore di yt-dlp tra una richiesta e l'altra per scaricare il feed a blocchi mentre l'utente scorre. È bloccante e non thread-safe: gli accessi passano da `_home_feed_lock` e girano in `run_in_executor`. Chiama `save_cookies()` ad ogni blocco perché YouTube ruota i cookie di sessione e non farlo invalida la sessione.
+`LazyFeed` (in `auth.py`) tiene vivo il generatore di yt-dlp tra una richiesta e l'altra per scaricare il feed a blocchi mentre l'utente scorre. È bloccante e non thread-safe: gli accessi passano da un lock per feed (`_feed_locks`, uno per chiave — `home`, `related:<id>`) e girano in `run_in_executor`. I feed aperti stanno in una cache LRU (`_feeds`, max `MAX_OPEN_FEEDS`) perché ognuno tiene viva un'istanza di yt-dlp. Chiama `save_cookies()` ad ogni blocco perché YouTube ruota i cookie di sessione e non farlo invalida la sessione.
 
 ### Frontend
 
@@ -73,7 +73,7 @@ React 18 + Vite, senza router né librerie di stato. `App.jsx` implementa il rou
 
 `api.js` centralizza le chiamate e il rilevamento del dispositivo. `getServerBase()` è vuoto sul web/Electron (stessa origine) ma su Android/Capacitor legge da localStorage l'indirizzo impostato in `ServerSetup`; `getLanBase()` serve al Chromecast, che scarica il video da sé e quindi ha bisogno di un URL assoluto e non-localhost.
 
-Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non in Electron, non in Chromium open-source — e l'hook espone il motivo dell'indisponibilità per poterlo spiegare all'utente.
+Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non in Electron, non in Chromium open-source — e l'hook espone il motivo dell'indisponibilità per poterlo spiegare all'utente. L'unico comando è `CastButton` nella pagina video: sempre visibile, spiega il motivo invece di sparire quando il cast non è disponibile.
 
 ## Nota sulla porta 8090
 
