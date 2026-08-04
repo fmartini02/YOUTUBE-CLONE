@@ -36,12 +36,12 @@ set LOCAL_IP=%LOCAL_IP: =%
 echo.
 echo   Server pronto!
 echo.
-echo   Questo PC:    http://localhost:8080
-echo   Telefono/TV:  http://%LOCAL_IP%:8080
+echo   Questo PC:    http://localhost:8090
+echo   Telefono/TV:  http://%LOCAL_IP%:8090
 echo.
 echo   Assicurati che telefono e PC siano sulla stessa WiFi
 echo.
 
 cd server
-python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
 pause

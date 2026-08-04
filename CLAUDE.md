@@ -1,0 +1,77 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Cos'è
+
+YTProxy: server locale (FastAPI + yt-dlp) che serve un clone dell'UI di YouTube senza pubblicità, raggiungibile da PC, telefono e Smart TV sulla stessa rete. Codice, commenti e UI sono in italiano — mantieni la lingua quando modifichi.
+
+## Comandi
+
+```bash
+# Avvio completo (installa dipendenze di sistema/Python, aggiorna yt-dlp una volta al giorno,
+# builda il frontend se manca dist/, poi uvicorn su 0.0.0.0:8090 --reload)
+./start_server.sh                      # start_server.bat su Windows
+
+# Solo server (dipendenze già presenti)
+cd server && python3 -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
+
+# Frontend con HMR su :3000 (proxy /api → :8090, quindi il server deve girare a parte)
+cd frontend && npm run dev
+
+# Build frontend → frontend/dist (servito da FastAPI su /)
+cd frontend && npm run build
+
+# App desktop Electron (avvia da sé il server Python)
+npm install && npm run build:frontend && npm start
+npm run build                          # electron-builder → dist-electron/
+
+# APK Android (Capacitor)
+cd frontend && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug
+```
+
+Non ci sono test né linter configurati. Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s "localhost:8090/api/watch/<id>?quality=720"`.
+
+`frontend/dist/` **è versionato** (il server lo serve così com'è): dopo aver toccato il frontend serve `npm run build` e i file buildati vanno committati. `frontend/node_modules/` e i file personali in `data/` sono invece ignorati.
+
+## Architettura
+
+Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste database: tutto lo stato sta in file JSON dentro `data/`.
+
+- `server/main.py` — endpoint HTTP + selettori di formato yt-dlp + mount di `frontend/dist` su `/`.
+- `server/auth.py` — `auth_manager` (singleton): OAuth Google, cookie YouTube, feed, cronologia, preferenze, cache loghi canale. Carica tutti i JSON in memoria all'avvio e riscrive il file intero ad ogni modifica.
+- `server/sync.py` — `scheduler` (singleton): loop orario che rinnova le iscrizioni via API e ricostruisce la cache del feed iscrizioni. Avviato da `on_startup`.
+
+**yt-dlp è l'unica fonte dei dati YouTube** (niente API key per ricerca/trending/video/commenti/sottotitoli). La YouTube Data API v3 serve solo per l'elenco iscrizioni e i loghi dei canali, e richiede l'OAuth.
+
+### Riproduzione: tre selettori di formato, tre scopi
+
+`_progressive_format_selector` / `_adaptive_format_selector` / `_cast_format_selector` in `main.py` non sono intercambiabili — i docstring spiegano il perché (player `<video>` che non gestisce flussi separati, Chromecast che non decodifica AV1/Opus). Il player reale usa **`/api/mux`**: ffmpeg unisce al volo video+audio adattivi in un MP4 frammentato (`-c copy`, `frag_duration` 1s). Conseguenza da tenere a mente: niente `Content-Length`/Range, quindi **non si può cercare in avanti oltre il buffer**. `/api/watch` resta per i metadati (e restituisce anche uno stream progressivo di riserva).
+
+### Due autenticazioni indipendenti, entrambe facoltative
+
+| | A cosa serve | Dove |
+|---|---|---|
+| `data/cookies.txt` | Feed home reale e feed iscrizioni reale (via yt-dlp) | upload manuale o import automatico dal browser (`/api/cookies/import`, gestisce i percorsi snap su Linux) |
+| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
+
+Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
+
+### Fallback dei feed (catena voluta, non accidentale)
+
+- Home: `/api/feed/home` (cookie, `LazyFeed`) → se vuoto il frontend ricade su `/api/trending` (cache in memoria 10 min).
+- Iscrizioni: feed cookie di YouTube (cache 5 min) → cache su disco aggiornata ogni ora da `sync.py` → fetch a caldo ridotto (15 canali) se la cache è ancora vuota.
+
+`LazyFeed` (in `auth.py`) tiene vivo il generatore di yt-dlp tra una richiesta e l'altra per scaricare il feed a blocchi mentre l'utente scorre. È bloccante e non thread-safe: gli accessi passano da `_home_feed_lock` e girano in `run_in_executor`. Chiama `save_cookies()` ad ogni blocco perché YouTube ruota i cookie di sessione e non farlo invalida la sessione.
+
+### Frontend
+
+React 18 + Vite, senza router né librerie di stato. `App.jsx` implementa il routing a mano sulla History API. **Aggiungere una pagina richiede tre modifiche coerenti**: `pageToUrl`/`urlToPage` in `App.jsx`, il rendering condizionale in `App.jsx`, e la route corrispondente in `spa_routes()` di `main.py` (senza quest'ultima, aprire l'URL diretto o ricaricare dà 404).
+
+`api.js` centralizza le chiamate e il rilevamento del dispositivo. `getServerBase()` è vuoto sul web/Electron (stessa origine) ma su Android/Capacitor legge da localStorage l'indirizzo impostato in `ServerSetup`; `getLanBase()` serve al Chromecast, che scarica il video da sé e quindi ha bisogno di un URL assoluto e non-localhost.
+
+Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non in Electron, non in Chromium open-source — e l'hook espone il motivo dell'indisponibilità per poterlo spiegare all'utente.
+
+## Nota sulla porta 8090
+
+È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`, e l'Authorized redirect URI registrato su Google Cloud Console per l'OAuth.

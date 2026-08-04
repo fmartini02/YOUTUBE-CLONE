@@ -42,10 +42,10 @@ export default function Header({ navigate, currentQuery, sidebarOpen, setSidebar
     <header className="header">
       <div className="header-left">
         <button className="hamburger" onClick={() => setSidebarOpen(o => !o)}>
-          <span style={{ fontSize: 20 }}>☰</span>
+          <span className="material-symbols-outlined" style={{ fontSize: 20 }}>menu</span>
         </button>
         <div className="logo" onClick={() => navigate("home")}>
-          <span className="logo-icon">▶</span>
+          <span className="material-symbols-outlined logo-icon">play_circle</span>
           <span className="logo-text">YTProxy</span>
           <span className="logo-badge">AD-FREE</span>
         </div>
@@ -64,7 +64,9 @@ export default function Header({ navigate, currentQuery, sidebarOpen, setSidebar
               onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             />
           </div>
-          <button className="search-btn" onClick={() => handleSearch()}>🔍</button>
+          <button className="search-btn" onClick={() => handleSearch()}>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>search</span>
+          </button>
 
           {showSuggestions && suggestions.length > 0 && (
             <div style={{
@@ -79,7 +81,7 @@ export default function Header({ navigate, currentQuery, sidebarOpen, setSidebar
                   onMouseEnter={e => e.currentTarget.style.background = "var(--bg3)"}
                   onMouseLeave={e => e.currentTarget.style.background = ""}
                 >
-                  <span style={{ color: "var(--text3)" }}>🔍</span> {s}
+                  <span className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--text3)" }}>search</span> {s}
                 </div>
               ))}
             </div>
@@ -92,14 +94,18 @@ export default function Header({ navigate, currentQuery, sidebarOpen, setSidebar
         {castSDK?.available && (
           <CastButton useCastHook={castSDK} />
         )}
-        <button className="icon-btn" title="Notifiche">🔔</button>
+        <button className="icon-btn" title="Notifiche">
+          <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
+        </button>
         <button
           className="icon-btn"
           title={authenticated ? "Account collegato" : "Impostazioni account"}
           onClick={() => navigate("settings")}
           style={{ position: "relative" }}
         >
-          {authenticated ? "👤" : "⚙️"}
+          <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
+            {authenticated ? "account_circle" : "settings"}
+          </span>
           {authenticated && (
             <span style={{
               position: "absolute", top: 4, right: 4,
