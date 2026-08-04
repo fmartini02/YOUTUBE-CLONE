@@ -1,30 +1,53 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 /**
- * Integrazione Google Cast (Chromecast) via Cast Web Sender SDK.
+ * Chromecast — integrazione minima con il Cast Web Sender SDK di Google.
  *
- * Disponibile SOLO in browser Chrome/Edge/Brave desktop (il componente Cast è
- * proprietario di Google, non presente in Chromium open-source né in Electron
- * né in Firefox/Safari) — su quei runtime `available` resta false, la UI che
- * dipende da questo hook (CastButton, CastBar) si nasconde da sola.
+ * Fa una cosa sola: mandare UN video sulla TV e interromperlo. Niente coda,
+ * niente telecomando remoto — una volta partito, il video si comanda dal
+ * telecomando della TV o da Google Home, come con l'app YouTube. Tutta la UI
+ * del cast è un solo bottone (vedi CastButton).
  *
- * Gestisce sia riproduzione singola sia coda (queue): ogni video viene
- * caricato come chrome.cast.media.QueueItem, così "Aggiungi alla coda" può
- * accodare senza interrompere quello in corso.
+ * Disponibile SOLO in Chrome/Edge/Brave desktop: il componente Cast è
+ * proprietario di Google e non esiste in Chromium open-source, in Electron,
+ * in Firefox né in Safari. Su quei runtime `available` resta false e
+ * `unavailableReason` dice il perché, così il bottone può spiegarlo invece di
+ * sparire in silenzio.
  */
 
-const RECEIVER_APP_ID = import.meta.env.VITE_CAST_APP_ID || "CC1AD845"; // default media receiver di Google
+// Default Media Receiver di Google: riproduce MP4 H.264+AAC senza dover
+// registrare (e pagare) un receiver personalizzato. VITE_CAST_APP_ID permette
+// comunque di puntare a un receiver proprio, se lo si è registrato.
+const RECEIVER_APP_ID = import.meta.env.VITE_CAST_APP_ID || "CC1AD845";
+
+export const CAST_UNAVAILABLE_MESSAGE = {
+  electron: "La trasmissione non è disponibile nell'app desktop: apri YTProxy in Chrome, Brave o Edge.",
+  browser: "Serve un browser Chrome, Brave o Edge per trasmettere.",
+  blocked: "Lo script di Google Cast è stato bloccato (Brave Shields o adblocker). Disattiva lo scudo su questo sito e ricarica.",
+  "no-cast": "Il browser non espone il componente Cast. Su Brave: brave://settings → Sistema → attiva Media Router, poi riavvia il browser.",
+  timeout: "Google Cast non ha risposto. Controlla la connessione e che il componente Cast del browser sia attivo.",
+};
+
+export const CAST_ERROR_MESSAGE = {
+  unavailable: "Trasmissione non disponibile in questo browser.",
+  "no-device": "Nessun dispositivo Chromecast trovato sulla rete.",
+  load: "Il Chromecast non è riuscito ad avviare il video. Riprova, o scegli una qualità più bassa.",
+};
 
 /**
- * Carica l'SDK Cast. Restituisce {ok, reason}: quando fallisce il motivo serve
- * a dirlo all'utente, altrimenti il pulsante "Trasmetti" sparirebbe in
- * silenzio senza dare modo di capire cosa non va.
+ * Carica lo script dell'SDK una volta sola per pagina (promessa condivisa fra
+ * tutte le istanze dell'hook). Restituisce {ok, reason}: quando fallisce, il
+ * motivo serve per poterlo dire all'utente.
  */
+let sdkPromise = null;
+
 function loadCastSdk() {
-  return new Promise(resolve => {
+  if (sdkPromise) return sdkPromise;
+
+  sdkPromise = new Promise(resolve => {
     if (window.cast?.framework) return resolve({ ok: true });
 
-    if (/Electron/i.test(navigator.userAgent)) {
+    if (/Electron/i.test(navigator.userAgent) || window.__YTPROXY_ELECTRON__) {
       return resolve({ ok: false, reason: "electron" });
     }
     if (!/Chrome|Edg|Brave|Chromium/i.test(navigator.userAgent)) {
@@ -37,225 +60,159 @@ function loadCastSdk() {
     window.__onGCastApiAvailable = (isAvailable) =>
       finish(isAvailable ? { ok: true } : { ok: false, reason: "no-cast" });
 
-    if (!document.getElementById("__cast_sdk_script")) {
-      const script = document.createElement("script");
-      script.id = "__cast_sdk_script";
-      script.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
-      // Tipicamente: Brave Shields o un adblocker che blocca gstatic.com.
-      script.onerror = () => finish({ ok: false, reason: "blocked" });
-      document.head.appendChild(script);
-    }
+    const script = document.createElement("script");
+    script.id = "__cast_sdk_script";
+    script.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+    // Tipicamente: Brave Shields o un adblocker che blocca gstatic.com.
+    script.onerror = () => finish({ ok: false, reason: "blocked" });
+    document.head.appendChild(script);
 
-    // Lo script può caricarsi ma non annunciare mai l'SDK (componente Cast
-    // assente o disattivato nel browser).
+    // Lo script può caricarsi senza mai annunciare l'SDK (componente Cast
+    // assente o disattivato nel browser): senza timeout resteremmo in attesa
+    // per sempre e il bottone non direbbe mai cosa non va.
     setTimeout(() => finish(
       window.cast?.framework ? { ok: true } : { ok: false, reason: "timeout" },
-    ), 6000);
+    ), 8000);
   });
+
+  return sdkPromise;
 }
 
-export const CAST_UNAVAILABLE_MESSAGE = {
-  electron: "La trasmissione non è disponibile nell'app desktop: aprila in Brave o Chrome.",
-  browser: "Serve un browser Chrome, Brave o Edge per trasmettere.",
-  blocked: "Lo script di Google Cast è stato bloccato (Brave Shields o adblocker). Disattiva lo scudo su questo sito e ricarica.",
-  "no-cast": "Il browser non espone il componente Cast. Su Brave: brave://settings → Sistema → attiva Media Router, poi riavvia il browser.",
-  timeout: "Google Cast non ha risposto. Controlla la connessione e che il componente Cast del browser sia attivo.",
-};
+const PLAYER_STATE = { PLAYING: "playing", PAUSED: "paused", BUFFERING: "buffering", IDLE: "idle" };
 
 function buildMediaInfo(media) {
-  const info = new window.chrome.cast.media.MediaInfo(media.streamUrl, "video/mp4");
-  info.metadata = new window.chrome.cast.media.GenericMediaMetadata();
+  const cc = window.chrome.cast;
+  const info = new cc.media.MediaInfo(media.streamUrl, "video/mp4");
+  info.streamType = cc.media.StreamType.BUFFERED;
+  info.metadata = new cc.media.GenericMediaMetadata();
   info.metadata.title = media.title || "";
   info.metadata.subtitle = media.channel || "";
-  if (media.thumbnail) info.metadata.images = [new window.chrome.cast.Image(media.thumbnail)];
+  if (media.thumbnail) info.metadata.images = [new cc.Image(media.thumbnail)];
   if (media.duration) info.duration = media.duration;
-  info.customData = { videoId: media.videoId, channel: media.channel, thumbnail: media.thumbnail };
+  // Serve a riconoscere QUALE video sta girando sulla TV: il receiver ci
+  // restituisce customData, l'URL dello stream invece può essere riscritto.
+  info.customData = { videoId: media.videoId };
   return info;
 }
-
-function queueItemToMedia(item) {
-  const md = item?.media;
-  return {
-    itemId: item?.itemId,
-    videoId: md?.customData?.videoId,
-    title: md?.metadata?.title,
-    channel: md?.metadata?.subtitle || md?.customData?.channel,
-    thumbnail: md?.metadata?.images?.[0]?.url || md?.customData?.thumbnail,
-  };
-}
-
-const PLAYER_STATE_MAP = { PLAYING: "playing", PAUSED: "paused", BUFFERING: "buffering", IDLE: "idle" };
 
 export function useCast() {
   const [available, setAvailable] = useState(false);
   const [unavailableReason, setUnavailableReason] = useState(null);
   const [connected, setConnected] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [deviceName, setDeviceName] = useState("");
-  const [castState, setCastState] = useState("idle");
-  const [currentMedia, setCurrentMedia] = useState(null);
-  const [queue, setQueue] = useState([]);
-  const [queueIndex, setQueueIndex] = useState(-1);
+  const [playerState, setPlayerState] = useState("idle");
+  const [castingVideoId, setCastingVideoId] = useState(null);
 
   const playerRef = useRef(null);
-  const controllerRef = useRef(null);
 
-  const getSession = () => window.cast?.framework?.CastContext?.getInstance()?.getCurrentSession();
-  // I metodi di coda vivono su chrome.cast.media.Media (session.getMediaSession()),
-  // non su CastSession — CastSession espone solo loadMedia/endSession/ecc.
-  const getMedia = () => getSession()?.getMediaSession() || null;
+  const getContext = () => window.cast?.framework?.CastContext?.getInstance() || null;
 
-  const syncFromPlayer = useCallback(() => {
+  const sync = useCallback(() => {
+    const ctx = getContext();
+    if (!ctx) return;
+    const state = ctx.getCastState();   // NO_DEVICES_AVAILABLE | NOT_CONNECTED | CONNECTING | CONNECTED
     const player = playerRef.current;
-    if (!player) return;
-    setConnected(!!player.isConnected);
-    setCastState(PLAYER_STATE_MAP[player.playerState] || "idle");
+    const isConnected = state === "CONNECTED";
 
-    const items = player.queueData?.items || [];
-    const mapped = items.map(queueItemToMedia);
-    setQueue(mapped);
-
-    // RemotePlayer non espone currentItemId: sta solo su chrome.cast.media.Media.
-    const media = getMedia();
-    const currentItemId = media?.currentItemId ?? null;
-    const idx = items.findIndex(it => it.itemId === currentItemId);
-    setQueueIndex(idx);
-    setCurrentMedia(idx >= 0 ? mapped[idx] : (player.mediaInfo ? queueItemToMedia({ media: player.mediaInfo }) : null));
-
-    setDeviceName(getSession()?.getCastDevice()?.friendlyName || "");
+    setConnected(isConnected);
+    setConnecting(state === "CONNECTING");
+    setDeviceName(ctx.getCurrentSession()?.getCastDevice()?.friendlyName || "");
+    setPlayerState(PLAYER_STATE[player?.playerState] || "idle");
+    // mediaInfo resta valorizzato anche dopo la disconnessione: senza il
+    // controllo su isConnected il bottone continuerebbe a dire "Interrompi".
+    setCastingVideoId(isConnected ? (player?.mediaInfo?.customData?.videoId || null) : null);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    let cleanup = null;
+
     loadCastSdk().then(({ ok, reason }) => {
       if (cancelled) return;
-      if (!ok) {
-        setUnavailableReason(reason);
-        return;
-      }
-      const ctx = window.cast.framework.CastContext.getInstance();
+      if (!ok) { setUnavailableReason(reason); return; }
+
+      const framework = window.cast.framework;
+      const ctx = framework.CastContext.getInstance();
       ctx.setOptions({
         receiverApplicationId: RECEIVER_APP_ID,
+        // ORIGIN_SCOPED + resumeSavedSession: se ricarichiamo la pagina
+        // mentre la TV sta ancora trasmettendo, riagganciamo la sessione
+        // esistente invece di mostrare il bottone come se non stesse
+        // succedendo nulla.
         autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+        resumeSavedSession: true,
       });
 
-      const player = new window.cast.framework.RemotePlayer();
-      const controller = new window.cast.framework.RemotePlayerController(player);
+      // Due sorgenti di eventi, entrambe necessarie: CastContext sa se siamo
+      // connessi e a quale dispositivo, RemotePlayer sa cosa sta riproducendo.
+      const player = new framework.RemotePlayer();
+      const controller = new framework.RemotePlayerController(player);
       playerRef.current = player;
-      controllerRef.current = controller;
 
-      // CURRENT_ITEM_ID_CHANGED non esiste nell'enum: MEDIA_INFO_CHANGED si
-      // attiva già ad ogni cambio di item in coda, quindi basta quello.
-      const EV = window.cast.framework.RemotePlayerEventType;
-      [EV.IS_CONNECTED_CHANGED, EV.PLAYER_STATE_CHANGED, EV.MEDIA_INFO_CHANGED,
-       EV.QUEUE_DATA_CHANGED].forEach(ev => {
-        controller.addEventListener(ev, syncFromPlayer);
-      });
+      const EV = framework.RemotePlayerEventType;
+      const playerEvents = [EV.IS_CONNECTED_CHANGED, EV.PLAYER_STATE_CHANGED, EV.MEDIA_INFO_CHANGED];
+      playerEvents.forEach(ev => controller.addEventListener(ev, sync));
+
+      const CTX_EV = framework.CastContextEventType;
+      ctx.addEventListener(CTX_EV.CAST_STATE_CHANGED, sync);
+      ctx.addEventListener(CTX_EV.SESSION_STATE_CHANGED, sync);
 
       setAvailable(true);
-      syncFromPlayer();
+      sync();
+
+      cleanup = () => {
+        playerEvents.forEach(ev => controller.removeEventListener(ev, sync));
+        ctx.removeEventListener(CTX_EV.CAST_STATE_CHANGED, sync);
+        ctx.removeEventListener(CTX_EV.SESSION_STATE_CHANGED, sync);
+      };
     });
-    return () => { cancelled = true; };
-  }, [syncFromPlayer]);
 
-  const openDialog = useCallback(async () => {
-    if (!available) return;
-    try {
-      await window.cast.framework.CastContext.getInstance().requestSession();
-    } catch {
-      // utente ha chiuso il selettore dispositivi: nessun errore da mostrare
-    }
-  }, [available]);
+    return () => { cancelled = true; cleanup?.(); };
+  }, [sync]);
 
-  // I metodi di coda su chrome.cast.media.Media sono callback-based
-  // (successCallback, errorCallback), non Promise come CastSession#loadMedia:
-  // li avvolgo per poter usare await/try-catch in modo uniforme.
-  function callMedia(media, method, ...args) {
-    return new Promise((resolve, reject) => {
-      if (!media || typeof media[method] !== "function") return reject();
-      media[method](...args, () => resolve(true), () => reject());
-    });
-  }
+  /**
+   * Manda il video sulla TV: se non c'è ancora una sessione apre il selettore
+   * dei dispositivi, poi carica il video sulla sessione ottenuta.
+   * Restituisce {ok:true} oppure {ok:false, error}. "cancel" è l'utente che
+   * chiude il selettore — non un errore da mostrare.
+   */
+  const startCast = useCallback(async (media) => {
+    const ctx = getContext();
+    if (!available || !ctx) return { ok: false, error: "unavailable" };
 
-  const castVideo = useCallback(async (media) => {
-    if (!available) return false;
-    let session = getSession();
-    if (!session) {
+    if (!ctx.getCurrentSession()) {
       try {
-        await window.cast.framework.CastContext.getInstance().requestSession();
-      } catch {
-        return false;
+        await ctx.requestSession();
+      } catch (err) {
+        return { ok: false, error: err === "cancel" ? "cancel" : "no-device" };
       }
-      session = getSession();
     }
-    if (!session) return false;
 
-    // Il Default Media Receiver tratta comunque ogni loadMedia come una coda
-    // implicita di 1 elemento, quindi i successivi addToQueue si accodano.
+    const session = ctx.getCurrentSession();
+    if (!session) return { ok: false, error: "no-device" };
+
     const request = new window.chrome.cast.media.LoadRequest(buildMediaInfo(media));
+    request.autoplay = true;
     try {
       await session.loadMedia(request);
-      return true;
+      sync();
+      return { ok: true };
     } catch {
-      return false;
+      return { ok: false, error: "load" };
     }
-  }, [available]);
+  }, [available, sync]);
 
-  const addToQueue = useCallback(async (media) => {
-    if (!available) return false;
-    const mediaSession = getMedia();
-    if (!mediaSession) return castVideo(media); // niente sessione attiva: parte subito invece di accodare nel vuoto
-
-    const item = new window.chrome.cast.media.QueueItem(buildMediaInfo(media));
-    const request = new window.chrome.cast.media.QueueInsertItemsRequest([item]);
-    try {
-      await callMedia(mediaSession, "queueInsertItems", request);
-      return true;
-    } catch {
-      return false;
-    }
-  }, [available, castVideo]);
-
-  const pauseResume = useCallback(() => {
-    controllerRef.current?.playOrPause();
-  }, []);
-
+  /** Chiude la sessione e spegne il receiver sulla TV. */
   const stopCast = useCallback(() => {
-    controllerRef.current?.stop();
-  }, []);
-
-  const seek = useCallback((seconds) => {
-    const player = playerRef.current;
-    if (!player) return;
-    player.currentTime = seconds;
-    controllerRef.current?.seek();
-  }, []);
-
-  const next = useCallback(() => {
-    const m = getMedia();
-    if (m) callMedia(m, "queueNext").catch(() => {});
-  }, []);
-
-  const previous = useCallback(() => {
-    const m = getMedia();
-    if (m) callMedia(m, "queuePrev").catch(() => {});
-  }, []);
-
-  const playQueueItem = useCallback((itemId) => {
-    const m = getMedia();
-    if (m) callMedia(m, "queueJumpToItem", itemId).catch(() => {});
-  }, []);
-
-  const removeFromQueue = useCallback((itemId) => {
-    // queueRemoveItem è singolare: un solo itemId numerico, non un array.
-    const m = getMedia();
-    if (m) callMedia(m, "queueRemoveItem", itemId).catch(() => {});
-  }, []);
+    getContext()?.endCurrentSession(true);
+    sync();
+  }, [sync]);
 
   return {
-    available, unavailableReason, connected, deviceName, castState, currentMedia,
-    queue, queueIndex,
-    castVideo, addToQueue, pauseResume, stopCast, seek,
-    next, previous, playQueueItem, removeFromQueue,
-    openDialog,
+    available, unavailableReason,
+    connected, connecting, deviceName,
+    playerState, castingVideoId,
+    startCast, stopCast,
   };
 }

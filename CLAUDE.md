@@ -53,16 +53,23 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 | | A cosa serve | Dove |
 |---|---|---|
 | `data/cookies.txt` | Feed home reale e feed iscrizioni reale (via yt-dlp) | upload manuale o import automatico dal browser (`/api/cookies/import`, gestisce i percorsi snap su Linux) |
+<<<<<<< HEAD
 
 Sui cookie c'è una trappola che vale la pena ricordare: contano solo quelli di **prima parte sul dominio `youtube.com`** (`SID`, `__Secure-1PSID`, `LOGIN_INFO`, `SAPISID`). Essere loggati su `google.com` non basta — un profilo browser loggato su Google ma che non ha mai aperto YouTube produce un `cookies.txt` di decine di cookie in cui YouTube ti vede comunque anonimo, quindi feed vuoti. `_youtube_auth_cookies()` in `auth.py` è il controllo che distingue i due casi, e `get_cookie_status()` lo espone come `logged_in`.
+=======
+>>>>>>> worktree-cast-rewrite
 | OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
 
 Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
 
 ### Fallback dei feed (catena voluta, non accidentale)
 
+<<<<<<< HEAD
 - Home: **solo** `/api/feed/home` (cookie, `LazyFeed`). Nessun fallback: se il feed è vuoto l'endpoint restituisce `reason` (`no-cookies` / `not-logged-in` / `feed-vuoto`) e la home lo spiega, invece di mostrare i trending fingendo che sia la tua home. `/api/trending` esiste ancora ma non è più nella catena della home.
 - Correlati: `/api/related/<id>` legge il "Mix" di YouTube (playlist `RD<id>`) con lo stesso `LazyFeed` — si estende con continuazioni quasi senza fine, quindi regge lo scroll infinito della sidebar.
+=======
+- Home: `/api/feed/home` (cookie, `LazyFeed`) → se vuoto il frontend ricade su `/api/trending` (cache in memoria 10 min).
+>>>>>>> worktree-cast-rewrite
 - Iscrizioni: feed cookie di YouTube (cache 5 min) → cache su disco aggiornata ogni ora da `sync.py` → fetch a caldo ridotto (15 canali) se la cache è ancora vuota.
 
 `LazyFeed` (in `auth.py`) tiene vivo il generatore di yt-dlp tra una richiesta e l'altra per scaricare il feed a blocchi mentre l'utente scorre. È bloccante e non thread-safe: gli accessi passano da `_home_feed_lock` e girano in `run_in_executor`. Chiama `save_cookies()` ad ogni blocco perché YouTube ruota i cookie di sessione e non farlo invalida la sessione.

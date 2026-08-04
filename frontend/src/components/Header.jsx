@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { api } from "../api";
-import CastButton from "./CastButton";
 
-export default function Header({ navigate, currentQuery, sidebarOpen, setSidebarOpen, authStatus, cast: castSDK }) {
+export default function Header({ navigate, currentQuery, sidebarOpen, setSidebarOpen, authStatus }) {
   const [input, setInput] = useState(currentQuery);
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -90,10 +89,6 @@ export default function Header({ navigate, currentQuery, sidebarOpen, setSidebar
       </div>
 
       <div className="header-right">
-        {/* Cast button in header — solo su Chrome */}
-        {castSDK?.available && (
-          <CastButton useCastHook={castSDK} />
-        )}
         <button className="icon-btn" title="Notifiche">
           <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
         </button>
