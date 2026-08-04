@@ -681,9 +681,28 @@ async def home_feed(limit: int = 24, offset: int = 0):
     Paginato (limit/offset) per lo scroll infinito della home. L'estrazione è
     pigra: ogni pagina scarica da YouTube solo i blocchi che servono, quindi
     scorrere poco costa poco.
+
+    Quando è vuoto restituisce anche `reason` (no-cookies / not-logged-in /
+    feed-vuoto): la home lo mostra all'utente invece di rimpiazzare in
+    silenzio le raccomandazioni con i trending.
     """
     page = await auth_manager.get_home_feed_page(offset, limit, ydl_opts_base)
     return {**page, "source": "cookies" if page["total"] else "none"}
+
+
+@app.get("/api/related/{video_id}")
+async def related(video_id: str, limit: int = 20, offset: int = 0):
+    """
+    Video correlati a un video, dal "Mix" di YouTube (playlist RD<id>).
+
+    È la lista che YouTube stessa costruisce a partire da un video e si
+    estende con continuazioni quasi senza fine: regge lo scroll infinito
+    della sidebar. Prima i correlati erano una ricerca sulle prime 4 parole
+    del titolo, tagliata a 15 risultati — spesso fuori tema e non paginabile.
+
+    Estrazione pigra come la home: ogni pagina costa solo i blocchi che servono.
+    """
+    return await auth_manager.get_related_page(video_id, offset, limit, ydl_opts_base)
 
 
 @app.get("/api/channel-avatars")
@@ -735,6 +754,13 @@ async def upload_cookies(file: UploadFile = File(...)):
     result = auth_manager.save_cookies(content)
     if not result["valid"]:
         raise HTTPException(400, "File cookie non valido. Esporta da Chrome/Firefox con l'estensione 'Get cookies.txt'")
+    if not result["logged_in"]:
+        # Il file c'è ma non contiene una sessione youtube.com: meglio dirlo
+        # ora che lasciar scoprire più tardi una home senza raccomandazioni.
+        return {**result, "message": (
+            f"Cookie salvati ({result['cookie_count']}), ma non contengono una sessione YouTube: "
+            "fai login su youtube.com nel browser da cui esporti, poi riesporta."
+        )}
     return {**result, "message": f"Cookie salvati ({result['cookie_count']} cookie)"}
 
 
@@ -763,7 +789,10 @@ async def import_cookies(browser: str = Query(...)):
     except Exception as ex:
         raise HTTPException(500, str(ex))
     if not result["valid"]:
-        raise HTTPException(400, f"Nessun cookie YouTube trovato in {browser}. Fai login su youtube.com in quel browser e riprova.")
+        raise HTTPException(400, (
+            f"In {browser.capitalize()} non c'è una sessione YouTube. Essere loggati su Google "
+            "non basta: apri youtube.com in quel browser, verifica di essere loggato, poi riprova."
+        ))
     return {**result, "message": f"Cookie importati da {browser.capitalize()} ({result['cookie_count']} cookie)"}
 
 

@@ -7,6 +7,7 @@ import json
 import os
 import time
 import asyncio
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 import httpx
@@ -33,9 +34,14 @@ COOKIE_FEED_CACHE_TTL = 300  # 5 minuti: evita di ri-scaricare da YouTube ad ogn
 # l'utente scorre (vedi LazyFeed): scaricarlo tutto in anticipo significherebbe
 # decine di richieste consecutive a YouTube — la raffica che può far invalidare
 # la sessione dei cookie — per video che magari non verranno mai guardati.
-HOME_FEED_MAX = 10000          # tetto di sicurezza; in pratica finisce prima YouTube
-HOME_FEED_CHUNK = 30           # video per blocco (≈ 1 richiesta di continuazione)
-HOME_FEED_CACHE_TTL = 1800     # 30 minuti prima di ricominciare da capo il feed
+FEED_MAX = 10000               # tetto di sicurezza; in pratica finisce prima YouTube
+FEED_CHUNK = 30                # video per blocco (≈ 1 richiesta di continuazione)
+FEED_CACHE_TTL = 1800          # 30 min: dopo tanto, un nuovo scroll riparte da capo
+RELATED_CHUNK = 25             # il mix di YouTube arriva a blocchi di ~25
+RELATED_MAX = 2000             # nessuno scorre così tanto la sidebar dei correlati
+# Ogni feed aperto tiene viva un'istanza di yt-dlp: la home più i mix degli
+# ultimi video guardati bastano, gli altri si chiudono.
+MAX_OPEN_FEEDS = 6
 
 OAUTH_SCOPES = "https://www.googleapis.com/auth/youtube.readonly"
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -154,12 +160,13 @@ class AuthManager:
         self._subs_feed_cache: list = []
         self._cookie_feed_cache: list = []
         self._cookie_feed_cache_at: float = 0
-        # Estrattore pigro della home, tenuto vivo fra una richiesta e l'altra
-        # per poter continuare il feed da dove era arrivato (vedi LazyFeed).
-        self._home_feed: Optional[LazyFeed] = None
-        # Serializza gli accessi: il generatore di yt-dlp non è thread-safe e
-        # due scroll paralleli (due schede, o un refresh) lo corromperebbero.
-        self._home_feed_lock = asyncio.Lock()
+        # Estrattori pigri tenuti vivi fra una richiesta e l'altra per poter
+        # continuare ogni feed da dove era arrivato (vedi LazyFeed): la home e
+        # il mix dei video aperti di recente. Dict ordinato = cache LRU.
+        self._feeds: "OrderedDict[str, LazyFeed]" = OrderedDict()
+        # Un lock per feed: il generatore di yt-dlp non è thread-safe e due
+        # scroll paralleli (due schede, o un refresh) lo corromperebbero.
+        self._feed_locks: dict = {}
         self._load_all()
         self._sync_task = None
 
@@ -332,13 +339,36 @@ class AuthManager:
 
     # ── Cookie management ─────────────────────────────────────────────────────
 
+    @staticmethod
+    def _parse_netscape(content: str):
+        """(dominio, nome) di ogni cookie in un file in formato Netscape."""
+        for line in content.splitlines():
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 6:
+                yield parts[0], parts[5]
+
     def save_cookies(self, content: str) -> dict:
-        """Salva il file cookies.txt caricato dall'utente."""
+        """
+        Salva il file cookies.txt caricato dall'utente.
+
+        Salva anche quando la sessione non risulta loggata (il file può servire
+        lo stesso per aggirare i blocchi anti-bot), ma lo segnala con
+        logged_in=False: senza login YouTube non restituisce alcun feed
+        personalizzato, ed è meglio dirlo subito che farlo scoprire da una home
+        che mostra i trending.
+        """
         COOKIE_FILE.write_text(content)
-        # Verifica che sia un file Netscape cookies valido
-        valid = "# Netscape HTTP Cookie File" in content or ".youtube.com" in content
-        line_count = len([l for l in content.splitlines() if l and not l.startswith("#")])
-        return {"valid": valid, "cookie_count": line_count}
+        pairs = list(self._parse_netscape(content))
+        valid = "# Netscape HTTP Cookie File" in content or any(
+            d.endswith("youtube.com") for d, _ in pairs
+        )
+        return {
+            "valid": valid,
+            "cookie_count": len(pairs),
+            "logged_in": bool(self._youtube_auth_cookies(pairs)),
+        }
 
     # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
     #
@@ -352,8 +382,24 @@ class AuthManager:
         "chromium": "~/snap/chromium/current/.config/chromium",
         "firefox": "~/snap/firefox/common/.mozilla/firefox",
     }
+    # Cookie che provano una sessione YouTube di PRIMA PARTE. Devono stare sul
+    # dominio youtube.com: i cookie omonimi su google.com non vengono mai
+    # inviati a youtube.com, quindi non autenticano nulla. Il caso insidioso è
+    # essere loggati su Google ma non aver mai aperto YouTube in quel browser:
+    # il profilo contiene i cookie google.com e i soli "3P" di youtube.com
+    # (__Secure-3PSID e simili, impostati cross-site), che YouTube considera
+    # comunque anonimi. Un file così sembra pieno ma dà feed vuoti.
     _AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "LOGIN_INFO", "SAPISID"}
     _CANDIDATE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "vivaldi", "opera")
+
+    @classmethod
+    def _youtube_auth_cookies(cls, names_by_domain) -> set:
+        """Quali cookie di autenticazione YouTube (prima parte) sono presenti."""
+        found = set()
+        for domain, name in names_by_domain:
+            if domain.endswith("youtube.com") and name in cls._AUTH_COOKIE_NAMES:
+                found.add(name)
+        return found
 
     def _browser_profile_path(self, browser: str) -> Optional[str]:
         hint = self._SNAP_PROFILE_HINTS.get(browser)
@@ -367,20 +413,32 @@ class AuthManager:
         return ytc.extract_cookies_from_browser(browser, self._browser_profile_path(browser))
 
     def detect_browsers_with_youtube_login(self) -> list:
-        """Prova ogni browser noto e ritorna quelli con una sessione YouTube/Google attiva."""
+        """
+        Browser con una sessione YouTube vera e propria.
+
+        Il controllo è sui cookie del dominio youtube.com: bastava trovarli su
+        google.com per proporre un browser che poi importava una sessione
+        anonima, e la home ricadeva silenziosamente sui trending.
+        """
         found = []
         for browser in self._CANDIDATE_BROWSERS:
             try:
                 jar = self._extract_browser_jar(browser)
             except Exception:
                 continue
-            names = {ck.name for ck in jar if ck.domain.endswith(("youtube.com", "google.com"))}
-            if names & self._AUTH_COOKIE_NAMES:
+            if self._youtube_auth_cookies((ck.domain, ck.name) for ck in jar):
                 found.append(browser)
         return found
 
     def import_cookies_from_browser(self, browser: str) -> dict:
-        """Estrae i cookie YouTube/Google dal browser indicato e li salva come cookies.txt — nessun passaggio manuale."""
+        """
+        Estrae i cookie YouTube/Google dal browser indicato e li salva come
+        cookies.txt — nessun passaggio manuale.
+
+        Rifiuta l'import se nel profilo non c'è una sessione YouTube di prima
+        parte: salvare comunque il file produrrebbe un cookies.txt di aspetto
+        normale (decine di cookie google.com) che però lascia yt-dlp anonimo.
+        """
         import yt_dlp.cookies as ytc
         jar = self._extract_browser_jar(browser)
         out_jar = ytc.YoutubeDLCookieJar()
@@ -389,10 +447,11 @@ class AuthManager:
             if ck.domain.endswith(("youtube.com", "google.com")):
                 out_jar.set_cookie(ck)
                 count += 1
-        if count == 0:
-            return {"valid": False, "cookie_count": 0}
+        auth = self._youtube_auth_cookies((ck.domain, ck.name) for ck in jar)
+        if not auth:
+            return {"valid": False, "cookie_count": count, "logged_in": False}
         out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
-        return {"valid": True, "cookie_count": count}
+        return {"valid": True, "cookie_count": count, "logged_in": True}
 
     def get_cookie_path(self) -> Optional[str]:
         if COOKIE_FILE.exists() and COOKIE_FILE.stat().st_size > 0:
@@ -401,12 +460,20 @@ class AuthManager:
 
     def get_cookie_status(self) -> dict:
         if not COOKIE_FILE.exists():
-            return {"present": False, "age_days": None, "warning": False}
+            return {"present": False, "age_days": None, "warning": False, "logged_in": False}
         age = (time.time() - COOKIE_FILE.stat().st_mtime) / 86400
+        try:
+            pairs = list(self._parse_netscape(COOKIE_FILE.read_text()))
+        except Exception:
+            pairs = []
+        # Senza cookie di sessione youtube.com il file c'è ma non autentica:
+        # va segnalato come un problema quanto un file scaduto.
+        logged_in = bool(self._youtube_auth_cookies(pairs))
         return {
             "present": True,
             "age_days": round(age, 1),
-            "warning": age > 14,  # avvisa dopo 2 settimane
+            "logged_in": logged_in,
+            "warning": age > 14 or not logged_in,  # avvisa dopo 2 settimane
         }
 
     def delete_cookies(self):
@@ -450,74 +517,151 @@ class AuthManager:
         self._save_prefs()
         return self.get_prefs()
 
-    # ── Feed Home (raccomandazioni, non solo iscrizioni) ─────────────────────
+    # ── Paginazione pigra condivisa (home e correlati) ───────────────────────
 
-    async def get_home_feed_page(self, offset: int, limit: int, ydl_opts_base_fn) -> dict:
+    async def _lazy_page(self, key: str, url: str, offset: int, limit: int,
+                         opts: dict, chunk: int, cap: int) -> dict:
         """
-        Una pagina della home di YouTube (le tue raccomandazioni reali, servono
-        i cookie). Estrazione PIGRA: scarica da YouTube solo i blocchi
-        necessari a coprire la pagina richiesta, man mano che scorri, invece di
-        tirare giù tutto il feed in anticipo.
+        Una pagina di un feed estratto pigramente, tenendo vivo il generatore
+        di yt-dlp fra una richiesta e l'altra (vedi LazyFeed).
 
-        Ritorna {"results", "total", "has_more"}; senza cookie results è vuoto
-        e il chiamante ricade sui trending.
+        `key` identifica il feed da riprendere: "home" per le raccomandazioni,
+        "related:<id>" per il mix di un video. I feed aperti restano in una
+        piccola cache LRU perché ognuno tiene aperta un'istanza di yt-dlp.
         """
-        cookie_path = self.get_cookie_path()
-        if not cookie_path:
-            return {"results": [], "total": 0, "has_more": False}
-
-        # Un solo estrattore alla volta: il generatore di yt-dlp non è
+        lock = self._feed_locks.setdefault(key, asyncio.Lock())
+        # Un solo estrattore alla volta per feed: il generatore di yt-dlp non è
         # thread-safe e due scroll paralleli lo corromperebbero.
-        async with self._home_feed_lock:
-            feed = self._home_feed
-            scaduto = feed is not None and time.time() - feed.created_at > HOME_FEED_CACHE_TTL
+        async with lock:
+            feed = self._feeds.get(key)
+            # Il TTL vale solo a inizio scorrimento. Ricreare il feed a metà
+            # paginazione (offset alto) vorrebbe dire ri-scaricare centinaia di
+            # video per servire una pagina, e con un ordine diverso: l'utente
+            # vedrebbe lo scroll fermarsi o ripetere gli stessi video. Un feed
+            # già iniziato prosegue quindi finché non si esaurisce davvero.
+            scaduto = feed is not None and offset == 0 and time.time() - feed.created_at > FEED_CACHE_TTL
             if feed is None or scaduto:
                 if feed is not None:
                     feed.close()
-                feed = await self._open_home_feed(cookie_path, ydl_opts_base_fn)
-                self._home_feed = feed
+                    self._feeds.pop(key, None)
+                feed = await self._open_lazy_feed(url, opts)
                 if feed is None:
                     return {"results": [], "total": 0, "has_more": False}
+            self._remember_feed(key, feed)
 
-            # Estende quanto basta a coprire la pagina richiesta (più un blocco
-            # di margine, così lo scroll successivo trova già i dati pronti).
+            # Estende quanto basta a coprire la pagina richiesta: scorrere poco
+            # costa poche richieste a YouTube.
             needed = offset + limit
             loop = asyncio.get_event_loop()
-            while len(feed.items) < needed and not feed.exhausted and len(feed.items) < HOME_FEED_MAX:
+            while len(feed.items) < needed and not feed.exhausted and len(feed.items) < cap:
+                before = len(feed.items)
                 try:
-                    await loop.run_in_executor(None, feed.extend, HOME_FEED_CHUNK)
+                    await loop.run_in_executor(None, feed.extend, chunk)
                 except Exception as e:
-                    print(f"[auth] Home feed extend error: {e}")
+                    print(f"[auth] Errore estensione feed '{key}': {e}")
+                    feed.exhausted = True
+                    break
+                if len(feed.items) == before:
+                    # Nessun progresso pur non essendo esaurito: evita di
+                    # ciclare all'infinito su un feed che non avanza più.
                     feed.exhausted = True
                     break
 
             items = feed.items
-            has_more = (not feed.exhausted) and len(items) < HOME_FEED_MAX
             return {
                 "results": items[offset:offset + limit],
                 "total": len(items),
-                "has_more": has_more or offset + limit < len(items),
+                # C'è altro se il feed può ancora crescere, o se abbiamo già in
+                # memoria voci oltre la pagina appena servita.
+                "has_more": ((not feed.exhausted) and len(items) < cap) or offset + limit < len(items),
             }
 
-    async def _open_home_feed(self, cookie_path, ydl_opts_base_fn):
+    def _remember_feed(self, key: str, feed: "LazyFeed"):
+        """
+        Segna il feed come usato di recente, chiudendo i meno usati oltre il
+        limite: ogni istanza di yt-dlp tenuta viva costa memoria e socket.
+        """
+        self._feeds[key] = feed
+        self._feeds.move_to_end(key)
+        while len(self._feeds) > MAX_OPEN_FEEDS:
+            # Salta i feed con il lock preso: un'altra richiesta li sta usando
+            # proprio ora e chiuderli le farebbe fallire lo scroll.
+            def _libero(k):
+                lock = self._feed_locks.get(k)
+                return lock is None or not lock.locked()
+
+            evictable = [k for k in self._feeds if _libero(k)]
+            if not evictable:
+                break
+            old_key = evictable[0]
+            old = self._feeds.pop(old_key)
+            self._feed_locks.pop(old_key, None)
+            old.close()
+
+    async def _open_lazy_feed(self, url: str, opts: dict):
         """Apre il feed (prima richiesta a YouTube). None se fallisce."""
-        opts = {**ydl_opts_base_fn(), "cookiefile": cookie_path}
-
-        def _open():
-            # "https://www.youtube.com/" da loggati è un redirect verso questa
-            # stessa URL: in modalità extract_flat yt-dlp non lo segue da solo
-            # e ritorna solo il riferimento al redirect, senza video.
-            return LazyFeed("https://www.youtube.com/feed/recommended", opts)
-
         try:
             # extract_info è bloccante: in un thread separato, altrimenti
             # fermerebbe l'intero event loop di FastAPI (niente riproduzione,
             # niente ricerche) per tutta la durata dell'estrazione.
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, _open)
+            return await loop.run_in_executor(None, lambda: LazyFeed(url, opts))
         except Exception as e:
-            print(f"[auth] Home feed open error: {e}")
+            print(f"[auth] Errore apertura feed {url}: {e}")
             return None
+
+    # ── Feed Home (raccomandazioni, non solo iscrizioni) ─────────────────────
+
+    async def get_home_feed_page(self, offset: int, limit: int, ydl_opts_base_fn) -> dict:
+        """
+        Una pagina della home di YouTube: le tue raccomandazioni reali.
+
+        Servono i cookie di una sessione YouTube loggata — non esiste altro
+        modo di ottenere le raccomandazioni personali. Ritorna
+        {"results", "total", "has_more", "reason"}; `reason` dice al frontend
+        *perché* il feed è vuoto, così può spiegarlo invece di mostrare
+        qualcos'altro al posto della home.
+        """
+        cookie_path = self.get_cookie_path()
+        if not cookie_path:
+            return {"results": [], "total": 0, "has_more": False, "reason": "no-cookies"}
+        if not self.get_cookie_status().get("logged_in"):
+            return {"results": [], "total": 0, "has_more": False, "reason": "not-logged-in"}
+
+        # "https://www.youtube.com/" da loggati è un redirect verso questa
+        # stessa URL: in modalità extract_flat yt-dlp non lo segue da solo e
+        # ritorna solo il riferimento al redirect, senza video.
+        page = await self._lazy_page(
+            "home", "https://www.youtube.com/feed/recommended", offset, limit,
+            {**ydl_opts_base_fn(), "cookiefile": cookie_path}, FEED_CHUNK, FEED_MAX,
+        )
+        if not page["total"]:
+            # Cookie presenti e in apparenza validi, ma YouTube non ha dato
+            # nulla: di solito la sessione è scaduta e va reimportata.
+            page["reason"] = "feed-vuoto"
+        return page
+
+    async def get_related_page(self, video_id: str, offset: int, limit: int, ydl_opts_base_fn) -> dict:
+        """
+        Una pagina di video correlati, presi dal "Mix" di YouTube (playlist
+        RD<id>): è la lista che YouTube stessa costruisce a partire da un
+        video, e si estende con continuazioni praticamente senza fine — quindi
+        regge lo scroll infinito, al contrario di una ricerca per titolo.
+
+        Non richiede i cookie; se ci sono, il mix risulta personalizzato.
+        """
+        opts = {**ydl_opts_base_fn()}
+        cookie_path = self.get_cookie_path()
+        if cookie_path:
+            opts["cookiefile"] = cookie_path
+        url = f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}"
+        page = await self._lazy_page(
+            f"related:{video_id}", url, offset, limit, opts, RELATED_CHUNK, RELATED_MAX,
+        )
+        # Il primo elemento del mix è il video di partenza: fuori posto in una
+        # lista di "correlati".
+        page["results"] = [v for v in page["results"] if v.get("id") != video_id]
+        return page
 
     # ── Feed Iscrizioni ────────────────────────────────────────────────────
 
