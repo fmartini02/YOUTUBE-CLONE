@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { api, timeAgo } from "../api";
+import { api, timeAgo, isCapacitor, getServerBase, clearServerBase, isCastableOrigin } from "../api";
 import { useToast } from "../hooks/useToast";
+import { useCastContext } from "../App";
+import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
 
 export default function SettingsPage({ navigate }) {
   const [status, setStatus] = useState(null);
@@ -8,6 +10,8 @@ export default function SettingsPage({ navigate }) {
   const [clientSecret, setClientSecret] = useState("");
   const [oauthStep, setOauthStep] = useState("idle"); // idle | waiting | done
   const [cookieDrag, setCookieDrag] = useState(false);
+  const [detectedBrowsers, setDetectedBrowsers] = useState(null); // null = ancora in rilevamento
+  const [importingBrowser, setImportingBrowser] = useState(null);
   const fileRef = useRef();
   const { addToast, ToastContainer } = useToast();
 
@@ -17,6 +21,25 @@ export default function SettingsPage({ navigate }) {
     const interval = setInterval(loadStatus, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    api.cookieBrowsers().then(d => setDetectedBrowsers(d.browsers || [])).catch(() => setDetectedBrowsers([]));
+  }, []);
+
+  const BROWSER_LABELS = { brave: "Brave", chrome: "Chrome", chromium: "Chromium", edge: "Edge", firefox: "Firefox", vivaldi: "Vivaldi", opera: "Opera" };
+
+  async function handleImportCookies(browser) {
+    setImportingBrowser(browser);
+    try {
+      const res = await api.importCookies(browser);
+      addToast(`✅ ${res.message}`);
+      await loadStatus();
+    } catch (e) {
+      addToast("❌ " + e.message);
+    } finally {
+      setImportingBrowser(null);
+    }
+  }
 
   async function loadStatus() {
     try {
@@ -84,6 +107,26 @@ export default function SettingsPage({ navigate }) {
     <div style={{ maxWidth: 700, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>⚙️ Impostazioni</h1>
 
+      {/* ── Diagnostica Cast ─────────────────────────────────────────── */}
+      <Section title="Diagnostica Chromecast" icon="🩺">
+        <CastDiagnostics />
+      </Section>
+
+      {/* ── Server (solo app Android) ───────────────────────────────── */}
+      {isCapacitor() && (
+        <Section title="Server" icon="🖥️">
+          <p style={{ fontSize: 14, color: "var(--text2)", marginBottom: 12, lineHeight: 1.6 }}>
+            Connesso a <strong style={{ color: "var(--text)" }}>{getServerBase()}</strong>
+          </p>
+          <button
+            className="action-btn"
+            onClick={() => { clearServerBase(); window.location.reload(); }}
+          >
+            🔄 Cambia indirizzo server
+          </button>
+        </Section>
+      )}
+
       {/* ── Chromecast ───────────────────────────────────────────────── */}
       <Section title="Chromecast" icon="📺">
         <p style={{ fontSize: 14, color: "var(--text2)", marginBottom: 14, lineHeight: 1.7 }}>
@@ -92,7 +135,7 @@ export default function SettingsPage({ navigate }) {
         <ol style={{ fontSize: 14, color: "var(--text2)", lineHeight: 2, paddingLeft: 20 }}>
           <li>Vai su <a href="https://cast.google.com/publish" target="_blank" style={{ color: "var(--accent)" }}>cast.google.com/publish</a> → registra account sviluppatore (5€ una tantum)</li>
           <li>Clicca <strong>"Add new application"</strong> → scegli <strong>"Custom Receiver"</strong></li>
-          <li>URL Receiver: <code style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>http://IP-DEL-TUO-PC:8080/cast-receiver.html</code></li>
+          <li>URL Receiver: <code style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>http://IP-DEL-TUO-PC:8090/cast-receiver.html</code></li>
           <li>Copia l'<strong>App ID</strong> generato</li>
           <li>Aggiungilo al file <code style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>.env</code>: <code style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>VITE_CAST_APP_ID=XXXXXXXX</code></li>
           <li>Rebuild frontend: <code style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>npm run build</code></li>
@@ -166,12 +209,35 @@ export default function SettingsPage({ navigate }) {
       {/* ── Cookie ───────────────────────────────────────────────────── */}
       <Section title="Cookie YouTube" icon="🍪">
         <p style={{ fontSize: 14, color: "var(--text2)", marginBottom: 14, lineHeight: 1.6 }}>
-          I cookie permettono di vedere il <strong>feed abbonamenti reale</strong> con i suggerimenti personalizzati.
-          <br />
-          Installa <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" style={{ color: "var(--accent)" }}>
-            Get cookies.txt
-          </a>{" "}su Chrome, vai su youtube.com mentre sei loggato, esporta e trascina qui il file.
+          I cookie permettono di vedere la <strong>vera home YouTube</strong> e il <strong>feed iscrizioni reale</strong>, con i suggerimenti personalizzati.
         </p>
+
+        {/* Import automatico dal browser installato sulla macchina del server */}
+        {detectedBrowsers === null ? (
+          <p style={{ fontSize: 13, color: "var(--text3)", marginBottom: 14 }}>🔍 Rilevamento browser sul server...</p>
+        ) : detectedBrowsers.length > 0 ? (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 13, color: "var(--text2)", marginBottom: 8 }}>
+              Trovata una sessione YouTube attiva — importa i cookie con un click, senza estensioni:
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {detectedBrowsers.map(b => (
+                <button
+                  key={b}
+                  className="action-btn primary"
+                  disabled={importingBrowser === b}
+                  onClick={() => handleImportCookies(b)}
+                >
+                  {importingBrowser === b ? "⏳ Importazione..." : `🔗 ${cookiePresent ? "Aggiorna" : "Importa"} da ${BROWSER_LABELS[b] || b}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p style={{ fontSize: 13, color: "var(--text3)", marginBottom: 14 }}>
+            Nessuna sessione YouTube trovata nei browser sulla macchina del server. Fai login su youtube.com in un browser locale e ricarica questa pagina, oppure importa manualmente:
+          </p>
+        )}
 
         {cookiePresent ? (
           <div>
@@ -187,25 +253,37 @@ export default function SettingsPage({ navigate }) {
               </div>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="action-btn" onClick={() => fileRef.current?.click()}>🔄 Aggiorna cookie</button>
+              <button className="action-btn" onClick={() => fileRef.current?.click()}>📁 Importa da file</button>
               <button className="action-btn" onClick={handleDeleteCookies}>🗑️ Elimina</button>
             </div>
           </div>
         ) : (
-          <div
-            style={{
-              border: `2px dashed ${cookieDrag ? "var(--accent)" : "var(--border)"}`,
-              borderRadius: 12, padding: "32px 24px", textAlign: "center", cursor: "pointer",
-              transition: "border-color 0.2s", background: cookieDrag ? "rgba(255,0,0,0.05)" : "transparent"
-            }}
-            onClick={() => fileRef.current?.click()}
-            onDragOver={e => { e.preventDefault(); setCookieDrag(true); }}
-            onDragLeave={() => setCookieDrag(false)}
-            onDrop={e => { e.preventDefault(); setCookieDrag(false); handleCookieFile(e.dataTransfer.files[0]); }}
-          >
-            <div style={{ fontSize: 32, marginBottom: 8 }}>🍪</div>
-            <div style={{ fontSize: 14, color: "var(--text2)" }}>Trascina qui il file <strong>cookies.txt</strong></div>
-            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>oppure clicca per selezionarlo</div>
+          <div>
+            {detectedBrowsers?.length > 0 && (
+              <p style={{ fontSize: 12, color: "var(--text3)", margin: "4px 0 10px" }}>
+                In alternativa (es. cookie esportati da telefono/altro PC):
+              </p>
+            )}
+            <div
+              style={{
+                border: `2px dashed ${cookieDrag ? "var(--accent)" : "var(--border)"}`,
+                borderRadius: 12, padding: "32px 24px", textAlign: "center", cursor: "pointer",
+                transition: "border-color 0.2s", background: cookieDrag ? "rgba(255,0,0,0.05)" : "transparent"
+              }}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setCookieDrag(true); }}
+              onDragLeave={() => setCookieDrag(false)}
+              onDrop={e => { e.preventDefault(); setCookieDrag(false); handleCookieFile(e.dataTransfer.files[0]); }}
+            >
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🍪</div>
+              <div style={{ fontSize: 14, color: "var(--text2)" }}>Trascina qui il file <strong>cookies.txt</strong></div>
+              <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>
+                oppure clicca per selezionarlo — esportalo con{" "}
+                <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" onClick={e => e.stopPropagation()} style={{ color: "var(--accent)" }}>
+                  Get cookies.txt
+                </a>
+              </div>
+            </div>
           </div>
         )}
 
@@ -250,6 +328,51 @@ export default function SettingsPage({ navigate }) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+/**
+ * Perché la trasmissione non parte: mostra in chiaro le condizioni che il
+ * browser deve soddisfare, così non serve andare a leggere la console (dove
+ * per giunta un filtro sui livelli di log può nascondere l'output).
+ */
+function CastDiagnostics() {
+  const cast = useCastContext();
+  const secure = typeof window !== "undefined" && window.isSecureContext;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const chromeCast = typeof window !== "undefined" && !!window.chrome?.cast;
+  const castFw = typeof window !== "undefined" && !!window.cast?.framework;
+  const script = typeof document !== "undefined" && !!document.getElementById("__cast_sdk_script");
+
+  const rows = [
+    ["Indirizzo usato", origin, isCastableOrigin()],
+    ["Origine sicura (richiesta da Chrome per il Cast)", secure ? "sì" : "no — origine http non sicura", secure],
+    ["Script Google Cast caricato", script ? "sì" : "no", script],
+    ["API chrome.cast presente", chromeCast ? "sì" : "no", chromeCast],
+    ["Framework Cast pronto", castFw ? "sì" : "no", castFw],
+    ["Trasmissione disponibile", cast?.available ? "sì" : "no", !!cast?.available],
+  ];
+
+  return (
+    <div>
+      <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+        <tbody>
+          {rows.map(([label, value, ok]) => (
+            <tr key={label} style={{ borderBottom: "1px solid var(--border)" }}>
+              <td style={{ padding: "8px 0", color: "var(--text2)" }}>{label}</td>
+              <td style={{ padding: "8px 0", textAlign: "right", color: ok ? "var(--green)" : "#ff6060", wordBreak: "break-all" }}>
+                {ok ? "✓ " : "✕ "}{value}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!cast?.available && cast?.unavailableReason && (
+        <p style={{ fontSize: 13, color: "#ffc800", marginTop: 12, lineHeight: 1.6 }}>
+          {CAST_UNAVAILABLE_MESSAGE[cast.unavailableReason] || cast.unavailableReason}
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Section({ title, icon, children }) {
   return (
