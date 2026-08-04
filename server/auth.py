@@ -20,15 +20,128 @@ SUBS_FILE = DATA_DIR / "subscriptions.json"
 COOKIE_FILE = DATA_DIR / "cookies.txt"
 PREFS_FILE = DATA_DIR / "prefs.json"
 HISTORY_FILE = DATA_DIR / "history.json"
+AVATAR_CACHE_FILE = DATA_DIR / "channel_avatars.json"
+SUBS_FEED_CACHE_FILE = DATA_DIR / "subscriptions_feed_cache.json"
 
 # ── Google OAuth2 (YouTube Data API v3) ──────────────────────────────────────
 # L'utente crea il suo Client ID su Google Cloud Console (gratuito)
 # Scope: solo lettura iscrizioni e feed
 
+COOKIE_FEED_CACHE_TTL = 300  # 5 minuti: evita di ri-scaricare da YouTube ad ogni "carica altri"
+
+# Il feed home viene estratto PIGRAMENTE, un blocco alla volta, man mano che
+# l'utente scorre (vedi LazyFeed): scaricarlo tutto in anticipo significherebbe
+# decine di richieste consecutive a YouTube — la raffica che può far invalidare
+# la sessione dei cookie — per video che magari non verranno mai guardati.
+HOME_FEED_MAX = 10000          # tetto di sicurezza; in pratica finisce prima YouTube
+HOME_FEED_CHUNK = 30           # video per blocco (≈ 1 richiesta di continuazione)
+HOME_FEED_CACHE_TTL = 1800     # 30 minuti prima di ricominciare da capo il feed
+
 OAUTH_SCOPES = "https://www.googleapis.com/auth/youtube.readonly"
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
+
+
+def _timestamp_to_upload_date(ts) -> Optional[str]:
+    """Converte un unix timestamp (anche approssimato, vedi extractor_args approximate_date) in YYYYMMDD."""
+    if not ts:
+        return None
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
+
+
+def is_video_entry(e) -> bool:
+    """
+    Scarta le voci che non sono video singoli. I feed di YouTube includono
+    anche i "Mix" (playlist auto-generate, id tipo RD...): non hanno copertina
+    — l'URL i.ytimg.com/vi/<id> dà 404 — e aprirli come video non funziona.
+    Gli id dei video sono sempre di 11 caratteri, quelli di playlist più lunghi.
+    """
+    vid = (e or {}).get("id")
+    return bool(vid) and len(vid) == 11
+
+
+def map_video_entry(e: dict) -> dict:
+    """Voce grezza di yt-dlp → formato usato dal frontend."""
+    return {
+        "id": e.get("id"),
+        "title": e.get("title"),
+        "channel": e.get("uploader") or e.get("channel"),
+        "channel_id": e.get("channel_id"),
+        "duration": e.get("duration"),
+        "views": e.get("view_count"),
+        "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
+        "published": _timestamp_to_upload_date(e.get("timestamp")),
+    }
+
+
+class LazyFeed:
+    """
+    Estrazione pigra di un feed YouTube, a blocchi.
+
+    yt-dlp scarica il feed una "pagina di continuazione" alla volta (~30 video
+    per richiesta HTTP) e restituisce un generatore. Consumandolo tutto subito
+    si pagano decine di richieste in una raffica; tenendolo invece vivo fra una
+    chiamata e l'altra si scarica solo quello che serve, quando serve — cioè
+    man mano che l'utente scorre.
+
+    Attenzione: il generatore è codice bloccante e non è thread-safe, quindi
+    extend() va chiamato da un solo thread alla volta (vedi il lock nel chiamante).
+    """
+
+    def __init__(self, url: str, opts: dict):
+        import yt_dlp
+        self._ydl = yt_dlp.YoutubeDL(opts)
+        # process=False evita che yt-dlp materializzi l'intera lista: è ciò che
+        # mantiene pigro il generatore.
+        info = self._ydl.extract_info(url, download=False, process=False)
+        self._iter = iter((info or {}).get("entries") or [])
+        self.items: list = []
+        self.exhausted = False
+        self.created_at = time.time()
+        self._persist_cookies()
+
+    def _persist_cookies(self):
+        """
+        Riscrive su disco i cookie aggiornati da YouTube.
+
+        Ad ogni richiesta YouTube ruota alcuni cookie di sessione (SIDCC e
+        simili) e si aspetta che il client usi i nuovi. yt-dlp lo fa in memoria
+        e li salva sul file solo alla chiusura dell'istanza: siccome qui
+        l'istanza resta viva a lungo, senza questa chiamata continueremmo a
+        ripartire da cookie ormai vecchi — ed è così che la sessione viene
+        invalidata da YouTube.
+        """
+        try:
+            self._ydl.save_cookies()
+        except Exception as e:
+            print(f"[auth] Impossibile salvare i cookie aggiornati: {e}")
+
+    def extend(self, count: int) -> int:
+        """Tira fuori altri `count` video dal generatore. Ritorna quanti ne ha aggiunti."""
+        import itertools
+        added = 0
+        # Le voci scartate (Mix/playlist) non contano verso il totale richiesto,
+        # altrimenti un blocco pieno di Mix restituirebbe una pagina mezza vuota.
+        while added < count and not self.exhausted:
+            batch = list(itertools.islice(self._iter, count - added))
+            if not batch:
+                self.exhausted = True
+                break
+            for e in batch:
+                if is_video_entry(e):
+                    self.items.append(map_video_entry(e))
+                    added += 1
+        # Ogni blocco è una richiesta a YouTube, che può aver ruotato i cookie.
+        self._persist_cookies()
+        return added
+
+    def close(self):
+        try:
+            self._ydl.close()
+        except Exception:
+            pass
 
 
 class AuthManager:
@@ -37,6 +150,16 @@ class AuthManager:
         self._subs: list = []
         self._prefs: dict = {}
         self._history: list = []
+        self._avatar_cache: dict = {}
+        self._subs_feed_cache: list = []
+        self._cookie_feed_cache: list = []
+        self._cookie_feed_cache_at: float = 0
+        # Estrattore pigro della home, tenuto vivo fra una richiesta e l'altra
+        # per poter continuare il feed da dove era arrivato (vedi LazyFeed).
+        self._home_feed: Optional[LazyFeed] = None
+        # Serializza gli accessi: il generatore di yt-dlp non è thread-safe e
+        # due scroll paralleli (due schede, o un refresh) lo corromperebbero.
+        self._home_feed_lock = asyncio.Lock()
         self._load_all()
         self._sync_task = None
 
@@ -49,6 +172,10 @@ class AuthManager:
             self._prefs = json.loads(PREFS_FILE.read_text())
         if HISTORY_FILE.exists():
             self._history = json.loads(HISTORY_FILE.read_text())
+        if AVATAR_CACHE_FILE.exists():
+            self._avatar_cache = json.loads(AVATAR_CACHE_FILE.read_text())
+        if SUBS_FEED_CACHE_FILE.exists():
+            self._subs_feed_cache = json.loads(SUBS_FEED_CACHE_FILE.read_text())
 
     def _save_token(self):
         TOKEN_FILE.write_text(json.dumps(self._token, indent=2))
@@ -61,6 +188,12 @@ class AuthManager:
 
     def _save_history(self):
         HISTORY_FILE.write_text(json.dumps(self._history[-500:], indent=2))  # keep last 500
+
+    def _save_avatar_cache(self):
+        AVATAR_CACHE_FILE.write_text(json.dumps(self._avatar_cache, indent=2))
+
+    def _save_subs_feed_cache(self):
+        SUBS_FEED_CACHE_FILE.write_text(json.dumps(self._subs_feed_cache, indent=2))
 
     # ── OAuth flow ────────────────────────────────────────────────────────────
 
@@ -207,6 +340,60 @@ class AuthManager:
         line_count = len([l for l in content.splitlines() if l and not l.startswith("#")])
         return {"valid": valid, "cookie_count": line_count}
 
+    # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
+    #
+    # yt-dlp sa leggere i cookie direttamente dal database del browser, ma su
+    # Linux cerca solo il percorso standard (~/.config/...). Se il browser è
+    # installato via snap (comune su Ubuntu: Brave, Chromium, Firefox), snap
+    # confina i suoi dati reali in ~/snap/<pkg>/... e quel percorso standard è
+    # vuoto o non aggiornato — va indicato esplicitamente.
+    _SNAP_PROFILE_HINTS = {
+        "brave": "~/snap/brave/current/.config/BraveSoftware/Brave-Browser",
+        "chromium": "~/snap/chromium/current/.config/chromium",
+        "firefox": "~/snap/firefox/common/.mozilla/firefox",
+    }
+    _AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "LOGIN_INFO", "SAPISID"}
+    _CANDIDATE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "vivaldi", "opera")
+
+    def _browser_profile_path(self, browser: str) -> Optional[str]:
+        hint = self._SNAP_PROFILE_HINTS.get(browser)
+        if not hint:
+            return None
+        path = os.path.expanduser(hint)
+        return path if os.path.isdir(path) else None
+
+    def _extract_browser_jar(self, browser: str):
+        import yt_dlp.cookies as ytc
+        return ytc.extract_cookies_from_browser(browser, self._browser_profile_path(browser))
+
+    def detect_browsers_with_youtube_login(self) -> list:
+        """Prova ogni browser noto e ritorna quelli con una sessione YouTube/Google attiva."""
+        found = []
+        for browser in self._CANDIDATE_BROWSERS:
+            try:
+                jar = self._extract_browser_jar(browser)
+            except Exception:
+                continue
+            names = {ck.name for ck in jar if ck.domain.endswith(("youtube.com", "google.com"))}
+            if names & self._AUTH_COOKIE_NAMES:
+                found.append(browser)
+        return found
+
+    def import_cookies_from_browser(self, browser: str) -> dict:
+        """Estrae i cookie YouTube/Google dal browser indicato e li salva come cookies.txt — nessun passaggio manuale."""
+        import yt_dlp.cookies as ytc
+        jar = self._extract_browser_jar(browser)
+        out_jar = ytc.YoutubeDLCookieJar()
+        count = 0
+        for ck in jar:
+            if ck.domain.endswith(("youtube.com", "google.com")):
+                out_jar.set_cookie(ck)
+                count += 1
+        if count == 0:
+            return {"valid": False, "cookie_count": 0}
+        out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
+        return {"valid": True, "cookie_count": count}
+
     def get_cookie_path(self) -> Optional[str]:
         if COOKIE_FILE.exists() and COOKIE_FILE.stat().st_size > 0:
             return str(COOKIE_FILE)
@@ -263,88 +450,233 @@ class AuthManager:
         self._save_prefs()
         return self.get_prefs()
 
-    # ── Feed personalizzato ───────────────────────────────────────────────────
+    # ── Feed Home (raccomandazioni, non solo iscrizioni) ─────────────────────
+
+    async def get_home_feed_page(self, offset: int, limit: int, ydl_opts_base_fn) -> dict:
+        """
+        Una pagina della home di YouTube (le tue raccomandazioni reali, servono
+        i cookie). Estrazione PIGRA: scarica da YouTube solo i blocchi
+        necessari a coprire la pagina richiesta, man mano che scorri, invece di
+        tirare giù tutto il feed in anticipo.
+
+        Ritorna {"results", "total", "has_more"}; senza cookie results è vuoto
+        e il chiamante ricade sui trending.
+        """
+        cookie_path = self.get_cookie_path()
+        if not cookie_path:
+            return {"results": [], "total": 0, "has_more": False}
+
+        # Un solo estrattore alla volta: il generatore di yt-dlp non è
+        # thread-safe e due scroll paralleli lo corromperebbero.
+        async with self._home_feed_lock:
+            feed = self._home_feed
+            scaduto = feed is not None and time.time() - feed.created_at > HOME_FEED_CACHE_TTL
+            if feed is None or scaduto:
+                if feed is not None:
+                    feed.close()
+                feed = await self._open_home_feed(cookie_path, ydl_opts_base_fn)
+                self._home_feed = feed
+                if feed is None:
+                    return {"results": [], "total": 0, "has_more": False}
+
+            # Estende quanto basta a coprire la pagina richiesta (più un blocco
+            # di margine, così lo scroll successivo trova già i dati pronti).
+            needed = offset + limit
+            loop = asyncio.get_event_loop()
+            while len(feed.items) < needed and not feed.exhausted and len(feed.items) < HOME_FEED_MAX:
+                try:
+                    await loop.run_in_executor(None, feed.extend, HOME_FEED_CHUNK)
+                except Exception as e:
+                    print(f"[auth] Home feed extend error: {e}")
+                    feed.exhausted = True
+                    break
+
+            items = feed.items
+            has_more = (not feed.exhausted) and len(items) < HOME_FEED_MAX
+            return {
+                "results": items[offset:offset + limit],
+                "total": len(items),
+                "has_more": has_more or offset + limit < len(items),
+            }
+
+    async def _open_home_feed(self, cookie_path, ydl_opts_base_fn):
+        """Apre il feed (prima richiesta a YouTube). None se fallisce."""
+        opts = {**ydl_opts_base_fn(), "cookiefile": cookie_path}
+
+        def _open():
+            # "https://www.youtube.com/" da loggati è un redirect verso questa
+            # stessa URL: in modalità extract_flat yt-dlp non lo segue da solo
+            # e ritorna solo il riferimento al redirect, senza video.
+            return LazyFeed("https://www.youtube.com/feed/recommended", opts)
+
+        try:
+            # extract_info è bloccante: in un thread separato, altrimenti
+            # fermerebbe l'intero event loop di FastAPI (niente riproduzione,
+            # niente ricerche) per tutta la durata dell'estrazione.
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _open)
+        except Exception as e:
+            print(f"[auth] Home feed open error: {e}")
+            return None
+
+    # ── Feed Iscrizioni ────────────────────────────────────────────────────
 
     async def get_personalized_feed(self, ydl_opts_base_fn) -> list:
         """
-        Tenta feed via cookie (reale), fallback su feed dai canali iscritti.
+        Feed 'Iscrizioni': cookie → feed reale di YouTube (ordine loro),
+        tenuto in cache in memoria per qualche minuto così "carica altri" non
+        ri-scarica tutto da YouTube ad ogni pagina; altrimenti la cache su
+        disco aggiornata in background da tutti i canali iscritti (vedi
+        refresh_subscriptions_feed), o un fetch a caldo ridotto se la cache è
+        ancora vuota (es. subito dopo il primo login).
         """
         cookie_path = self.get_cookie_path()
 
-        # Strategia 1: feed homepage con cookie
         if cookie_path:
+            if self._cookie_feed_cache and time.time() - self._cookie_feed_cache_at < COOKIE_FEED_CACHE_TTL:
+                return self._cookie_feed_cache
             try:
                 import yt_dlp
                 opts = {
                     **ydl_opts_base_fn(),
                     "cookiefile": cookie_path,
-                    "playlistend": 30,
+                    "playlistend": 100,
                 }
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info("https://www.youtube.com/feed/subscriptions", download=False)
                     entries = (info or {}).get("entries", [])
                     results = []
                     for e in (entries or []):
-                        if not e:
+                        if not is_video_entry(e):
                             continue
                         results.append({
                             "id": e.get("id"),
                             "title": e.get("title"),
                             "channel": e.get("uploader") or e.get("channel"),
+                            "channel_id": e.get("channel_id"),
                             "duration": e.get("duration"),
                             "views": e.get("view_count"),
                             "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                            "published": e.get("upload_date"),
+                            "published": _timestamp_to_upload_date(e.get("timestamp")),
                         })
                     if results:
+                        self._cookie_feed_cache = results
+                        self._cookie_feed_cache_at = time.time()
                         return results
             except Exception as e:
                 print(f"[auth] Cookie feed error: {e}")
+                if self._cookie_feed_cache:
+                    return self._cookie_feed_cache  # stale, ma meglio di niente
 
-        # Strategia 2: ultimi video dai canali iscritti
+        if self._subs_feed_cache:
+            return self._subs_feed_cache
+
         if self._subs:
-            return await self._feed_from_subscriptions(ydl_opts_base_fn)
+            # Cache ancora vuota (es. server appena avviato, sync in background
+            # non ancora completato): fetch a caldo ma ridotto per non far
+            # aspettare troppo l'utente. Il prossimo sync orario coprirà tutti i canali.
+            return await self.refresh_subscriptions_feed(ydl_opts_base_fn, max_channels=15)
 
-        return []  # nessun dato disponibile
+        return []
 
-    async def _feed_from_subscriptions(self, ydl_opts_base_fn) -> list:
-        """Scarica gli ultimi video dai primi 10 canali iscritti."""
+    async def _fetch_channel_latest(self, ch: dict, ydl_opts_base_fn, sem: asyncio.Semaphore) -> list:
+        """Ultimi video di UN canale iscritto, con logo già allegato (gratis, viene da sync_subscriptions)."""
         import yt_dlp
-        results = []
-        # Prendi i primi 10 canali per non esagerare con le richieste
-        channels = self._subs[:10]
-
-        for ch in channels:
-            if not ch.get("id"):
-                continue
+        if not ch.get("id"):
+            return []
+        async with sem:
             try:
-                opts = {
-                    **ydl_opts_base_fn(),
-                    "playlistend": 3,
-                }
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(
-                        f"https://www.youtube.com/channel/{ch['id']}/videos",
-                        download=False,
-                    )
-                    for e in (info or {}).get("entries", []):
-                        if not e:
-                            continue
-                        results.append({
-                            "id": e.get("id"),
-                            "title": e.get("title"),
-                            "channel": ch["name"],
-                            "duration": e.get("duration"),
-                            "views": e.get("view_count"),
-                            "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                            "published": e.get("upload_date"),
-                        })
-            except Exception:
-                continue
+                opts = {**ydl_opts_base_fn(), "playlistend": 8}
+                loop = asyncio.get_event_loop()
 
-        # Ordina per data più recente
+                def _extract():
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        return ydl.extract_info(f"https://www.youtube.com/channel/{ch['id']}/videos", download=False)
+
+                info = await loop.run_in_executor(None, _extract)
+                out = []
+                for e in (info or {}).get("entries", []) or []:
+                    if not is_video_entry(e):
+                        continue
+                    out.append({
+                        "id": e.get("id"),
+                        "title": e.get("title"),
+                        "channel": ch["name"],
+                        "channel_id": ch["id"],
+                        "avatar": ch.get("thumbnail"),
+                        "duration": e.get("duration"),
+                        "views": e.get("view_count"),
+                        "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
+                        "published": _timestamp_to_upload_date(e.get("timestamp")),
+                    })
+                return out
+            except Exception:
+                return []
+
+    async def refresh_subscriptions_feed(self, ydl_opts_base_fn, max_channels: Optional[int] = None) -> list:
+        """
+        Scarica gli ultimi video di TUTTI i canali iscritti in parallelo
+        (bounded a 10 richieste contemporanee) e li mette in cache ordinati
+        per data. Chiamata ogni ora da sync.py — una scansione sincrona di
+        100+ canali ad ogni caricamento della pagina sarebbe troppo lenta.
+        """
+        channels = self._subs if max_channels is None else self._subs[:max_channels]
+        sem = asyncio.Semaphore(10)
+        results_lists = await asyncio.gather(*[
+            self._fetch_channel_latest(ch, ydl_opts_base_fn, sem) for ch in channels
+        ])
+        results = [v for sub in results_lists for v in sub]
         results.sort(key=lambda x: x.get("published") or "0", reverse=True)
-        return results[:30]
+
+        if max_channels is None:
+            # Solo la scansione completa (background) aggiorna la cache persistente:
+            # un fetch parziale a caldo non deve sovrascriverla con dati incompleti.
+            self._subs_feed_cache = results[:300]
+            self._save_subs_feed_cache()
+
+        return results[:300]
+
+    # ── Loghi canale (batch) ──────────────────────────────────────────────────
+
+    async def get_channel_avatars(self, channel_ids: list) -> dict:
+        """
+        {channel_id: avatar_url} per una lista di canali. yt-dlp in modalità
+        flat (ricerca/liste) non include il logo del canale — va richiesto a
+        parte. Usa la YouTube Data API (fino a 50 id per richiesta, serve un
+        account collegato) con cache persistente su disco: i loghi non cambiano
+        quasi mai, quindi una volta risolti non li richiediamo più.
+        """
+        ids = list(dict.fromkeys(c for c in channel_ids if c))  # dedup, ordine preservato
+        result = {cid: self._avatar_cache[cid] for cid in ids if cid in self._avatar_cache}
+        missing = [cid for cid in ids if cid not in self._avatar_cache]
+        if not missing:
+            return result
+
+        token = await self.get_valid_token()
+        if not token:
+            return result  # senza account collegato: solo quello che è già in cache
+
+        try:
+            async with httpx.AsyncClient() as client:
+                for i in range(0, len(missing), 50):
+                    batch = missing[i:i + 50]
+                    r = await client.get(
+                        f"{YT_API_BASE}/channels",
+                        params={"part": "snippet", "id": ",".join(batch), "maxResults": 50},
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=15,
+                    )
+                    data = r.json()
+                    for item in data.get("items", []):
+                        url = item.get("snippet", {}).get("thumbnails", {}).get("default", {}).get("url")
+                        if url:
+                            self._avatar_cache[item["id"]] = url
+                            result[item["id"]] = url
+            self._save_avatar_cache()
+        except Exception as e:
+            print(f"[auth] Channel avatars error: {e}")
+
+        return result
 
 
 # Singleton
