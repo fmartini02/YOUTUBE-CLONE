@@ -42,6 +42,12 @@ echo.
 echo   Assicurati che telefono e PC siano sulla stessa WiFi
 echo.
 
+:: Libera la porta 8090 (istanza precedente rimasta appesa)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /r /c:":8090 .*LISTENING"') do (
+    echo   Porta 8090 occupata ^(PID %%a^) - chiudo il processo...
+    taskkill /PID %%a /F >nul 2>&1
+)
+
 cd server
 python -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
 pause
