@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { api, formatDuration, formatViews, formatDate, timeAgo, isCastableOrigin } from "../api";
+import { api, formatDuration, formatViews, formatDate, timeAgo } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
-import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
 
 export default function VideoPage({ videoId, navigate }) {
   const [info, setInfo] = useState(null);
@@ -22,8 +21,10 @@ export default function VideoPage({ videoId, navigate }) {
   const { addToast, ToastContainer } = useToast();
   const cast = useCastContext();
 
-  // Cast state
-  const isCasting = cast?.connected && cast?.currentMedia?.videoId === videoId;
+  // Cast: quando questo video sta girando sulla TV il player locale lascia il
+  // posto a una schermata di stato — riprodurlo anche qui vorrebbe dire
+  // scaricare due volte lo stesso stream.
+  const isCasting = cast?.connected && cast?.castingVideoId === videoId;
 
   // I metadati (titolo/descrizione/correlati) arrivano con /api/watch, ma il
   // player NON aspetta più questa chiamata: l'URL del player (/api/mux) si
@@ -94,43 +95,18 @@ export default function VideoPage({ videoId, navigate }) {
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, []);
 
-  async function handleCast() {
-    if (!cast) return;
-    if (!isCastableOrigin()) {
-      addToast("Per trasmettere apri l'app dall'IP di rete (es. http://192.168.1.11:8090), non da localhost");
-      return;
-    }
-    const success = await cast.castVideo({
-      streamUrl: api.castUrl(videoId, quality),
-      title: info?.title || "Video",
-      channel: info?.channel || "",
-      thumbnail: info?.thumbnail,
-      duration: info?.duration,
-      videoId,
-    });
-    if (success) {
-      addToast(`📺 In riproduzione su ${cast.deviceName}`);
-    } else {
-      addToast("Nessun dispositivo Cast trovato");
-    }
-  }
-
-  async function handleAddToQueue() {
-    if (!cast) return;
-    if (!isCastableOrigin()) {
-      addToast("Per trasmettere apri l'app dall'IP di rete (es. http://192.168.1.11:8090), non da localhost");
-      return;
-    }
-    const ok = await cast.addToQueue({
-      streamUrl: api.castUrl(videoId, quality),
-      title: info?.title || "Video",
-      channel: info?.channel || "",
-      thumbnail: info?.thumbnail,
-      duration: info?.duration,
-      videoId,
-    });
-    addToast(ok ? "➕ Aggiunto alla coda" : "Errore nell'aggiunta alla coda");
-  }
+  // Video da mandare al Chromecast. L'URL si costruisce in modo sincrono da
+  // videoId+quality (compat=1 → H.264/AAC, gli unici codec che ogni
+  // Chromecast sa decodificare): il rimux lato server parte solo quando la TV
+  // richiede davvero lo stream.
+  const castMedia = useMemo(() => ({
+    streamUrl: api.castUrl(videoId, quality),
+    title: info?.title || "Video",
+    channel: info?.channel || "",
+    thumbnail: info?.thumbnail,
+    duration: info?.duration,
+    videoId,
+  }), [videoId, quality, info]);
 
   function handleDownload() {
     const url = api.downloadUrl(videoId, quality);
@@ -169,14 +145,16 @@ export default function VideoPage({ videoId, navigate }) {
                   <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm18-7H5c-1.1 0-2 .9-2 2v3h2v-3h14v10h-5v2h5c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM1 10v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/>
                 </svg>
                 <div style={{ textAlign: "center", zIndex: 1 }}>
-                  <div style={{ fontSize: 18, fontWeight: 600 }}>In riproduzione su</div>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>
+                    {cast.playerState === "buffering" ? "Caricamento su" : "In riproduzione su"}
+                  </div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: "#ff6060", marginTop: 4 }}>{cast.deviceName}</div>
-                </div>
-                <div style={{ display: "flex", gap: 10, zIndex: 1 }}>
-                  <button className="action-btn" onClick={cast.pauseResume}>
-                    {cast.castState === "playing" ? "⏸ Pausa" : "▶ Riprendi"}
-                  </button>
-                  <button className="action-btn" onClick={cast.stopCast}>✕ Interrompi</button>
+                  {/* Play/pausa e volume si comandano dal telecomando della TV
+                      o da Google Home: qui l'unico comando cast è il bottone
+                      "Interrompi" nella riga azioni qui sotto. */}
+                  <div style={{ fontSize: 13, color: "var(--text3)", marginTop: 10 }}>
+                    Usa il telecomando della TV per mettere in pausa
+                  </div>
                 </div>
               </div>
             ) : (
@@ -284,14 +262,6 @@ export default function VideoPage({ videoId, navigate }) {
 
           {/* ── Controls bar ───────────────────────── */}
           <div className="player-controls">
-            {/* Cast button — appare solo su Chrome */}
-            {cast?.available && (
-              <CastButton
-                useCastHook={cast}
-                style={{ marginLeft: 4 }}
-              />
-            )}
-
             <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: "auto" }}>
               {isCasting ? `📺 ${cast.deviceName}` : "🟢 Streaming diretto"}
             </span>
@@ -325,28 +295,10 @@ export default function VideoPage({ videoId, navigate }) {
                     </span>
                   )}
 
-                  {/* Cast — sempre visibile: se non è disponibile spiega il
-                      perché invece di sparire senza dare spiegazioni. */}
-                  <button
-                    className={`action-btn${isCasting || !cast?.available ? "" : " primary"}`}
-                    style={cast?.available ? undefined : { opacity: 0.6 }}
-                    onClick={
-                      !cast?.available
-                        ? () => addToast(CAST_UNAVAILABLE_MESSAGE[cast?.unavailableReason] || "Trasmissione non disponibile in questo browser.")
-                        : isCasting ? cast.stopCast : handleCast
-                    }
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4 }}>
-                      <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm18-7H5c-1.1 0-2 .9-2 2v3h2v-3h14v10h-5v2h5c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM1 10v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/>
-                    </svg>
-                    {isCasting ? "Interrompi Cast" : "Trasmetti sulla TV"}
-                  </button>
-
-                  {cast?.available && (
-                    <button className="action-btn" onClick={handleAddToQueue}>
-                      ➕ Coda
-                    </button>
-                  )}
+                  {/* L'unico comando Chromecast dell'app. Sempre visibile:
+                      quando il cast non è disponibile spiega il perché invece
+                      di sparire senza dare spiegazioni. */}
+                  <CastButton cast={cast} media={castMedia} onNotice={addToast} />
 
                   <button className="action-btn" onClick={() => {
                     navigator.clipboard?.writeText(`https://youtube.com/watch?v=${videoId}`);

@@ -336,19 +336,22 @@ export default function SettingsPage({ navigate }) {
  */
 function CastDiagnostics() {
   const cast = useCastContext();
-  const secure = typeof window !== "undefined" && window.isSecureContext;
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const chromeCast = typeof window !== "undefined" && !!window.chrome?.cast;
   const castFw = typeof window !== "undefined" && !!window.cast?.framework;
   const script = typeof document !== "undefined" && !!document.getElementById("__cast_sdk_script");
 
+  // Niente riga sull'origine sicura (https): il Cast Sender funziona anche su
+  // http in rete locale, segnalarlo come errore mandava fuori strada. Quello
+  // che conta davvero è che l'indirizzo non sia localhost, perché è la TV a
+  // scaricare il video.
   const rows = [
-    ["Indirizzo usato", origin, isCastableOrigin()],
-    ["Origine sicura (richiesta da Chrome per il Cast)", secure ? "sì" : "no — origine http non sicura", secure],
+    ["Indirizzo usato (la TV deve poterlo raggiungere)", origin, isCastableOrigin()],
     ["Script Google Cast caricato", script ? "sì" : "no", script],
     ["API chrome.cast presente", chromeCast ? "sì" : "no", chromeCast],
     ["Framework Cast pronto", castFw ? "sì" : "no", castFw],
     ["Trasmissione disponibile", cast?.available ? "sì" : "no", !!cast?.available],
+    ["Dispositivo collegato", cast?.connected ? cast.deviceName || "sì" : "no", !!cast?.connected],
   ];
 
   return (

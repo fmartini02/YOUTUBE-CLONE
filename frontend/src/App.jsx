@@ -6,13 +6,14 @@ import SettingsPage from "./pages/SettingsPage";
 import SubscriptionsPage from "./pages/SubscriptionsPage";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
-import CastBar from "./components/CastBar";
 import ServerSetup from "./components/ServerSetup";
 import { useCast } from "./hooks/useCast.jsx";
 import { api, isCapacitor, getServerBase, checkServerReachable } from "./api";
 import "./App.css";
 
-// Cast context — disponibile in tutta l'app
+// Cast context — l'SDK Chromecast si inizializza una volta sola qui e viene
+// consumato dall'unico bottone Cast (pagina video) e dalla diagnostica nelle
+// impostazioni.
 export const CastContext = createContext(null);
 export function useCastContext() { return useContext(CastContext); }
 
@@ -107,7 +108,6 @@ export default function App() {
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
           authStatus={authStatus}
-          cast={castSDK}
         />
 
         {cookieWarning && (
@@ -126,7 +126,7 @@ export default function App() {
 
         <div className="app-body" style={{ marginTop: cookieWarning ? 40 : 0 }}>
           <Sidebar open={sidebarOpen} navigate={navigate} currentPage={page} authStatus={authStatus} />
-          <main className="main-content" style={{ paddingBottom: castSDK?.connected ? 72 : 24 }}>
+          <main className="main-content" style={{ paddingBottom: 24 }}>
             {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
             {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}
             {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} />}
@@ -134,9 +134,6 @@ export default function App() {
             {page === "settings"      && <SettingsPage navigate={navigate} />}
           </main>
         </div>
-
-        {/* Barra cast persistente in basso */}
-        <CastBar useCastHook={castSDK} navigate={navigate} />
       </div>
     </CastContext.Provider>
   );
