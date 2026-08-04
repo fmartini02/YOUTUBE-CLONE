@@ -33,10 +33,15 @@ class SyncScheduler:
         self._status = "syncing"
         try:
             await auth_manager.sync_subscriptions()
+            print(f"[sync] Iscrizioni aggiornate — {len(auth_manager.get_subscriptions())} canali")
+            # Scansione completa (tutti i canali) del feed 'Iscrizioni': lenta
+            # (una richiesta per canale, parallelizzata), per questo gira solo
+            # qui in background e non ad ogni caricamento della pagina.
+            feed = await auth_manager.refresh_subscriptions_feed(ydl_opts_fn)
+            print(f"[sync] Feed iscrizioni aggiornato — {len(feed)} video")
             self._last_sync = time.time()
             self._status = "ok"
             self._last_error = ""
-            print(f"[sync] Iscrizioni aggiornate — {len(auth_manager.get_subscriptions())} canali")
         except Exception as e:
             self._status = "error"
             self._last_error = str(e)

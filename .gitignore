@@ -1,0 +1,33 @@
+# ── Segreti e dati personali — mai online ──────────────────────────────────
+data/cookies.txt
+data/oauth_token.json
+data/oauth_setup.json
+data/subscriptions.json
+data/subscriptions_feed_cache.json
+data/channel_avatars.json
+data/history.json
+.env
+.env.local
+.env.*.local
+
+# Chiavi di firma Android (se un giorno si genera un keystore di release)
+*.keystore
+*.jks
+
+# ── Dipendenze — rigenerabili con npm install ──────────────────────────────
+node_modules/
+
+# ── Build Python ────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+
+# ── Android / Capacitor — rigenerabili con npx cap sync + gradlew ──────────
+frontend/android/**/build/
+frontend/android/.gradle/
+frontend/android/local.properties
+frontend/android/app/src/main/assets/public/
+frontend/android/*.apk
+*.apk
+
+# ── Varie ────────────────────────────────────────────────────────────────────
+.ytdlp_last_update
