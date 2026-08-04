@@ -1,15 +1,23 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { api, formatDuration, formatViews, formatDate, timeAgo, isCastableOrigin } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
 import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
 import { useChannelAvatars } from "../hooks/useChannelAvatars";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+
+// Quanti correlati per richiesta: il mix di YouTube arriva a blocchi di ~25,
+// chiederne 20 alla volta tiene ogni richiesta a una sola continuazione.
+const RELATED_PAGE_SIZE = 20;
 
 export default function VideoPage({ videoId, navigate }) {
   const [info, setInfo] = useState(null);
   const [quality, setQuality] = useState("best");
   const [related, setRelated] = useState([]);
+  const [relatedHasMore, setRelatedHasMore] = useState(false);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const relatedPageRef = useRef(0);
   const [descExpanded, setDescExpanded] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentCount, setCommentCount] = useState(null);
@@ -32,6 +40,7 @@ export default function VideoPage({ videoId, navigate }) {
   const channelAsList = useMemo(() => (info?.channel_id ? [info] : []), [info]);
   const channelAvatar = useChannelAvatars(channelAsList)[info?.channel_id];
 
+
   // I metadati (titolo/descrizione/correlati) arrivano con /api/watch, ma il
   // player NON aspetta più questa chiamata: l'URL del player (/api/mux) si
   // costruisce subito da videoId+quality, senza bisogno di sapere nient'altro.
@@ -45,14 +54,56 @@ export default function VideoPage({ videoId, navigate }) {
       setInfo(data);
       // Salva in cronologia
       api.addHistory({ id: videoId, title: data.title, channel: data.channel, thumbnail: data.thumbnail }).catch(() => {});
-      // Video correlati
-      api.search(data.title.split(" ").slice(0, 4).join(" "))
-        .then(d => setRelated((d.results || []).filter(v => v.id !== videoId).slice(0, 15)))
-        .catch(() => {});
     }).catch(() => {
       addToast("Errore nel caricamento dei dettagli del video");
     });
   }, [videoId, quality]);
+
+  // Correlati: il "Mix" che YouTube costruisce a partire da questo video.
+  // Effetto separato da /api/watch perché non dipende dalla qualità e perché
+  // si ricarica solo al cambio di video.
+  useEffect(() => {
+    if (!videoId) return;
+    let cancelled = false;
+    setRelated([]);
+    setRelatedHasMore(false);
+    relatedPageRef.current = 0;
+
+    api.related(videoId, RELATED_PAGE_SIZE, 0).then(d => {
+      if (cancelled) return;
+      setRelated((d.results || []).filter(v => v.id !== videoId));
+      setRelatedHasMore(!!d.has_more);
+    }).catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [videoId]);
+
+  const loadMoreRelated = useCallback(async () => {
+    if (relatedLoading || !relatedHasMore) return;
+    setRelatedLoading(true);
+    try {
+      const next = relatedPageRef.current + 1;
+      const d = await api.related(videoId, RELATED_PAGE_SIZE, next * RELATED_PAGE_SIZE);
+      relatedPageRef.current = next;
+      setRelated(prev => {
+        // Il mix ripropone periodicamente gli stessi video (incluso quello in
+        // riproduzione): senza dedup si avrebbero chiavi React duplicate.
+        const seen = new Set([videoId, ...prev.map(v => v.id)]);
+        return [...prev, ...(d.results || []).filter(v => !seen.has(v.id))];
+      });
+      setRelatedHasMore(!!d.has_more);
+    } catch {
+      setRelatedHasMore(false);
+    } finally {
+      setRelatedLoading(false);
+    }
+  }, [videoId, relatedHasMore, relatedLoading]);
+
+  const relatedSentinelRef = useInfiniteScroll({
+    hasMore: relatedHasMore,
+    loading: relatedLoading,
+    onLoadMore: loadMoreRelated,
+  });
 
   // Commenti: chiamata separata (non dipende da 'quality') e non bloccante —
   // parte in parallelo, il player non aspetta che finisca.
@@ -468,6 +519,15 @@ export default function VideoPage({ videoId, navigate }) {
               </div>
             </div>
           ))}
+
+          {/* Sentinella: entrando nel viewport carica il blocco successivo del mix */}
+          <div ref={relatedSentinelRef} style={{ height: 1 }} />
+
+          {relatedLoading && (
+            <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "var(--text3)" }}>
+              Caricamento…
+            </div>
+          )}
         </div>
       </div>
       <ToastContainer />

@@ -63,6 +63,7 @@ export const api = {
   search: (q, page = 1) => apiFetch(`/api/search?q=${encodeURIComponent(q)}&page=${page}`),
   trending: (limit = 24, offset = 0) => apiFetch(`/api/trending?limit=${limit}&offset=${offset}`),
   homeFeed: (limit = 24, offset = 0) => apiFetch(`/api/feed/home?limit=${limit}&offset=${offset}`),
+  related: (id, limit = 20, offset = 0) => apiFetch(`/api/related/${id}?limit=${limit}&offset=${offset}`),
   channelAvatars: (ids) => apiFetch(`/api/channel-avatars?ids=${ids.join(",")}`),
   videoInfo: (id) => apiFetch(`/api/video/${id}`),
   streamUrl: (id, quality = "best") => apiFetch(`/api/stream/${id}?quality=${quality}`),
