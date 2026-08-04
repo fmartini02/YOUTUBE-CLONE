@@ -195,8 +195,8 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  ✅ YTProxy pronto!"
 echo ""
-echo "  💻 Questo PC:     http://localhost:8080"
-echo "  📱 Telefono/TV:   http://$LOCAL_IP:8080"
+echo "  💻 Questo PC:     http://localhost:8090"
+echo "  📱 Telefono/TV:   http://$LOCAL_IP:8090"
 echo ""
 echo "  ⚠️  Telefono e PC devono essere sulla stessa WiFi"
 echo "  💡 Per accedere fuori casa: usa Tailscale"
@@ -205,9 +205,28 @@ echo ""
 echo "  Premi Ctrl+C per fermare"
 echo ""
 
-# ── Avvia server ──────────────────────────────────────────────
-echo "🧹 Pulizia porta 8090..."
-fuser -k 8090/tcp 2>/dev/null || true
+# ── Libera la porta 8090 ──────────────────────────────────────
+# Capita che un'istanza precedente resti appesa (chiusa male, avviata in
+# background, Electron ancora aperto) e tenga la porta: uvicorn fallirebbe
+# con "Address already in use". fuser e lsof non ci sono ovunque, quindi
+# cerchiamo il PID in cascata con quello che è disponibile.
+PORT_PIDS=""
+if command -v fuser &>/dev/null; then
+  PORT_PIDS=$(fuser 8090/tcp 2>/dev/null || true)
+elif command -v lsof &>/dev/null; then
+  PORT_PIDS=$(lsof -t -i :8090 2>/dev/null || true)
+elif command -v ss &>/dev/null; then
+  PORT_PIDS=$(ss -tulpn 2>/dev/null | grep ':8090 ' | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+fi
 
+if [ -n "$PORT_PIDS" ]; then
+  echo "🧹 Porta 8090 occupata (PID:$(echo " $PORT_PIDS")) — chiudo il processo..."
+  kill $PORT_PIDS 2>/dev/null || true
+  sleep 2
+  kill -9 $PORT_PIDS 2>/dev/null || true   # se SIGTERM non è bastato
+  echo "✓  Porta 8090 liberata"
+fi
+
+# ── Avvia server ──────────────────────────────────────────────
 cd "$DIR/server"
 python3 -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload

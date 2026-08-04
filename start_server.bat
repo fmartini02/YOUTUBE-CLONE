@@ -36,14 +36,15 @@ set LOCAL_IP=%LOCAL_IP: =%
 echo.
 echo   Server pronto!
 echo.
-echo   Questo PC:    http://localhost:8080
-echo   Telefono/TV:  http://%LOCAL_IP%:8080
+echo   Questo PC:    http://localhost:8090
+echo   Telefono/TV:  http://%LOCAL_IP%:8090
 echo.
 echo   Assicurati che telefono e PC siano sulla stessa WiFi
 echo.
 
-echo Pulizia porta 8090...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8090') do (
+:: Libera la porta 8090 (istanza precedente rimasta appesa)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /r /c:":8090 .*LISTENING"') do (
+    echo   Porta 8090 occupata ^(PID %%a^) - chiudo il processo...
     taskkill /PID %%a /F >nul 2>&1
 )
 
