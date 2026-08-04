@@ -118,7 +118,7 @@ export default function SubscriptionsPage({ navigate }) {
               onMouseLeave={e => e.currentTarget.style.background = "var(--bg2)"}
             >
               {ch.thumbnail ? (
-                <img src={ch.thumbnail} alt={ch.name} style={{ width: 64, height: 64, borderRadius: "50%", marginBottom: 8 }} />
+                <img src={ch.thumbnail} alt={ch.name} referrerPolicy="no-referrer" style={{ width: 64, height: 64, borderRadius: "50%", marginBottom: 8, objectFit: "cover" }} />
               ) : (
                 <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--bg3)", margin: "0 auto 8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>
                   {(ch.name||"?")[0]}

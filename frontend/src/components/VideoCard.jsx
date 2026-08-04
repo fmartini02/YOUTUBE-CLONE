@@ -51,7 +51,12 @@ export default function VideoCard({ video, navigate, onPlay, onDownload, avatarU
       </div>
       <div className="video-info">
         <div className="avatar">
-          {avatar ? <img src={avatar} alt={video.channel} loading="lazy" /> : (video.channel || "?")[0]}
+          {/* referrerPolicy no-referrer: con il Referer di localhost i server
+              yt3.ggpht.com rispondono 429 con una pagina HTML, e Chromium la
+              blocca (ERR_BLOCKED_BY_ORB) — senza questo il logo resta vuoto. */}
+          {avatar
+            ? <img src={avatar} alt={video.channel} loading="lazy" referrerPolicy="no-referrer" />
+            : (video.channel || "?")[0]}
         </div>
         <div className="video-meta">
           <div className="video-title">{video.title}</div>

@@ -410,7 +410,7 @@ export default function VideoPage({ videoId, navigate }) {
                       <div key={c.id} style={{ display: "flex", gap: 12 }}>
                         <div className="channel-avatar" style={{ width: 36, height: 36, fontSize: 13, flexShrink: 0, overflow: "hidden" }}>
                           {c.author_thumbnail
-                            ? <img src={c.author_thumbnail} alt={c.author} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ? <img src={c.author_thumbnail} alt={c.author} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                             : (c.author || "?").replace("@", "")[0]}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
