@@ -37,10 +37,41 @@ HOME_FEED_MAX = 10000          # tetto di sicurezza; in pratica finisce prima Yo
 HOME_FEED_CHUNK = 30           # video per blocco (≈ 1 richiesta di continuazione)
 HOME_FEED_CACHE_TTL = 1800     # 30 minuti prima di ricominciare da capo il feed
 
-OAUTH_SCOPES = "https://www.googleapis.com/auth/youtube.readonly"
+# youtube.readonly basta per leggere iscrizioni e loghi, ma NON per scrivere:
+# per pubblicare un commento Google pretende youtube.force-ssl (che include
+# anche tutta la lettura). Chi si era collegato con il vecchio scope ha un
+# refresh token che non lo comprende: il token continua a funzionare per le
+# iscrizioni, ma commentThreads.insert risponde 403 insufficientPermissions
+# finché non rifà il login (vedi can_comment / COMMENT_SCOPE).
+COMMENT_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
+OAUTH_SCOPES = f"https://www.googleapis.com/auth/youtube.readonly {COMMENT_SCOPE}"
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
+
+
+class YouTubeAPIError(Exception):
+    """
+    Errore restituito dalla Data API, con il 'reason' di Google conservato:
+    serve a distinguere i casi che l'utente può risolvere (commenti
+    disattivati sul video, scope insufficiente, quota finita) da un guasto.
+    """
+    def __init__(self, message: str, reason: str = "", status: int = 400):
+        super().__init__(message)
+        self.message = message
+        self.reason = reason
+        self.status = status
+
+
+def _iso_to_timestamp(iso: Optional[str]) -> Optional[int]:
+    """publishedAt della Data API (ISO 8601 UTC) → unix timestamp, come i commenti di yt-dlp."""
+    if not iso:
+        return None
+    from datetime import datetime
+    try:
+        return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return None
 
 
 def _timestamp_to_upload_date(ts) -> Optional[str]:
@@ -151,6 +182,9 @@ class AuthManager:
         self._prefs: dict = {}
         self._history: list = []
         self._avatar_cache: dict = {}
+        # Canale YouTube dell'account collegato (nome/avatar per la casella
+        # "commenta come"): None = mai letto, {} = account senza canale.
+        self._me: Optional[dict] = None
         self._subs_feed_cache: list = []
         self._cookie_feed_cache: list = []
         self._cookie_feed_cache_at: float = 0
@@ -230,7 +264,11 @@ class AuthManager:
                 "expires_at": time.time() + data.get("expires_in", 3600),
                 "client_id": client_id,
                 "client_secret": client_secret,
+                # Google restituisce gli scope effettivamente concessi: li
+                # teniamo per sapere se questo token può anche commentare.
+                "scope": data.get("scope", ""),
             }
+            self._me = None  # identità dell'account: da rileggere
             self._save_token()
             return self._token
 
@@ -250,6 +288,8 @@ class AuthManager:
                 if "access_token" in data:
                     self._token["access_token"] = data["access_token"]
                     self._token["expires_at"] = time.time() + data.get("expires_in", 3600)
+                    if data.get("scope"):
+                        self._token["scope"] = data["scope"]
                     self._save_token()
                     return self._token["access_token"]
         except Exception as e:
@@ -270,8 +310,174 @@ class AuthManager:
 
     def logout(self):
         self._token = {}
+        self._me = None
         if TOKEN_FILE.exists():
             TOKEN_FILE.unlink()
+
+    def can_comment(self) -> bool:
+        """
+        True solo se il token collegato comprende lo scope di scrittura.
+        Un account collegato prima dell'introduzione dei commenti è
+        autenticato ma non può pubblicare: serve rifare il login.
+        """
+        return self.is_authenticated() and COMMENT_SCOPE in (self._token.get("scope") or "")
+
+    # ── Commenti (YouTube Data API v3) ────────────────────────────────────────
+    #
+    # Per la sola lettura yt-dlp basterebbe, ma restituisce i commenti in blocco
+    # (nessuna continuazione riutilizzabile fra una richiesta e l'altra) e non
+    # può in alcun modo pubblicare. Con l'account collegato usiamo quindi la
+    # Data API: ha una paginazione vera (nextPageToken), quindi "carica altri
+    # commenti" è una richiesta piccola invece di ri-scaricare tutto, e le
+    # risposte ai thread si possono chiedere solo quando servono.
+    # Costo quota: 1 unità a lettura, 50 a commento pubblicato (su 10.000/giorno).
+
+    async def _yt_api(self, method: str, path: str, *, params: dict = None, json_body: dict = None) -> dict:
+        """Chiamata autenticata alla Data API. Solleva ValueError col messaggio di Google."""
+        token = await self.get_valid_token()
+        if not token:
+            raise PermissionError("Nessun account Google collegato")
+        async with httpx.AsyncClient() as client:
+            r = await client.request(
+                method,
+                f"{YT_API_BASE}/{path}",
+                params=params,
+                json=json_body,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=20,
+            )
+        try:
+            data = r.json()
+        except Exception:
+            raise ValueError(f"Risposta non valida da YouTube ({r.status_code})")
+        if "error" in data:
+            err = data["error"]
+            reason = ""
+            if err.get("errors"):
+                reason = err["errors"][0].get("reason", "")
+            raise YouTubeAPIError(err.get("message", "Errore YouTube"), reason, r.status_code)
+        return data
+
+    async def get_my_channel(self) -> Optional[dict]:
+        """Canale YouTube dell'account collegato (nome + avatar), per la casella 'commenta come'."""
+        if self._me is not None:
+            return self._me or None
+        if not self.is_authenticated():
+            return None
+        try:
+            data = await self._yt_api("GET", "channels", params={"part": "snippet", "mine": "true"})
+            items = data.get("items") or []
+            if not items:
+                # Account Google senza canale YouTube: non può commentare.
+                self._me = {}
+                return None
+            sn = items[0].get("snippet", {})
+            self._me = {
+                "channel_id": items[0].get("id"),
+                "title": sn.get("title"),
+                "thumbnail": (sn.get("thumbnails", {}).get("default") or {}).get("url"),
+            }
+            return self._me
+        except Exception as e:
+            print(f"[auth] get_my_channel: {e}")
+            return None
+
+    def _map_api_comment(self, snippet: dict, comment_id: str, extra: dict = None) -> dict:
+        """Commento della Data API → stessa forma di quelli estratti da yt-dlp."""
+        out = {
+            "id": comment_id,
+            "text": snippet.get("textOriginal") or snippet.get("textDisplay") or "",
+            "author": snippet.get("authorDisplayName"),
+            "author_thumbnail": snippet.get("authorProfileImageUrl"),
+            "author_channel_id": (snippet.get("authorChannelId") or {}).get("value"),
+            "author_is_uploader": False,  # riempito da chi conosce il canale del video
+            "likes": snippet.get("likeCount") or 0,
+            "published": _iso_to_timestamp(snippet.get("publishedAt")),
+            "reply_count": 0,
+        }
+        if extra:
+            out.update(extra)
+        return out
+
+    async def list_comment_threads(self, video_id: str, sort: str, page_token: str = "", limit: int = 40) -> dict:
+        """Una pagina di commenti principali + il token per la successiva (vuoto = finiti)."""
+        params = {
+            "part": "snippet",
+            "videoId": video_id,
+            "order": "time" if sort == "new" else "relevance",
+            "maxResults": max(1, min(limit, 100)),
+            "textFormat": "plainText",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        data = await self._yt_api("GET", "commentThreads", params=params)
+        comments = []
+        for item in data.get("items", []):
+            sn = item.get("snippet", {})
+            top = sn.get("topLevelComment", {})
+            comments.append(self._map_api_comment(
+                top.get("snippet", {}),
+                top.get("id") or item.get("id"),
+                {"reply_count": sn.get("totalReplyCount") or 0},
+            ))
+        # pageInfo.totalResults di commentThreads è il numero di risultati
+        # della PAGINA, non del video: per il totale vero serve la scheda
+        # statistiche, che chiediamo una volta sola (prima pagina).
+        total = None
+        if not page_token:
+            total = await self.get_video_comment_count(video_id)
+        return {
+            "comments": comments,
+            "next_page_token": data.get("nextPageToken", ""),
+            "total": total,
+        }
+
+    async def get_video_comment_count(self, video_id: str) -> Optional[int]:
+        """Numero totale di commenti del video (statistiche della Data API)."""
+        try:
+            data = await self._yt_api("GET", "videos", params={"part": "statistics", "id": video_id})
+            items = data.get("items") or []
+            if items:
+                n = (items[0].get("statistics") or {}).get("commentCount")
+                return int(n) if n is not None else None
+        except Exception as e:
+            print(f"[auth] comment count: {e}")
+        return None
+
+    async def list_comment_replies(self, parent_id: str, page_token: str = "", limit: int = 50) -> dict:
+        """Risposte a un commento — caricate solo quando l'utente le apre."""
+        params = {
+            "part": "snippet",
+            "parentId": parent_id,
+            "maxResults": max(1, min(limit, 100)),
+            # Senza questo la API restituisce HTML (<br>, &quot;, link <a>) che
+            # React stamperebbe alla lettera dentro il testo del commento.
+            "textFormat": "plainText",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        data = await self._yt_api("GET", "comments", params=params)
+        replies = [
+            self._map_api_comment(item.get("snippet", {}), item.get("id"))
+            for item in data.get("items", [])
+        ]
+        # La API le dà dalla più vecchia alla più recente: è l'ordine di lettura.
+        return {"comments": replies, "next_page_token": data.get("nextPageToken", "")}
+
+    async def post_comment(self, video_id: str, text: str) -> dict:
+        """Pubblica un commento principale sul video."""
+        data = await self._yt_api("POST", "commentThreads", params={"part": "snippet"}, json_body={
+            "snippet": {"videoId": video_id, "topLevelComment": {"snippet": {"textOriginal": text}}},
+        })
+        top = (data.get("snippet") or {}).get("topLevelComment") or {}
+        return self._map_api_comment(top.get("snippet", {}), top.get("id") or data.get("id"))
+
+    async def post_reply(self, parent_id: str, text: str) -> dict:
+        """Pubblica una risposta a un commento esistente."""
+        data = await self._yt_api("POST", "comments", params={"part": "snippet"}, json_body={
+            "snippet": {"parentId": parent_id, "textOriginal": text},
+        })
+        return self._map_api_comment(data.get("snippet", {}), data.get("id"))
 
     # ── Subscriptions sync ────────────────────────────────────────────────────
 

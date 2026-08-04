@@ -1,19 +1,16 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { api, formatDuration, formatViews, formatDate, timeAgo, isCastableOrigin } from "../api";
+import { useState, useEffect, useRef } from "react";
+import { api, formatDuration, formatViews, formatDate, isCastableOrigin } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
+import Comments from "../components/Comments";
 import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
 
-export default function VideoPage({ videoId, navigate }) {
+export default function VideoPage({ videoId, navigate, authStatus }) {
   const [info, setInfo] = useState(null);
   const [quality, setQuality] = useState("best");
   const [related, setRelated] = useState([]);
   const [descExpanded, setDescExpanded] = useState(false);
-  const [comments, setComments] = useState([]);
-  const [commentCount, setCommentCount] = useState(null);
-  const [commentsLoading, setCommentsLoading] = useState(true);
-  const [commentSort, setCommentSort] = useState("top"); // top (più pertinenti) | new (più recenti)
   const [subtitleLangs, setSubtitleLangs] = useState([]);
   const [subtitleLang, setSubtitleLang] = useState("");
   const [subtitleSize, setSubtitleSize] = useState("normal");
@@ -46,19 +43,6 @@ export default function VideoPage({ videoId, navigate }) {
       addToast("Errore nel caricamento dei dettagli del video");
     });
   }, [videoId, quality]);
-
-  // Commenti: chiamata separata (non dipende da 'quality') e non bloccante —
-  // parte in parallelo, il player non aspetta che finisca.
-  useEffect(() => {
-    if (!videoId) return;
-    setComments([]);
-    setCommentsLoading(true);
-    api.comments(videoId).then(d => {
-      setComments(d.comments || []);
-      setCommentCount(d.comment_count);
-      setCommentsLoading(false);
-    }).catch(() => setCommentsLoading(false));
-  }, [videoId]);
 
   // Lingue sottotitoli disponibili — anche questa non bloccante.
   useEffect(() => {
@@ -138,15 +122,6 @@ export default function VideoPage({ videoId, navigate }) {
     a.href = url; a.download = (info?.title || videoId) + ".mp4"; a.click();
     addToast("⬇ Download avviato...");
   }
-
-  // Ordinamento lato client — i commenti sono già tutti scaricati, non serve
-  // una nuova richiesta al server per cambiare ordine.
-  const sortedComments = useMemo(() => {
-    const list = [...comments];
-    if (commentSort === "new") list.sort((a, b) => (b.published || 0) - (a.published || 0));
-    else list.sort((a, b) => (b.likes || 0) - (a.likes || 0));
-    return list;
-  }, [comments, commentSort]);
 
   return (
     <div className="video-page">
@@ -371,72 +346,12 @@ export default function VideoPage({ videoId, navigate }) {
               )}
 
               {/* ── Commenti ─────────────────────────── */}
-              <div style={{ marginTop: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 600 }}>
-                    Commenti {commentCount != null && <span style={{ color: "var(--text3)", fontWeight: 400 }}>({formatViews(commentCount).replace(" views", "")})</span>}
-                  </h3>
-                  {comments.length > 1 && (
-                    <select
-                      className="quality-select"
-                      value={commentSort}
-                      onChange={e => setCommentSort(e.target.value)}
-                    >
-                      <option value="top">Più pertinenti</option>
-                      <option value="new">Più recenti</option>
-                    </select>
-                  )}
-                </div>
-
-                {commentsLoading ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {Array.from({ length: 3 }).map((_, i) => (
-                      <div key={i} style={{ display: "flex", gap: 12 }}>
-                        <div className="skeleton" style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0 }} />
-                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                          <div className="skeleton skeleton-line short" />
-                          <div className="skeleton skeleton-line" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : comments.length === 0 ? (
-                  <p style={{ fontSize: 13, color: "var(--text3)" }}>
-                    Nessun commento disponibile per questo video.
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                    {sortedComments.map(c => (
-                      <div key={c.id} style={{ display: "flex", gap: 12 }}>
-                        <div className="channel-avatar" style={{ width: 36, height: 36, fontSize: 13, flexShrink: 0, overflow: "hidden" }}>
-                          {c.author_thumbnail
-                            ? <img src={c.author_thumbnail} alt={c.author} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                            : (c.author || "?").replace("@", "")[0]}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <span style={{ fontSize: 13, fontWeight: 500 }}>{c.author}</span>
-                            {c.author_is_uploader && (
-                              <span style={{ fontSize: 10, color: "var(--accent)", border: "1px solid var(--accent)", borderRadius: 4, padding: "0 4px" }}>
-                                AUTORE
-                              </span>
-                            )}
-                            <span style={{ fontSize: 12, color: "var(--text3)" }}>{timeAgo(c.published)}</span>
-                          </div>
-                          <div style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                            {c.text}
-                          </div>
-                          {c.likes > 0 && (
-                            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>
-                              👍 {c.likes}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Comments
+                videoId={videoId}
+                channelId={info.channel_id}
+                authStatus={authStatus}
+                onToast={addToast}
+              />
             </>
           )}
         </div>

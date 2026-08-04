@@ -151,9 +151,11 @@ iscrizioni reale. Due modi:
 
 I cookie scadono: dopo 2 settimane l'app mostra un avviso per rigenerarli.
 
-### 🔑 Account Google → elenco iscrizioni e loghi dei canali
+### 🔑 Account Google → iscrizioni, loghi dei canali e commenti
 
-Serve solo per la YouTube Data API v3 (elenco canali iscritti + avatar). Devi
+Serve per la YouTube Data API v3: elenco canali iscritti, avatar, e i commenti
+(paginazione completa, risposte ai thread e **pubblicazione** dei propri
+commenti — senza account i commenti restano leggibili ma in sola lettura). Devi
 creare un **Client ID OAuth gratuito** su
 [console.cloud.google.com](https://console.cloud.google.com) (progetto → API e
 servizi → Credenziali → OAuth 2.0, abilitando *YouTube Data API v3*), con questo
@@ -165,6 +167,10 @@ http://localhost:8090/api/auth/callback-page
 
 Client ID e Secret si incollano in Impostazioni. Da lì in poi le iscrizioni si
 risincronizzano da sole ogni ora.
+
+> Se avevi già collegato l'account prima di poter commentare, **rifai il login**
+> dalle Impostazioni: il permesso di scrittura (`youtube.force-ssl`) va concesso
+> di nuovo, altrimenti YouTube rifiuta la pubblicazione dei commenti.
 
 ---
 
@@ -241,12 +247,15 @@ ytproxy/
 | `GET /api/mux/{id}?quality=1080` | **Stream del player**: audio+video uniti al volo |
 | `GET /api/stream/{id}?quality=720` | URL diretto del CDN YouTube |
 | `GET /api/download/{id}?quality=720` | Scarica MP4 |
-| `GET /api/comments/{id}` | Commenti principali |
+| `GET /api/comments/{id}?sort=top&page_token=` | Commenti principali, una pagina alla volta |
+| `GET /api/comments/{id}/replies?parent_id=` | Risposte a un commento (serve l'account) |
+| `POST /api/comments/{id}` | Pubblica un commento o una risposta (serve l'account) |
 | `GET /api/subtitles/{id}` | Lingue sottotitoli disponibili |
 | `GET /api/subtitles/{id}/{lang}.vtt` | Traccia sottotitoli (WebVTT) |
 | `GET /api/channel/{id}/videos` | Ultimi video di un canale |
 | `GET /api/suggestions?q=query` | Autocomplete |
 | `GET /api/auth/status` | Stato cookie, account e sync |
+| `GET /api/auth/me` | Canale dell'account collegato (per "commenta come") |
 | `GET /api/history` · `POST` · `DELETE` | Cronologia locale |
 | `GET /api/prefs` · `PATCH` | Preferenze |
 | `GET /api/health` | Controllo che il server sia vivo |

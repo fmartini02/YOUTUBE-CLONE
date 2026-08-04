@@ -67,7 +67,20 @@ export const api = {
   videoInfo: (id) => apiFetch(`/api/video/${id}`),
   streamUrl: (id, quality = "best") => apiFetch(`/api/stream/${id}?quality=${quality}`),
   watch: (id, quality = "best") => apiFetch(`/api/watch/${id}?quality=${quality}`),
-  comments: (id, limit = 30) => apiFetch(`/api/comments/${id}?limit=${limit}`),
+  // Commenti paginati: pageToken vuoto = prima pagina; la risposta ne
+  // restituisce uno nuovo finché ci sono altri commenti da caricare.
+  comments: (id, { limit = 40, sort = "top", pageToken = "", channelId = "" } = {}) =>
+    apiFetch(`/api/comments/${id}?limit=${limit}&sort=${sort}` +
+      `&page_token=${encodeURIComponent(pageToken)}&channel_id=${encodeURIComponent(channelId || "")}`),
+  commentReplies: (id, parentId, pageToken = "") =>
+    apiFetch(`/api/comments/${id}/replies?parent_id=${encodeURIComponent(parentId)}` +
+      `&page_token=${encodeURIComponent(pageToken)}`),
+  postComment: (id, text, parentId = null) => apiFetch(`/api/comments/${id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, parent_id: parentId }),
+  }),
+  me: () => apiFetch("/api/auth/me"),
   subtitleLanguages: (id) => apiFetch(`/api/subtitles/${id}`),
   subtitleUrl: (id, lang) => `${getServerBase()}/api/subtitles/${id}/${lang}.vtt`,
   downloadUrl: (id, quality = "best") => `${getServerBase()}/api/download/${id}?quality=${quality}`,

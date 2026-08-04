@@ -129,7 +129,7 @@ export default function App() {
           <main className="main-content" style={{ paddingBottom: castSDK?.connected ? 72 : 24 }}>
             {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
             {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}
-            {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} />}
+            {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} authStatus={authStatus} />}
             {page === "subscriptions" && <SubscriptionsPage navigate={navigate} />}
             {page === "settings"      && <SettingsPage navigate={navigate} />}
           </main>

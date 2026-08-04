@@ -3,6 +3,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import urllib.parse
 from pathlib import Path
 from typing import Optional
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 import httpx
 import yt_dlp
 
-from auth import auth_manager, is_video_entry
+from auth import auth_manager, is_video_entry, YouTubeAPIError
 from sync import scheduler
 
 app = FastAPI(title="YTProxy")
@@ -242,43 +243,217 @@ async def video_info(video_id: str):
         raise HTTPException(500, str(ex))
 
 
-@app.get("/api/comments/{video_id}")
-async def get_comments(video_id: str, limit: int = 30):
-    """
-    Commenti principali del video (no risposte, per restare veloce: ogni
-    livello in più significa altre richieste a YouTube). Chiamata separata da
-    /api/watch così i commenti non rallentano l'avvio del video — la pagina li
-    carica in background dopo che il player è già partito.
-    """
-    try:
-        opts = {
-            **ydl_opts_base(),
-            "extract_flat": False,
-            "getcomments": True,
+# ─── Commenti ────────────────────────────────────────────────────────────────
+#
+# Due sorgenti, scelte in questo ordine:
+#
+#   1. YouTube Data API (solo con account Google collegato) — ha una
+#      paginazione vera: "carica altri commenti" costa una richiesta piccola,
+#      quindi si arriva davvero in fondo al thread, e si possono aprire le
+#      risposte di un commento singolo. È anche l'unica via per pubblicare.
+#   2. yt-dlp — nessuna continuazione riutilizzabile fra una richiesta e
+#      l'altra: ogni estrazione riparte da zero e scarica i primi N commenti.
+#      Per non ri-scaricare tutto ad ogni "carica altri" i risultati finiscono
+#      in cache e si passa allo scaglione successivo solo quando la pagina
+#      richiesta esce dal materiale già in mano (vedi _YTDLP_TIERS).
+
+_YTDLP_TIERS = [100, 300, 800, 2000]   # quanti commenti chiedere a yt-dlp, per tentativi successivi
+_YTDLP_CACHE_TTL = 900                 # 15 min: oltre, il thread può essere cambiato
+_YTDLP_CACHE_MAX_VIDEOS = 8            # tetto alla memoria: si ricorda solo l'ultima manciata di video
+_ytdlp_comments_cache: dict = {}       # (video_id, sort) -> {comments, tier, count, at, exhausted}
+_ytdlp_comments_lock = asyncio.Lock()  # una sola estrazione alla volta: sono lente e pesanti
+
+
+def _extract_comments_ytdlp(video_id: str, sort: str, max_comments: int) -> dict:
+    """Estrazione bloccante dei commenti principali via yt-dlp (va chiamata in un executor)."""
+    base = ydl_opts_base()
+    opts = {
+        **base,
+        "extract_flat": False,
+        "getcomments": True,
+        "extractor_args": {**base.get("extractor_args", {}), "youtube": {
             # [max_comments, max_parents, max_replies, max_replies_per_thread]
-            "extractor_args": {"youtube": {"max_comments": [str(limit), str(limit), "0", "0"]}},
-        }
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            comments = []
-            for c in (info.get("comments") or []):
-                if c.get("parent") and c.get("parent") != "root":
-                    continue  # solo commenti principali, niente risposte
-                comments.append({
-                    "id": c.get("id"),
-                    "text": c.get("text"),
-                    "author": c.get("author"),
-                    "author_thumbnail": c.get("author_thumbnail"),
-                    "author_is_uploader": bool(c.get("author_is_uploader")),
-                    "likes": c.get("like_count") or 0,
-                    "published": c.get("timestamp"),
-                })
-            return {"comments": comments[:limit], "comment_count": info.get("comment_count")}
+            # Le risposte restano a 0: moltiplicherebbero le richieste a YouTube
+            # e qui non c'è modo di caricarle solo per il thread che si apre.
+            "max_comments": [str(max_comments), str(max_comments), "0", "0"],
+            "comment_sort": ["top" if sort != "new" else "new"],
+        }},
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    comments = []
+    for c in (info.get("comments") or []):
+        if c.get("parent") and c.get("parent") != "root":
+            continue  # solo commenti principali, niente risposte
+        comments.append({
+            "id": c.get("id"),
+            "text": c.get("text"),
+            "author": c.get("author"),
+            "author_thumbnail": c.get("author_thumbnail"),
+            "author_channel_id": c.get("author_id"),
+            "author_is_uploader": bool(c.get("author_is_uploader")),
+            "likes": c.get("like_count") or 0,
+            "published": c.get("timestamp"),
+            "reply_count": 0,
+        })
+    return {"comments": comments, "count": info.get("comment_count")}
+
+
+async def _comments_ytdlp_page(video_id: str, sort: str, offset: int, limit: int) -> dict:
+    """Una pagina di commenti da yt-dlp, allargando la cache solo quando serve."""
+    key = (video_id, sort)
+    async with _ytdlp_comments_lock:
+        entry = _ytdlp_comments_cache.get(key)
+        if entry and time.time() - entry["at"] > _YTDLP_CACHE_TTL:
+            entry = None
+        # Serve altro materiale? Si sale di scaglione finché la pagina
+        # richiesta non è coperta (o finché YouTube non ne dà più).
+        while entry is None or (
+            not entry["exhausted"]
+            and offset + limit > len(entry["comments"])
+            and entry["tier"] < _YTDLP_TIERS[-1]
+        ):
+            tier = _YTDLP_TIERS[0] if entry is None else next(
+                (t for t in _YTDLP_TIERS if t > entry["tier"]), _YTDLP_TIERS[-1]
+            )
+            got = await asyncio.get_event_loop().run_in_executor(
+                None, _extract_comments_ytdlp, video_id, sort, tier
+            )
+            entry = {
+                "comments": got["comments"],
+                "count": got["count"],
+                "tier": tier,
+                "at": time.time(),
+                # Meno commenti del tetto richiesto = il thread è finito.
+                "exhausted": len(got["comments"]) < tier,
+            }
+            _ytdlp_comments_cache[key] = entry
+            # Ogni voce può arrivare a 2000 commenti: si tengono solo gli
+            # ultimi video guardati, il resto si può sempre riestrarre.
+            while len(_ytdlp_comments_cache) > _YTDLP_CACHE_MAX_VIDEOS:
+                _ytdlp_comments_cache.pop(next(iter(_ytdlp_comments_cache)))
+
+    page = entry["comments"][offset:offset + limit]
+    more = offset + len(page) < len(entry["comments"]) or not entry["exhausted"]
+    return {
+        "comments": page,
+        # yt-dlp riporta come comment_count quanti commenti ha estratto, non
+        # quanti ne ha il video: finché il thread non è finito quel numero
+        # sarebbe solo il tetto che gli abbiamo imposto (es. "100" su un video
+        # con due milioni di commenti), quindi è meglio non mostrarlo affatto.
+        "comment_count": entry["count"] if entry["exhausted"] else None,
+        "next_page_token": str(offset + len(page)) if (more and page) else "",
+        "source": "ytdlp",
+    }
+
+
+@app.get("/api/comments/{video_id}")
+async def get_comments(
+    video_id: str,
+    limit: int = 40,
+    sort: str = "top",              # top (più pertinenti) | new (più recenti)
+    page_token: str = "",           # vuoto = prima pagina
+    channel_id: str = "",           # canale del video: serve per l'etichetta AUTORE
+):
+    """
+    Una pagina di commenti principali. Chiamata separata da /api/watch così i
+    commenti non rallentano l'avvio del video: la pagina li carica in
+    background dopo che il player è già partito, e le pagine successive
+    arrivano quando l'utente preme "carica altri commenti".
+    """
+    sort = "new" if sort == "new" else "top"
+    limit = max(1, min(limit, 100))
+    can_comment = auth_manager.can_comment()
+
+    if auth_manager.is_authenticated():
+        try:
+            data = await auth_manager.list_comment_threads(video_id, sort, page_token, limit)
+            for c in data["comments"]:
+                if channel_id and c.get("author_channel_id") == channel_id:
+                    c["author_is_uploader"] = True
+            return {
+                "comments": data["comments"],
+                "comment_count": data["total"],
+                "next_page_token": data["next_page_token"],
+                "source": "api",
+                "can_comment": can_comment,
+                "supports_replies": True,
+            }
+        except YouTubeAPIError as ex:
+            if ex.reason in ("commentsDisabled", "videoNotFound"):
+                return {"comments": [], "comment_count": None, "next_page_token": "",
+                        "source": "api", "can_comment": False, "supports_replies": True,
+                        "error": "I commenti sono disattivati per questo video."}
+            # Quota finita, API non abilitata, token con scope vecchio: si
+            # ripiega su yt-dlp invece di lasciare la sezione vuota.
+            print(f"[comments] Data API non utilizzabile ({ex.reason}): {ex.message}")
+        except Exception as ex:
+            print(f"[comments] Data API errore: {ex}")
+
+    try:
+        out = await _comments_ytdlp_page(video_id, sort, int(page_token or 0), limit)
+        out["can_comment"] = can_comment
+        out["supports_replies"] = False
+        return out
     except Exception as ex:
         # Non deve mai bloccare la pagina video: se i commenti falliscono
         # (video con commenti disattivati, errore di estrazione) si mostra
         # semplicemente una sezione vuota invece di un errore.
-        return {"comments": [], "comment_count": None, "error": str(ex)}
+        return {"comments": [], "comment_count": None, "next_page_token": "",
+                "source": "ytdlp", "can_comment": can_comment,
+                "supports_replies": False, "error": str(ex)}
+
+
+@app.get("/api/comments/{video_id}/replies")
+async def get_comment_replies(video_id: str, parent_id: str, page_token: str = "", limit: int = 50):
+    """Risposte a un singolo commento — solo con account collegato (yt-dlp non le sa dare a richiesta)."""
+    if not auth_manager.is_authenticated():
+        raise HTTPException(403, "Le risposte richiedono un account Google collegato")
+    try:
+        data = await auth_manager.list_comment_replies(parent_id, page_token, limit)
+        return {"comments": data["comments"], "next_page_token": data["next_page_token"]}
+    except YouTubeAPIError as ex:
+        raise HTTPException(400, ex.message)
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
+
+
+class NewComment(BaseModel):
+    text: str
+    parent_id: Optional[str] = None   # valorizzato = risposta a un commento
+
+
+@app.post("/api/comments/{video_id}")
+async def create_comment(video_id: str, body: NewComment):
+    """
+    Pubblica un commento (o una risposta) a nome dell'account collegato.
+    Richiede lo scope di scrittura: chi si era collegato prima deve rifare il
+    login dalle impostazioni, altrimenti Google rifiuta con 403.
+    """
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "Il commento è vuoto")
+    if not auth_manager.is_authenticated():
+        raise HTTPException(403, "Collega un account Google per commentare")
+    if not auth_manager.can_comment():
+        raise HTTPException(403, "L'account collegato non ha il permesso di commentare: "
+                                 "ricollegalo dalle impostazioni per concederlo")
+    try:
+        if body.parent_id:
+            comment = await auth_manager.post_reply(body.parent_id, text)
+        else:
+            comment = await auth_manager.post_comment(video_id, text)
+        return {"comment": comment}
+    except YouTubeAPIError as ex:
+        if ex.reason in ("insufficientPermissions", "forbidden"):
+            raise HTTPException(403, "Permesso negato da YouTube: ricollega l'account dalle impostazioni")
+        if ex.reason == "commentsDisabled":
+            raise HTTPException(400, "I commenti sono disattivati per questo video")
+        if ex.reason in ("quotaExceeded", "rateLimitExceeded"):
+            raise HTTPException(429, "Quota giornaliera della YouTube Data API esaurita")
+        raise HTTPException(400, ex.message)
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
 
 
 def _subtitle_tracks(info: dict) -> dict:
@@ -569,6 +744,9 @@ async def auth_status():
     cookie_status = auth_manager.get_cookie_status()
     return {
         "authenticated": auth_manager.is_authenticated(),
+        # False su un account collegato prima che esistesse la pubblicazione
+        # dei commenti: il suo token non ha lo scope di scrittura.
+        "can_comment": auth_manager.can_comment(),
         "subscription_count": len(auth_manager.get_subscriptions()),
         "cookie": cookie_status,
         "sync": scheduler.get_status(),
@@ -637,6 +815,17 @@ async def oauth_callback_page(code: str = None, error: str = None):
 async def logout():
     auth_manager.logout()
     return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me():
+    """
+    Canale YouTube dell'account collegato: nome e avatar mostrati nella
+    casella "commenta come". Endpoint a parte e non in /api/auth/status
+    perché costa una chiamata di rete e serve solo alla pagina video.
+    """
+    me = await auth_manager.get_my_channel()
+    return {"channel": me, "can_comment": auth_manager.can_comment()}
 
 
 # ─── Subscriptions ────────────────────────────────────────────────────────────
