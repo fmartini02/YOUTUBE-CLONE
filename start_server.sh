@@ -206,5 +206,8 @@ echo "  Premi Ctrl+C per fermare"
 echo ""
 
 # ── Avvia server ──────────────────────────────────────────────
+echo "🧹 Pulizia porta 8090..."
+fuser -k 8090/tcp 2>/dev/null || true
+
 cd "$DIR/server"
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload

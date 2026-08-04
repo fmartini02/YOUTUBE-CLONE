@@ -42,6 +42,11 @@ echo.
 echo   Assicurati che telefono e PC siano sulla stessa WiFi
 echo.
 
+echo Pulizia porta 8090...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8090') do (
+    taskkill /PID %%a /F >nul 2>&1
+)
+
 cd server
-python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
 pause
