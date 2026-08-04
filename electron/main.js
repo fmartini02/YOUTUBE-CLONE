@@ -1,5 +1,5 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
-const { spawn, exec } = require("child_process");
+const { app, BrowserWindow } = require("electron");
+const { spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
 
@@ -9,7 +9,7 @@ let serverProcess;
 // ── Start Python server ───────────────────────────────────────────────────────
 function startServer() {
   const serverDir = path.join(__dirname, "..", "server");
-  serverProcess = spawn("python3", ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"], {
+  serverProcess = spawn("python3", ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8090"], {
     cwd: serverDir,
     stdio: "pipe",
   });
@@ -21,7 +21,7 @@ function startServer() {
 function waitForServer(retries = 30) {
   return new Promise((resolve, reject) => {
     function check() {
-      http.get("http://localhost:8080/api/health", res => {
+      http.get("http://localhost:8090/api/health", res => {
         if (res.statusCode === 200) resolve();
         else retry();
       }).on("error", () => retry());
@@ -58,44 +58,15 @@ async function createWindow() {
 
   try {
     await waitForServer();
-    mainWindow.loadURL("http://localhost:8080");
+    mainWindow.loadURL("http://localhost:8090");
     // Inject electron flag
     mainWindow.webContents.on("did-finish-load", () => {
-      mainWindow.webContents.executeJavaScript(`
-        window.__YTPROXY_ELECTRON__ = true;
-        window.__ytproxy_open_vlc = (url, title) => {
-          window.__electron_ipc.openVlc(url, title);
-        };
-      `);
+      mainWindow.webContents.executeJavaScript(`window.__YTPROXY_ELECTRON__ = true;`);
     });
   } catch (e) {
     mainWindow.loadURL("data:text/html,<html style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'><div>Errore: server non avviato. Controlla che Python e yt-dlp siano installati.</div></html>");
   }
 }
-
-// ── IPC: open in VLC ──────────────────────────────────────────────────────────
-ipcMain.handle("open-vlc", (event, url, title) => {
-  const vlcPaths = {
-    win32: ["C:\\Program Files\\VideoLAN\\VLC\\vlc.exe", "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe"],
-    darwin: ["/Applications/VLC.app/Contents/MacOS/VLC"],
-    linux: ["vlc", "/usr/bin/vlc", "/snap/bin/vlc"],
-  };
-
-  const candidates = vlcPaths[process.platform] || ["vlc"];
-
-  function tryNext(i) {
-    if (i >= candidates.length) {
-      // Fallback: open in default app
-      shell.openExternal(url);
-      return;
-    }
-    const proc = spawn(candidates[i], [url, `--meta-title=${title}`], { detached: true, stdio: "ignore" });
-    proc.on("error", () => tryNext(i + 1));
-    proc.unref();
-  }
-
-  tryNext(0);
-});
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(createWindow);

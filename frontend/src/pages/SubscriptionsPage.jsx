@@ -1,12 +1,20 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "../api";
+import VideoCard from "../components/VideoCard";
+import { useChannelAvatars } from "../hooks/useChannelAvatars";
+import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+
+const PAGE_SIZE = 30;
 
 export default function SubscriptionsPage({ navigate }) {
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [feed, setFeed] = useState([]);
   const [feedLoading, setFeedLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [view, setView] = useState("feed"); // feed | channels
+  const avatars = useChannelAvatars(feed);
 
   useEffect(() => {
     api.subscriptions().then(d => {
@@ -15,11 +23,33 @@ export default function SubscriptionsPage({ navigate }) {
     }).catch(() => setLoading(false));
 
     setFeedLoading(true);
-    api.subsFeed().then(d => {
+    api.subsFeed(PAGE_SIZE, 0).then(d => {
       setFeed(d.results || []);
+      setHasMore(!!d.has_more);
       setFeedLoading(false);
     }).catch(() => setFeedLoading(false));
   }, []);
+
+  const loadMore = useCallback(() => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    api.subsFeed(PAGE_SIZE, feed.length).then(d => {
+      setFeed(f => {
+        // Dedup per id: senza, chiavi React duplicate romperebbero la griglia.
+        const seen = new Set(f.map(v => v.id));
+        return [...f, ...(d.results || []).filter(v => !seen.has(v.id))];
+      });
+      setHasMore(!!d.has_more);
+      setLoadingMore(false);
+    }).catch(() => setLoadingMore(false));
+  }, [feed.length, hasMore, loadingMore]);
+
+  const sentinelRef = useInfiniteScroll({
+    // Solo nella vista feed: la lista canali non è paginata.
+    hasMore: hasMore && view === "feed",
+    loading: feedLoading || loadingMore,
+    onLoadMore: loadMore,
+  });
 
   if (loading) return <div style={{ color: "var(--text2)" }}>Caricamento iscrizioni...</div>;
 
@@ -37,7 +67,7 @@ export default function SubscriptionsPage({ navigate }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Abbonamenti</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Iscrizioni</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <button className={`chip${view === "feed" ? " active" : ""}`} onClick={() => setView("feed")}>Feed</button>
           <button className={`chip${view === "channels" ? " active" : ""}`} onClick={() => setView("channels")}>Canali ({subs.length})</button>
@@ -52,23 +82,28 @@ export default function SubscriptionsPage({ navigate }) {
             Nessun video nel feed. Carica i cookie YouTube per il feed personalizzato.
           </div>
         ) : (
-          <div className="video-grid">
-            {feed.map(v => (
-              <div key={v.id} className="video-card" onClick={() => navigate("video", { videoId: v.id })}>
-                <div className="thumbnail-wrap">
-                  <img src={v.thumbnail} alt={v.title} loading="lazy" />
-                  {v.duration && <span className="duration">{v.duration}</span>}
-                </div>
-                <div className="video-info">
-                  <div className="avatar">{(v.channel||"?")[0]}</div>
-                  <div className="video-meta">
-                    <div className="video-title">{v.title}</div>
-                    <div className="video-channel">{v.channel}</div>
+          <>
+            <div className="video-grid">
+              {feed.map(v => (
+                <VideoCard key={v.id} video={v} navigate={navigate} avatarUrl={avatars[v.channel_id]} />
+              ))}
+            </div>
+
+            {/* Sentinella: quando entra nel viewport scatta il caricamento */}
+            <div ref={sentinelRef} style={{ height: 1 }} />
+
+            {loadingMore && (
+              <div className="video-grid" style={{ marginTop: 40 }}>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="skeleton-card">
+                    <div className="skeleton skeleton-thumb" />
+                    <div className="skeleton skeleton-line" />
+                    <div className="skeleton skeleton-line short" />
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )
       )}
 

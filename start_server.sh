@@ -195,8 +195,8 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  ✅ YTProxy pronto!"
 echo ""
-echo "  💻 Questo PC:     http://localhost:8080"
-echo "  📱 Telefono/TV:   http://$LOCAL_IP:8080"
+echo "  💻 Questo PC:     http://localhost:8090"
+echo "  📱 Telefono/TV:   http://$LOCAL_IP:8090"
 echo ""
 echo "  ⚠️  Telefono e PC devono essere sulla stessa WiFi"
 echo "  💡 Per accedere fuori casa: usa Tailscale"
@@ -207,4 +207,4 @@ echo ""
 
 # ── Avvia server ──────────────────────────────────────────────
 cd "$DIR/server"
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
