@@ -18,6 +18,19 @@ import { api, timeAgo, formatViews } from "../api";
 
 const PAGE_SIZE = 40;
 
+/**
+ * apiFetch rilancia il corpo della risposta così com'è, che per FastAPI è
+ * {"detail": "..."}: qui serve la sola frase, è quella che finisce nel toast.
+ */
+function errorMessage(e, fallback) {
+  const raw = String(e?.message || e || "");
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.detail) return String(parsed.detail);
+  } catch { /* non era JSON: si usa il testo così com'è */ }
+  return raw.slice(0, 160) || fallback;
+}
+
 function Avatar({ src, name, size = 36 }) {
   return (
     <div className="channel-avatar" style={{ width: size, height: size, fontSize: size / 2.8, flexShrink: 0, overflow: "hidden" }}>
@@ -108,7 +121,7 @@ function CommentItem({ c, videoId, me, canComment, supportsReplies, onToast }) {
       onToast("💬 Risposta pubblicata");
       return true;
     } catch (e) {
-      onToast(String(e.message || e).slice(0, 160));
+      onToast(errorMessage(e, "Impossibile pubblicare la risposta"));
       return false;
     } finally {
       setPosting(false);
@@ -262,7 +275,7 @@ export default function Comments({ videoId, channelId, authStatus, onToast }) {
       toast("💬 Commento pubblicato");
       return true;
     } catch (e) {
-      toast(String(e.message || e).slice(0, 160));
+      toast(errorMessage(e, "Impossibile pubblicare il commento"));
       return false;
     } finally {
       setPosting(false);
