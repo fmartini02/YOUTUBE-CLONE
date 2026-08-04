@@ -39,6 +39,7 @@ OAUTH_REDIRECT_URI = f"http://localhost:{SERVER_PORT}/api/auth/callback-page"
 # ─── YouTube Data API (no key needed: scraping via yt-dlp) ───────────────────
 
 import shutil as _shutil
+import time as _time
 _NODE_PATH = _shutil.which("node") or "/usr/bin/node"
 
 def ydl_opts_base():
@@ -579,9 +580,52 @@ async def watch(video_id: str, quality: str = "best"):
 
 _FFMPEG_BIN = _shutil.which("ffmpeg") or "ffmpeg"
 
+# Cache degli URL di formato usati da /api/mux. Serve al seek: saltare in un
+# altro punto del video significa riavviare ffmpeg, e senza cache ogni salto
+# ripagherebbe l'estrazione yt-dlp (1-3 secondi) prima ancora di iniziare a
+# scaricare. Gli URL googlevideo restano validi diverse ore, ma 30 minuti
+# tengono il margine largo.
+_mux_fmt_cache: dict = {}
+_MUX_FMT_CACHE_TTL = 1800
+
+
+def _mux_formats(video_id: str, quality: str, compat: bool):
+    """URL video+audio (o singolo URL progressivo) per /api/mux, con cache."""
+    key = (video_id, quality, compat)
+    hit = _mux_fmt_cache.get(key)
+    if hit and _time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
+        return hit[1]
+
+    # compat=1 (usato dal Chromecast): forza H.264+AAC invece del meglio
+    # assoluto, che sarebbe AV1+Opus e la TV non lo riprodurrebbe.
+    selector = _cast_format_selector(quality) if compat else _adaptive_format_selector(quality)
+    opts = {**ydl_opts_base(), "extract_flat": False, "format": selector}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+
+    requested = info.get("requested_formats")
+    if requested and len(requested) >= 2:
+        video_fmt = next((f for f in requested if f.get("vcodec") != "none"), requested[0])
+        audio_fmt = next((f for f in requested if f.get("acodec") != "none" and f.get("vcodec") == "none"), requested[-1])
+        urls = (video_fmt["url"], audio_fmt["url"])
+    else:
+        url = info.get("url")
+        if not url:
+            return None
+        urls = (url, None)
+
+    _mux_fmt_cache[key] = (_time.time(), urls)
+    # Potatura opportunistica: senza, la cache cresce per tutta la vita del
+    # processo su un server che resta acceso per giorni.
+    if len(_mux_fmt_cache) > 64:
+        now = _time.time()
+        for k in [k for k, v in _mux_fmt_cache.items() if now - v[0] >= _MUX_FMT_CACHE_TTL]:
+            _mux_fmt_cache.pop(k, None)
+    return urls
+
 
 @app.get("/api/mux/{video_id}")
-async def mux_stream(video_id: str, quality: str = "best", compat: bool = False):
+async def mux_stream(video_id: str, quality: str = "best", compat: bool = False, start: float = 0):
     """
     Streaming ad alta qualità: unisce al volo con ffmpeg i flussi video e
     audio separati che YouTube offre oltre i 360p (vedi _adaptive_format_selector),
@@ -589,11 +633,27 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False)
     Solo remux (-c copy, nessuna transcodifica) — leggero anche su hardware
     modesto come un Raspberry Pi.
 
-    Costo noto: essendo un flusso generato in tempo reale (niente
-    Content-Length/Range), il browser non può saltare avanti nella barra oltre
-    quello che ha già bufferizzato — può solo tornare indietro nel buffer
-    ricevuto. Su rete locale il bitrate più alto è "gratis"; da remoto (es.
-    Tailscale) il traffico passa dal PC, quindi pesa sulla sua banda in upload.
+    Il flusso è generato in tempo reale, quindi non ha né Content-Length né
+    supporto Range: il browser da solo non può saltare avanti nella barra oltre
+    quello che ha già bufferizzato. Da qui il parametro `start`: invece di
+    chiedere al browser di cercare dentro un flusso che non è cercabile, il
+    player ricomincia il flusso dal secondo richiesto (ffmpeg `-ss` prima degli
+    input, che usa il Range degli URL googlevideo e quindi non riscarica il
+    video da capo) e mostra `start + currentTime` come posizione. Il risultato
+    per l'utente è una barra normale, con durata intera e seek in entrambe le
+    direzioni.
+
+    `-copypriorss 0` è quello che rende il salto preciso. In sola copia ffmpeg
+    per default tiene il keyframe che precede il punto richiesto e poi salta al
+    punto vero: il risultato è un flusso che comincia con un fotogramma fermo
+    per tutta la distanza fra i due (misurati fino a 7 secondi di immagine
+    congelata) e un audio che parte ~10s prima del punto chiesto. Scartando quel
+    keyframe il flusso comincia dove è stato chiesto: misurato, audio esatto al
+    centesimo e video entro mezzo secondo. Video e audio ricevono lo stesso
+    `-ss`, quindi il sincronismo fra i due resta invariato.
+
+    Su rete locale il bitrate più alto è "gratis"; da remoto (es. Tailscale) il
+    traffico passa dal PC, quindi pesa sulla sua banda in upload.
 
     Frammentazione a tempo fisso (frag_duration), non per keyframe: i video
     YouTube hanno spesso il secondo keyframe a 5-6s dall'inizio, e con
@@ -603,47 +663,73 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False)
     dai keyframe del sorgente (misurato: da 10-15s a 1-2s di avvio).
     """
     try:
-        # compat=1 (usato dal Chromecast): forza H.264+AAC invece del meglio
-        # assoluto, che sarebbe AV1+Opus e la TV non lo riprodurrebbe.
-        selector = _cast_format_selector(quality) if compat else _adaptive_format_selector(quality)
-        opts = {**ydl_opts_base(), "extract_flat": False, "format": selector}
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        urls = await asyncio.get_running_loop().run_in_executor(
+            None, _mux_formats, video_id, quality, compat
+        )
     except Exception as ex:
         raise HTTPException(500, str(ex))
+    if not urls:
+        raise HTTPException(404, "Nessun formato disponibile")
 
+    video_url, audio_url = urls
+    start = max(0.0, start)
+    # -ss PRIMA di -i: seek sull'input (una richiesta Range al CDN) invece che
+    # scorrimento del flusso decodificato, che a video lunghi costerebbe minuti.
+    seek = ["-ss", f"{start:.3f}"] if start > 0 else []
+    # Opzione di output (dopo gli input): scarta il keyframe precedente al
+    # punto di seek. Solo quando si cerca davvero — a start=0 non c'è nulla da
+    # scartare e non vale la pena toccare il percorso di avvio.
+    prior = ["-copypriorss", "0"] if start > 0 else []
     movflags = "empty_moov+default_base_moof"
-    requested = info.get("requested_formats")
-    if requested and len(requested) >= 2:
-        video_fmt = next((f for f in requested if f.get("vcodec") != "none"), requested[0])
-        audio_fmt = next((f for f in requested if f.get("acodec") != "none" and f.get("vcodec") == "none"), requested[-1])
+
+    if audio_url:
         cmd = [
             _FFMPEG_BIN, "-loglevel", "error",
-            "-i", video_fmt["url"], "-i", audio_fmt["url"],
-            "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+            *seek, "-i", video_url,
+            *seek, "-i", audio_url,
+            "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", *prior,
             "-movflags", movflags, "-frag_duration", "1000000",
             "-f", "mp4", "pipe:1",
         ]
     else:
-        url = info.get("url")
-        if not url:
-            raise HTTPException(404, "Nessun formato disponibile")
         cmd = [
             _FFMPEG_BIN, "-loglevel", "error",
-            "-i", url, "-c", "copy",
+            *seek, "-i", video_url, "-c", "copy", *prior,
             "-movflags", movflags, "-frag_duration", "1000000",
             "-f", "mp4", "pipe:1",
         ]
 
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+    # stderr letto in parallelo, non scartato: se ffmpeg muore subito il client
+    # vede solo un flusso vuoto, e senza questo messaggio nei log non c'è modo
+    # di sapere perché. Va consumato mentre gira, altrimenti a buffer pieno
+    # ffmpeg si blocca.
+    errbuf: list = []
+
+    async def drain_err():
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            errbuf.append(line.decode(errors="replace").rstrip())
+            del errbuf[:-20]
+
+    err_task = asyncio.create_task(drain_err())
 
     async def stream_gen():
+        sent = 0
         try:
             while True:
                 chunk = await proc.stdout.read(65536)
                 if not chunk:
                     break
+                sent += len(chunk)
                 yield chunk
+            if sent == 0:
+                await asyncio.wait_for(err_task, timeout=2)
+                print(f"[mux] ffmpeg non ha prodotto nulla per {video_id} "
+                      f"(quality={quality}, start={start}): " + " | ".join(errbuf[-5:]))
         finally:
             # Il client può disconnettersi a metà (cambio pagina, seek che
             # ricarica il player): senza questo ffmpeg resterebbe orfano a
@@ -651,6 +737,7 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False)
             if proc.returncode is None:
                 proc.kill()
                 await proc.wait()
+            err_task.cancel()
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
     # "Range: bytes=0-" (come fa sempre per i video) e riceve un 200 invece

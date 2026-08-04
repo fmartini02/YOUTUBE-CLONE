@@ -241,6 +241,19 @@ body {
 .video-page-layout { display: flex; gap: 24px; }
 .video-main { flex: 1; min-width: 0; }
 
+/* ── Modalità cinema ───────────────────────────────────────────────────
+   Come su YouTube: il player prende tutta la larghezza dell'area contenuti e
+   i video correlati scendono sotto, invece di stare nella colonna a destra. */
+.video-page-layout.theater { flex-direction: column; }
+.video-page-layout.theater .related-sidebar {
+  width: 100%; max-width: none;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px 16px; align-content: start;
+}
+/* Il titolo "Video correlati" sta su una riga sua, non dentro una colonna. */
+.video-page-layout.theater .related-sidebar > h3 { grid-column: 1 / -1; }
+.video-page-layout.theater .player-wrap video { max-height: 78vh; }
+
 .player-wrap {
   width: 100%; background: #000;
   border-radius: var(--radius); overflow: hidden;
@@ -252,8 +265,8 @@ body {
 }
 
 /* A schermo intero il contenitore (non solo il <video>) diventa il target:
-   così l'overlay impostazioni resta visibile invece di sparire — vince sullo
-   style inline max-height:85vh, che altrimenti lascerebbe bande nere sopra/sotto. */
+   così la barra dei controlli resta visibile invece di sparire — vince sullo
+   style inline max-height, che altrimenti lascerebbe bande nere sopra/sotto. */
 .player-wrap:fullscreen {
   display: flex; align-items: center; justify-content: center;
   width: 100vw; height: 100vh; border-radius: 0;
@@ -262,29 +275,106 @@ body {
   max-height: 100vh !important; height: 100%; width: 100%; object-fit: contain;
 }
 
-/* ── Overlay impostazioni player (qualità/sottotitoli/schermo intero) ──── */
-.player-settings {
-  position: absolute; top: 12px; right: 12px; z-index: 20;
-  display: flex; gap: 6px;
-  opacity: 0; transition: opacity 0.2s;
+/* ── Barra dei controlli ───────────────────────────────────────────────── */
+.player-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
+  padding: 0 12px 6px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.75) 60%);
+  opacity: 1; transition: opacity 0.2s;
 }
-.player-wrap:hover .player-settings,
-.player-wrap:fullscreen .player-settings { opacity: 1; }
+/* I controlli spariscono solo mentre il video va e il puntatore è fermo:
+   in pausa restano, come su YouTube. */
+.player-wrap.hide-controls .player-bar { opacity: 0; pointer-events: none; }
+.player-wrap.hide-controls { cursor: none; }
 
-.player-settings-btn {
-  background: rgba(0,0,0,0.6); border: none; color: #fff;
-  width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
+.player-progress {
+  position: relative; height: 18px; display: flex; align-items: center;
+  cursor: pointer; touch-action: none;
+}
+.player-progress-track {
+  position: relative; width: 100%; height: 4px;
+  background: rgba(255,255,255,0.25); border-radius: 2px;
+  transition: height 0.1s;
+}
+.player-progress:hover .player-progress-track { height: 6px; }
+.player-progress-buffer {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(255,255,255,0.45); border-radius: 2px;
+}
+.player-progress-played {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent); border-radius: 2px;
+}
+.player-progress-handle {
+  position: absolute; top: 50%; width: 13px; height: 13px;
+  margin-left: -6.5px; border-radius: 50%; background: var(--accent);
+  transform: translateY(-50%) scale(0);
+  transition: transform 0.1s;
+}
+.player-progress:hover .player-progress-handle { transform: translateY(-50%) scale(1); }
+.player-progress-tip {
+  position: absolute; bottom: 22px; transform: translateX(-50%);
+  background: rgba(0,0,0,0.85); color: #fff; font-size: 12px;
+  padding: 2px 6px; border-radius: 4px; pointer-events: none; white-space: nowrap;
+}
+
+.player-buttons {
+  display: flex; align-items: center; gap: 2px;
+  padding-top: 2px;
+}
+.player-buttons-right { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+
+.player-btn {
+  background: none; border: none; color: #fff; cursor: pointer;
+  width: 38px; height: 38px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  transition: background 0.2s;
+  opacity: 0.92; transition: opacity 0.15s, background 0.15s;
 }
-.player-settings-btn:hover { background: rgba(0,0,0,0.85); }
+.player-btn:hover { opacity: 1; background: rgba(255,255,255,0.12); }
+.player-btn .material-symbols-outlined { font-size: 24px; }
+/* Sottolineatura del CC acceso: stesso segnale che usa YouTube. */
+.player-btn.on { position: relative; }
+.player-btn.on::after {
+  content: ""; position: absolute; bottom: 6px; left: 9px; right: 9px;
+  height: 2px; background: #fff; border-radius: 1px;
+}
 
+.player-volume { display: flex; align-items: center; }
+.player-volume-slider {
+  width: 0; opacity: 0; padding: 0; margin: 0;
+  transition: width 0.15s, opacity 0.15s, margin 0.15s;
+  accent-color: #fff; cursor: pointer;
+}
+.player-volume:hover .player-volume-slider,
+.player-volume-slider:focus { width: 70px; opacity: 1; margin: 0 6px 0 2px; }
+
+.player-time { font-size: 13px; color: #fff; margin-left: 10px; font-variant-numeric: tabular-nums; }
+
+.player-spinner {
+  position: absolute; top: 50%; left: 50%; z-index: 15;
+  margin: -24px 0 0 -24px;
+  width: 48px; height: 48px; border: 3px solid rgba(255,255,255,0.25);
+  border-top-color: #fff; border-radius: 50%;
+  animation: spin 0.8s linear infinite; pointer-events: none;
+}
+
+.player-big-play {
+  position: absolute; top: 50%; left: 50%; z-index: 15;
+  transform: translate(-50%, -50%);
+  width: 68px; height: 68px; border-radius: 50%; border: none;
+  background: rgba(0,0,0,0.55); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.player-big-play:hover { background: var(--accent); }
+.player-big-play .material-symbols-outlined { font-size: 40px; }
+
+/* ── Menu impostazioni (qualità/sottotitoli) ───────────────────────────── */
 .player-settings-backdrop {
   position: absolute; inset: 0; z-index: 21;
 }
 
 .player-settings-menu {
-  position: absolute; top: 52px; right: 12px; z-index: 22;
+  position: absolute; bottom: 62px; right: 12px; z-index: 22;
   background: rgba(20,20,20,0.97); border-radius: 10px;
   padding: 8px 0; min-width: 200px; max-height: 60vh; overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0,0,0,0.5);
