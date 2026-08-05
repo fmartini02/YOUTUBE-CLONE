@@ -37,6 +37,11 @@ COOKIE_FEED_CACHE_TTL = 300  # 5 minuti: evita di ri-scaricare da YouTube ad ogn
 FEED_MAX = 10000               # tetto di sicurezza; in pratica finisce prima YouTube
 FEED_CHUNK = 30                # video per blocco (≈ 1 richiesta di continuazione)
 FEED_CACHE_TTL = 1800          # 30 min: dopo tanto, un nuovo scroll riparte da capo
+# Quante volte riaprire la home quando YouTube smette di dare continuazioni
+# (vedi LazyFeed._rigenera). Ogni riapertura è un'estrazione intera e rende
+# sempre meno video nuovi, quindi il numero è basso di proposito: si ferma da
+# sola anche prima, appena una riapertura non porta nulla di nuovo.
+FEED_REFILL_MAX = 5
 RELATED_CHUNK = 25             # il mix di YouTube arriva a blocchi di ~25
 RELATED_MAX = 2000             # nessuno scorre così tanto la sidebar dei correlati
 # Il ripiego a ricerca non ha continuazioni infinite come il Mix: oltre questo
@@ -175,26 +180,75 @@ class LazyFeed:
 
     Attenzione: il generatore è codice bloccante e non è thread-safe, quindi
     extend() va chiamato da un solo thread alla volta (vedi il lock nel chiamante).
+
+    Con `refill=True` il feed non finisce quando finisce il generatore: viene
+    riaperto daccapo (vedi _rigenera). Serve alla home, dove YouTube chiude le
+    continuazioni molto prima di aver finito le raccomandazioni.
     """
 
-    def __init__(self, url: str, opts: dict):
+    def __init__(self, url: str, opts: dict, refill: bool = False):
+        self.url = url
+        self._opts = opts
+        self._refill = refill
+        self._riaperture = 0
+        # Gli id già serviti: senza, una riapertura ripeterebbe la maggior
+        # parte del feed precedente (vedi _rigenera).
+        self._visti: set = set()
+        self._visti_all_ultima_riapertura = 0
+        self.items: list = []
+        self.exhausted = False
+        self.created_at = time.time()
+        self._logout_segnalato = False
+        self._ydl = None
+        self._apri()
+
+    def _apri(self):
+        """Apre (o riapre) l'estrazione: una richiesta a YouTube, poi il generatore."""
         import yt_dlp
-        self._ydl = yt_dlp.YoutubeDL(opts)
+        self._ydl = yt_dlp.YoutubeDL(self._opts)
         # process=False evita che yt-dlp materializzi l'intera lista: è ciò che
         # mantiene pigro il generatore.
-        info = self._ydl.extract_info(url, download=False, process=False)
+        info = self._ydl.extract_info(self.url, download=False, process=False)
         self._iter = iter((info or {}).get("entries") or [])
         # Metadati della lista (nome canale, iscritti, loghi...): arrivano già
         # con questa estrazione, quindi conservarli evita una seconda richiesta
         # a YouTube per l'intestazione della pagina canale. Senza "entries",
         # che è il generatore consumato pigramente qui sopra.
         self.info = {k: v for k, v in (info or {}).items() if k != "entries"}
-        self.url = url
-        self.items: list = []
-        self.exhausted = False
-        self.created_at = time.time()
-        self._logout_segnalato = False
         self._persist_cookies()
+
+    def _rigenera(self) -> bool:
+        """
+        Riapre il feed daccapo per continuare oltre la fine del generatore.
+        True se c'è una nuova estrazione da consumare.
+
+        YouTube smette di dare continuazioni sulla home molto presto — misurato:
+        ~200-350 video, cioè meno di mezz'ora di scorrimento — ma NON perché
+        abbia finito le raccomandazioni: una nuova estrazione riparte con una
+        lista in buona parte diversa (misurato: ~100 video mai visti su ~280).
+        È lo stesso comportamento della home nel browser, che a un certo punto
+        si aggiorna con altri consigli. Le voci già servite vengono saltate
+        grazie a `_visti`, altrimenti la seconda estrazione ripeterebbe quasi
+        tutta la prima e lo scroll sembrerebbe fermo.
+
+        Due freni, perché ogni riapertura è un'estrazione intera (decine di
+        richieste a YouTube): un tetto al numero di riaperture, e lo stop
+        automatico quando l'ultima non ha portato niente di nuovo — segno che
+        YouTube sta ridando la stessa lista e insistere è solo traffico.
+        """
+        if not self._refill or self._riaperture >= FEED_REFILL_MAX:
+            return False
+        if self._riaperture and len(self._visti) == self._visti_all_ultima_riapertura:
+            return False
+        self._riaperture += 1
+        self._visti_all_ultima_riapertura = len(self._visti)
+        self.close()
+        try:
+            self._apri()
+        except Exception as e:
+            print(f"[auth] Riapertura feed {self.url} fallita: {e}")
+            return False
+        return True
 
     def _persist_cookies(self):
         """
@@ -233,15 +287,21 @@ class LazyFeed:
         """Tira fuori altri `count` video dal generatore. Ritorna quanti ne ha aggiunti."""
         import itertools
         added = 0
-        # Le voci scartate (Mix/playlist) non contano verso il totale richiesto,
-        # altrimenti un blocco pieno di Mix restituirebbe una pagina mezza vuota.
+        # Le voci scartate (Mix/playlist, e i doppioni dopo una riapertura) non
+        # contano verso il totale richiesto, altrimenti un blocco pieno di Mix
+        # restituirebbe una pagina mezza vuota.
         while added < count and not self.exhausted:
             batch = list(itertools.islice(self._iter, count - added))
             if not batch:
+                # Generatore finito: o si riapre il feed, o il feed è finito
+                # davvero (vedi _rigenera).
+                if self._rigenera():
+                    continue
                 self.exhausted = True
                 break
             for e in batch:
-                if is_video_entry(e):
+                if is_video_entry(e) and e["id"] not in self._visti:
+                    self._visti.add(e["id"])
                     self.items.append(map_video_entry(e))
                     added += 1
         # Ogni blocco è una richiesta a YouTube, che può aver ruotato i cookie.
@@ -821,7 +881,7 @@ class AuthManager:
 
     async def _lazy_page(self, key: str, url: str, offset: int, limit: int,
                          opts: dict, chunk: int, cap: int,
-                         with_info: bool = False) -> dict:
+                         with_info: bool = False, refill: bool = False) -> dict:
         """
         Una pagina di un feed estratto pigramente, tenendo vivo il generatore
         di yt-dlp fra una richiesta e l'altra (vedi LazyFeed).
@@ -835,6 +895,10 @@ class AuthManager:
         (per il canale: nome, iscritti, logo). Vengono letti anche quando il
         feed è vuoto e quindi già scartato, perché servono a intestare la
         pagina pure in quel caso.
+
+        Con `refill` il feed si riapre invece di finire (vedi LazyFeed): ha
+        senso solo dove una nuova estrazione dà una lista diversa, cioè la
+        home. Riaprire un canale o un Mix ridarebbe gli stessi video.
         """
         lock = self._feed_locks.setdefault(key, asyncio.Lock())
         # Un solo estrattore alla volta per feed: il generatore di yt-dlp non è
@@ -851,7 +915,7 @@ class AuthManager:
                 if feed is not None:
                     feed.close()
                     self._feeds.pop(key, None)
-                feed = await self._open_lazy_feed(url, opts)
+                feed = await self._open_lazy_feed(url, opts, refill)
                 if feed is None:
                     vuoto = {"results": [], "total": 0, "has_more": False}
                     return {**vuoto, "info": {}} if with_info else vuoto
@@ -937,14 +1001,14 @@ class AuthManager:
             self._feed_locks.pop(old_key, None)
             old.close()
 
-    async def _open_lazy_feed(self, url: str, opts: dict):
+    async def _open_lazy_feed(self, url: str, opts: dict, refill: bool = False):
         """Apre il feed (prima richiesta a YouTube). None se fallisce."""
         try:
             # extract_info è bloccante: in un thread separato, altrimenti
             # fermerebbe l'intero event loop di FastAPI (niente riproduzione,
             # niente ricerche) per tutta la durata dell'estrazione.
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, lambda: LazyFeed(url, opts))
+            return await loop.run_in_executor(None, lambda: LazyFeed(url, opts, refill))
         except Exception as e:
             print(f"[auth] Errore apertura feed {url}: {e}")
             return None
@@ -970,9 +1034,13 @@ class AuthManager:
         # "https://www.youtube.com/" da loggati è un redirect verso questa
         # stessa URL: in modalità extract_flat yt-dlp non lo segue da solo e
         # ritorna solo il riferimento al redirect, senza video.
+        # refill: YouTube chiude le continuazioni della home dopo poche
+        # centinaia di video, ma riaprendo il feed ne dà altri (vedi
+        # LazyFeed._rigenera). Senza, lo scroll della home finiva lì.
         page = await self._lazy_page(
             "home", "https://www.youtube.com/feed/recommended", offset, limit,
             {**ydl_opts_base_fn(), "cookiefile": cookie_path}, FEED_CHUNK, FEED_MAX,
+            refill=True,
         )
         if not page["total"]:
             # Cookie presenti e in apparenza validi, ma YouTube non ha dato
