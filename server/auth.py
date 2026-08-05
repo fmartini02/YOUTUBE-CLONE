@@ -88,6 +88,21 @@ def _timestamp_to_upload_date(ts) -> Optional[str]:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
 
 
+# Cookie che distinguono una sessione YouTube vera da un profilo solo-Google.
+# Contano unicamente sul dominio youtube.com: gli stessi nomi su google.com
+# ci sono anche in un profilo che su YouTube non ha mai messo piede, e per
+# YouTube quel profilo è anonimo.
+AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "LOGIN_INFO", "SAPISID"}
+
+
+def youtube_auth_cookies(names_by_domain) -> set:
+    """Quali cookie di autenticazione YouTube (prima parte) sono presenti."""
+    return {
+        name for domain, name in names_by_domain
+        if domain.endswith("youtube.com") and name in AUTH_COOKIE_NAMES
+    }
+
+
 def is_video_entry(e) -> bool:
     """
     Scarta le voci che non sono video singoli. I feed di YouTube includono
@@ -137,11 +152,13 @@ class LazyFeed:
         self.items: list = []
         self.exhausted = False
         self.created_at = time.time()
+        self._logout_segnalato = False
         self._persist_cookies()
 
     def _persist_cookies(self):
         """
-        Riscrive su disco i cookie aggiornati da YouTube.
+        Riscrive su disco i cookie aggiornati da YouTube — ma solo finché
+        restano cookie di una sessione valida.
 
         Ad ogni richiesta YouTube ruota alcuni cookie di sessione (SIDCC e
         simili) e si aspetta che il client usi i nuovi. yt-dlp lo fa in memoria
@@ -149,9 +166,25 @@ class LazyFeed:
         l'istanza resta viva a lungo, senza questa chiamata continueremmo a
         ripartire da cookie ormai vecchi — ed è così che la sessione viene
         invalidata da YouTube.
+
+        Il controllo prima di scrivere serve al caso opposto, ed è il motivo
+        per cui la home poteva svuotarsi da sola e non tornare più: quando
+        YouTube decide di invalidare la sessione manda dei Set-Cookie che
+        scadono i cookie di autenticazione, yt-dlp li toglie dal jar e questo
+        salvataggio scriveva il logout sul file. Da lì in poi cookies.txt era
+        anonimo per sempre — reimportarlo lo riparava per qualche richiesta, poi
+        succedeva di nuovo. Se l'autenticazione è sparita dal jar, il file
+        resta com'è: quei cookie sono l'unica copia che abbiamo.
         """
         try:
-            self._ydl.save_cookies()
+            jar = self._ydl.cookiejar
+            if not youtube_auth_cookies((c.domain, c.name) for c in jar):
+                if not self._logout_segnalato:
+                    self._logout_segnalato = True
+                    print("[auth] YouTube ha invalidato la sessione: cookies.txt "
+                          "lasciato intatto. Reimporta i cookie dalle Impostazioni.")
+                return
+            jar.save()
         except Exception as e:
             print(f"[auth] Impossibile salvare i cookie aggiornati: {e}")
 
@@ -596,7 +629,7 @@ class AuthManager:
     # il profilo contiene i cookie google.com e i soli "3P" di youtube.com
     # (__Secure-3PSID e simili, impostati cross-site), che YouTube considera
     # comunque anonimi. Un file così sembra pieno ma dà feed vuoti.
-    _AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "LOGIN_INFO", "SAPISID"}
+    _AUTH_COOKIE_NAMES = AUTH_COOKIE_NAMES
     _CANDIDATE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "vivaldi", "opera")
 
     # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
@@ -612,14 +645,10 @@ class AuthManager:
         "firefox": "~/snap/firefox/common/.mozilla/firefox",
     }
 
-    @classmethod
-    def _youtube_auth_cookies(cls, names_by_domain) -> set:
+    @staticmethod
+    def _youtube_auth_cookies(names_by_domain) -> set:
         """Quali cookie di autenticazione YouTube (prima parte) sono presenti."""
-        found = set()
-        for domain, name in names_by_domain:
-            if domain.endswith("youtube.com") and name in cls._AUTH_COOKIE_NAMES:
-                found.add(name)
-        return found
+        return youtube_auth_cookies(names_by_domain)
 
     def _browser_profile_path(self, browser: str) -> Optional[str]:
         hint = self._SNAP_PROFILE_HINTS.get(browser)
