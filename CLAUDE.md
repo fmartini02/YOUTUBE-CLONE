@@ -53,11 +53,13 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 | | A cosa serve | Dove |
 |---|---|---|
 | `data/cookies.txt` | Feed home reale e feed iscrizioni reale (via yt-dlp) | upload manuale o import automatico dal browser (`/api/cookies/import`, gestisce i percorsi snap su Linux) |
-| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) + lettura/pubblicazione commenti | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
+| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3), iscriversi/disiscriversi da un canale, lettura/pubblicazione commenti | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
 
 Sui cookie c'è una trappola che vale la pena ricordare: contano solo quelli di **prima parte sul dominio `youtube.com`** (`SID`, `__Secure-1PSID`, `LOGIN_INFO`, `SAPISID`). Essere loggati su `google.com` non basta — un profilo browser loggato su Google ma che non ha mai aperto YouTube produce un `cookies.txt` di decine di cookie in cui YouTube ti vede comunque anonimo, quindi feed vuoti. `_youtube_auth_cookies()` in `auth.py` è il controllo che distingue i due casi, e `get_cookie_status()` lo espone come `logged_in`.
 
 Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
+
+Le due azioni che *scrivono* su YouTube — pubblicare un commento e iscriversi/disiscriversi da un canale — richiedono lo scope `youtube.force-ssl` (`WRITE_SCOPE` in `auth.py`, esposto come `can_write()` e come `can_comment`/`can_subscribe` in `/api/auth/status`). Chi si era collegato quando l'app leggeva soltanto ha un refresh token senza quello scope: continua a leggere le iscrizioni ma riceve 403 `insufficientPermissions` finché non rifà il login. Lo stato "sono iscritto a questo canale?" (`/api/subscriptions/status/<id>`) si legge invece dalla copia locale `data/subscriptions.json`, non da YouTube: iscriversi e disiscriversi costano 50 unità di quota ciascuna, aprire una pagina canale non deve costarne nessuna.
 
 ### Fallback dei feed (catena voluta, non accidentale)
 

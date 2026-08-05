@@ -6,6 +6,7 @@ import CastButton from "../components/CastButton";
 import Comments from "../components/Comments";
 import VideoPlayer from "../components/VideoPlayer";
 import ChannelLink from "../components/ChannelLink";
+import SubscribeButton from "../components/SubscribeButton";
 import { useChannelAvatars } from "../hooks/useChannelAvatars";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
@@ -15,7 +16,7 @@ const RELATED_PAGE_SIZE = 20;
 
 const THEATER_KEY = "ytproxy_theater";
 
-export default function VideoPage({ videoId, navigate, authStatus }) {
+export default function VideoPage({ videoId, navigate, authStatus, onSubsChange }) {
   const [info, setInfo] = useState(null);
   const [quality, setQuality] = useState("best");
   const [related, setRelated] = useState([]);
@@ -234,6 +235,16 @@ export default function VideoPage({ videoId, navigate, authStatus }) {
                     </div>
                     <div className="channel-subs">{formatViews(info.views)}</div>
                   </div>
+
+                  {/* Accanto al nome del canale, come su YouTube: da qui ci si
+                      iscrive senza passare dalla pagina del canale. */}
+                  <SubscribeButton
+                    channelId={info.channel_id}
+                    channelName={info.channel}
+                    thumbnail={channelAvatar}
+                    onNotice={addToast}
+                    onChange={onSubsChange}
+                  />
                 </div>
 
                 <div className="video-actions">

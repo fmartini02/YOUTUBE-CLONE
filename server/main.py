@@ -364,7 +364,7 @@ async def get_comments(
     """
     sort = "new" if sort == "new" else "top"
     limit = max(1, min(limit, 100))
-    can_comment = auth_manager.can_comment()
+    can_comment = auth_manager.can_write()
 
     if auth_manager.is_authenticated():
         try:
@@ -436,7 +436,7 @@ async def create_comment(video_id: str, body: NewComment):
         raise HTTPException(400, "Il commento è vuoto")
     if not auth_manager.is_authenticated():
         raise HTTPException(403, "Collega un account Google per commentare")
-    if not auth_manager.can_comment():
+    if not auth_manager.can_write():
         raise HTTPException(403, "L'account collegato non ha il permesso di commentare: "
                                  "ricollegalo dalle impostazioni per concederlo")
     try:
@@ -863,9 +863,11 @@ async def auth_status():
     cookie_status = auth_manager.get_cookie_status()
     return {
         "authenticated": auth_manager.is_authenticated(),
-        # False su un account collegato prima che esistesse la pubblicazione
-        # dei commenti: il suo token non ha lo scope di scrittura.
-        "can_comment": auth_manager.can_comment(),
+        # False su un account collegato prima che esistessero la pubblicazione
+        # dei commenti e l'iscrizione ai canali: il suo token non ha lo scope
+        # di scrittura, e per riaverlo deve rifare il login.
+        "can_comment": auth_manager.can_write(),
+        "can_subscribe": auth_manager.can_write(),
         "subscription_count": len(auth_manager.get_subscriptions()),
         "cookie": cookie_status,
         "sync": scheduler.get_status(),
@@ -944,7 +946,7 @@ async def auth_me():
     perché costa una chiamata di rete e serve solo alla pagina video.
     """
     me = await auth_manager.get_my_channel()
-    return {"channel": me, "can_comment": auth_manager.can_comment()}
+    return {"channel": me, "can_comment": auth_manager.can_write()}
 
 
 # ─── Subscriptions ────────────────────────────────────────────────────────────
@@ -958,6 +960,77 @@ async def get_subscriptions():
 async def force_sync_subs():
     await scheduler.force_sync(auth_manager, ydl_opts_base)
     return {"subscriptions": auth_manager.get_subscriptions(), "sync": scheduler.get_status()}
+
+
+# Le tre rotte qui sotto stanno DOPO /api/subscriptions/sync di proposito:
+# FastAPI prova le rotte nell'ordine di dichiarazione e "sync" finirebbe
+# altrimenti dentro {channel_id}.
+
+@app.get("/api/subscriptions/status/{channel_id}")
+async def subscription_status(channel_id: str):
+    """
+    Stato del pulsante "Iscriviti" per un canale. Risponde anche senza account
+    collegato: il pulsante c'è comunque e spiega cosa manca (come CastButton),
+    invece di sparire senza motivo apparente.
+    """
+    return {
+        "subscribed": auth_manager.is_subscribed(channel_id),
+        "authenticated": auth_manager.is_authenticated(),
+        "can_subscribe": auth_manager.can_write(),
+    }
+
+
+class SubscribeInfo(BaseModel):
+    # Nome e logo che il frontend sta già mostrando: usati solo come ripiego
+    # se YouTube risponde "sei già iscritto" e non manda lo snippet.
+    name: Optional[str] = None
+    thumbnail: Optional[str] = None
+
+
+def _subscription_write_guard():
+    if not auth_manager.is_authenticated():
+        raise HTTPException(403, "Collega un account Google per gestire le iscrizioni")
+    if not auth_manager.can_write():
+        raise HTTPException(403, "L'account collegato non ha il permesso di gestire le iscrizioni: "
+                                 "ricollegalo dalle impostazioni per concederlo")
+
+
+def _subscription_api_error(ex: YouTubeAPIError) -> HTTPException:
+    if ex.reason in ("insufficientPermissions", "forbidden"):
+        return HTTPException(403, "Permesso negato da YouTube: ricollega l'account dalle impostazioni")
+    if ex.reason in ("quotaExceeded", "rateLimitExceeded"):
+        return HTTPException(429, "Quota giornaliera della YouTube Data API esaurita")
+    if ex.reason in ("subscriptionNotFound", "channelNotFound", "publisherNotFound"):
+        return HTTPException(404, "Canale non trovato su YouTube")
+    return HTTPException(400, ex.message)
+
+
+@app.post("/api/subscriptions/{channel_id}")
+async def subscribe_channel(channel_id: str, body: SubscribeInfo = SubscribeInfo()):
+    """Iscrive l'account collegato al canale (idempotente: se sei già iscritto va bene lo stesso)."""
+    _subscription_write_guard()
+    try:
+        channel = await auth_manager.subscribe(channel_id, body.name or "", body.thumbnail or "")
+    except YouTubeAPIError as ex:
+        raise _subscription_api_error(ex)
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
+    return {"subscribed": True, "channel": channel,
+            "subscription_count": len(auth_manager.get_subscriptions())}
+
+
+@app.delete("/api/subscriptions/{channel_id}")
+async def unsubscribe_channel(channel_id: str):
+    """Disiscrive l'account dal canale (idempotente: se non eri iscritto va bene lo stesso)."""
+    _subscription_write_guard()
+    try:
+        await auth_manager.unsubscribe(channel_id)
+    except YouTubeAPIError as ex:
+        raise _subscription_api_error(ex)
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
+    return {"subscribed": False,
+            "subscription_count": len(auth_manager.get_subscriptions())}
 
 
 @app.get("/api/feed/subscriptions")
