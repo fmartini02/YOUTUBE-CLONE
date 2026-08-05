@@ -720,7 +720,8 @@ class AuthManager:
 
     def get_cookie_status(self) -> dict:
         if not COOKIE_FILE.exists():
-            return {"present": False, "age_days": None, "warning": False, "logged_in": False}
+            return {"present": False, "age_days": None, "warning": False,
+                    "logged_in": False, "reason": None}
         age = (time.time() - COOKIE_FILE.stat().st_mtime) / 86400
         try:
             pairs = list(self._parse_netscape(COOKIE_FILE.read_text()))
@@ -729,11 +730,18 @@ class AuthManager:
         # Senza cookie di sessione youtube.com il file c'è ma non autentica:
         # va segnalato come un problema quanto un file scaduto.
         logged_in = bool(self._youtube_auth_cookies(pairs))
+        # `reason` distingue due problemi che chiedono rimedi diversi: un file
+        # vecchio si risolve riesportandolo, un file senza sessione YouTube no
+        # — lì bisogna prima aprire youtube.com nel browser. Senza questa
+        # distinzione l'avviso diceva "hanno più di 2 settimane" anche nel
+        # secondo caso, e reimportare i cookie non lo faceva sparire mai.
+        reason = "not-logged-in" if not logged_in else ("stale" if age > 14 else None)
         return {
             "present": True,
             "age_days": round(age, 1),
             "logged_in": logged_in,
-            "warning": age > 14 or not logged_in,  # avvisa dopo 2 settimane
+            "reason": reason,
+            "warning": reason is not None,  # avvisa dopo 2 settimane
         }
 
     def delete_cookies(self):

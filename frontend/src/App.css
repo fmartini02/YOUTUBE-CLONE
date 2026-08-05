@@ -20,6 +20,9 @@
   --green: #00c864;
   --sidebar-width: 240px;
   --header-height: 56px;
+  /* Altezza dell'avviso cookie: 0 quando non c'è, così i calcoli di layout
+     che ne tengono conto valgono in entrambi i casi. */
+  --banner-height: 0px;
   --radius: 12px;
   --transition: 0.2s ease;
 }
@@ -43,9 +46,36 @@ body {
 
 .app-body {
   display: flex;
-  margin-top: var(--header-height);
-  min-height: calc(100vh - var(--header-height));
+  margin-top: calc(var(--header-height) + var(--banner-height));
+  min-height: calc(100vh - var(--header-height) - var(--banner-height));
 }
+
+/* ── Avviso cookie ──────────────────────────────────────────────────────
+   Sta sotto l'header fisso, quindi il contenuto deve scendere di altrettanto:
+   lo spazio si fa qui, con la stessa altezza dichiarata dalla barra, invece
+   che con un margine scritto a mano nel JSX — che sovrascriveva anche quello
+   dell'header e lasciava il primo pezzo di pagina nascosto sotto di esso.
+   Lo sfondo è pieno e non traslucido: sopra un video nero il testo giallo su
+   trasparente si confondeva con quello che scorreva sotto. */
+.app[data-cookie-banner="true"] { --banner-height: 40px; }
+
+.cookie-banner {
+  position: fixed; top: var(--header-height); left: 0; right: 0; z-index: 95;
+  height: var(--banner-height); box-sizing: border-box;
+  background: var(--bg2); border-bottom: 1px solid rgba(255, 200, 0, 0.35);
+  padding: 0 16px; display: flex; align-items: center; gap: 10px; font-size: 13px;
+}
+.cookie-banner-text {
+  color: #ffc800;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cookie-banner-btn { margin-left: auto; padding: 4px 12px; font-size: 12px; flex-shrink: 0; }
+.cookie-banner-close {
+  background: none; border: none; color: var(--text3);
+  font-size: 15px; line-height: 1; cursor: pointer;
+  padding: 4px 6px; flex-shrink: 0;
+}
+.cookie-banner-close:hover { color: var(--text); }
 
 .main-content {
   flex: 1;

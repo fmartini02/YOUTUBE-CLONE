@@ -17,6 +17,16 @@ import "./App.css";
 export const CastContext = createContext(null);
 export function useCastContext() { return useContext(CastContext); }
 
+// Avviso cookie: quale problema l'utente ha già scelto di ignorare.
+const COOKIE_BANNER_KEY = "ytproxy_cookie_banner_off";
+
+const COOKIE_WARNING_TEXT = {
+  stale: "I tuoi cookie YouTube hanno più di 2 settimane — aggiornali per il feed personalizzato.",
+  // Caso diverso e più insidioso: il file c'è ma per YouTube sei anonimo,
+  // quindi riesportarlo dallo stesso browser non cambierebbe niente.
+  "not-logged-in": "I cookie caricati non contengono una sessione YouTube: apri youtube.com nel browser (non solo google.com), poi reimportali.",
+};
+
 // Mappa pagina+parametri <-> URL reale, per far funzionare il tasto Indietro
 // del browser (History API) invece di uscire dal sito: prima navigate()
 // cambiava solo stato React, senza mai toccare l'URL o la cronologia.
@@ -47,6 +57,9 @@ export default function App() {
   // etichetta), non quella larga — si espande solo cliccando l'hamburger.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [authStatus, setAuthStatus] = useState(null);
+  const [dismissedCookieReason, setDismissedCookieReason] = useState(
+    () => localStorage.getItem(COOKIE_BANNER_KEY) || "",
+  );
   // Sul web/Electron il frontend è servito dallo stesso server (nessun setup
   // necessario). Nell'app Android il server va indicato esplicitamente la
   // prima volta (o quando quello salvato non risponde più, es. IP cambiato).
@@ -93,7 +106,11 @@ export default function App() {
     window.history.pushState({ page: to, params }, "", pageToUrl(to, params));
   }, []);
 
-  const cookieWarning = authStatus?.cookie?.present && authStatus?.cookie?.warning;
+  // Avviso cookie: si può chiudere, ma la chiusura vale per QUEL problema.
+  // Se il motivo cambia (i cookie erano solo vecchi e ora manca la sessione
+  // YouTube) l'avviso ricompare, perché è un'altra cosa da sistemare.
+  const cookieReason = authStatus?.cookie?.present ? authStatus.cookie.reason : null;
+  const cookieWarning = !!cookieReason && dismissedCookieReason !== cookieReason;
 
   if (!serverReady) {
     return <ServerSetup onDone={() => setServerReady(true)} />;
@@ -101,7 +118,7 @@ export default function App() {
 
   return (
     <CastContext.Provider value={castSDK}>
-      <div className="app" data-sidebar={sidebarOpen}>
+      <div className="app" data-sidebar={sidebarOpen} data-cookie-banner={cookieWarning}>
         <Header
           navigate={navigate}
           currentQuery={pageParams.query || ""}
@@ -111,20 +128,29 @@ export default function App() {
         />
 
         {cookieWarning && (
-          <div style={{
-            position: "fixed", top: "var(--header-height)", left: 0, right: 0, zIndex: 95,
-            background: "rgba(255,200,0,0.12)", borderBottom: "1px solid rgba(255,200,0,0.3)",
-            padding: "8px 16px", display: "flex", alignItems: "center", gap: 10, fontSize: 13,
-          }}>
-            <span>⚠️</span>
-            <span style={{ color: "#ffc800" }}>I tuoi cookie YouTube hanno più di 2 settimane — aggiornali per il feed personalizzato.</span>
-            <button className="action-btn" style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 12 }} onClick={() => navigate("settings")}>
+          <div className="cookie-banner">
+            <span aria-hidden="true">⚠️</span>
+            <span className="cookie-banner-text">
+              {COOKIE_WARNING_TEXT[cookieReason] || COOKIE_WARNING_TEXT.stale}
+            </span>
+            <button className="action-btn cookie-banner-btn" onClick={() => navigate("settings")}>
               Aggiorna
+            </button>
+            <button
+              className="cookie-banner-close"
+              onClick={() => {
+                localStorage.setItem(COOKIE_BANNER_KEY, cookieReason);
+                setDismissedCookieReason(cookieReason);
+              }}
+              title="Nascondi questo avviso"
+              aria-label="Nascondi questo avviso"
+            >
+              ✕
             </button>
           </div>
         )}
 
-        <div className="app-body" style={{ marginTop: cookieWarning ? 40 : 0 }}>
+        <div className="app-body">
           <Sidebar open={sidebarOpen} navigate={navigate} currentPage={page} authStatus={authStatus} />
           <main className="main-content" style={{ paddingBottom: 24 }}>
             {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}

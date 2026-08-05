@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { api, timeAgo, isCapacitor, getServerBase, clearServerBase, isCastableOrigin } from "../api";
+import { api, timeAgo, isCapacitor, getServerBase, clearServerBase, resolveCastBase } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
@@ -350,12 +350,19 @@ function CastDiagnostics() {
   const castFw = typeof window !== "undefined" && !!window.cast?.framework;
   const script = typeof document !== "undefined" && !!document.getElementById("__cast_sdk_script");
 
+  // Indirizzo che verrà dato alla TV: se la pagina è aperta su localhost non
+  // è quello della barra degli indirizzi ma quello che il server dichiara per
+  // la rete locale, quindi va mostrato quello — altrimenti la diagnostica
+  // segnalava un problema anche quando la trasmissione funziona.
+  const [castBase, setCastBase] = useState(null);
+  useEffect(() => { resolveCastBase().then(setCastBase); }, []);
+
   // Niente riga sull'origine sicura (https): il Cast Sender funziona anche su
   // http in rete locale, segnalarlo come errore mandava fuori strada. Quello
   // che conta davvero è che l'indirizzo non sia localhost, perché è la TV a
   // scaricare il video.
   const rows = [
-    ["Indirizzo usato (la TV deve poterlo raggiungere)", origin, isCastableOrigin()],
+    ["Indirizzo dato alla TV", castBase === null ? "…" : (castBase || `non ricavabile (pagina su ${origin})`), !!castBase],
     ["Script Google Cast caricato", script ? "sì" : "no", script],
     ["API chrome.cast presente", chromeCast ? "sì" : "no", chromeCast],
     ["Framework Cast pronto", castFw ? "sì" : "no", castFw],

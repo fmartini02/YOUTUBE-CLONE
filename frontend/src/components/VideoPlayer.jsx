@@ -36,6 +36,7 @@ function isBuffered(video, t) {
 }
 
 const SKIP_SECONDS = 10;
+const VOLUME_STEP = 0.05;
 
 export default function VideoPlayer({
   videoId,
@@ -137,6 +138,14 @@ export default function VideoPlayer({
     setMuted(val === 0);
   }, []);
 
+  // Alza/abbassa a passi, partendo dal volume vero dell'elemento: `volume`
+  // nello stato può essere di un istante prima se si tiene premuto il tasto.
+  const nudgeVolume = useCallback((delta) => {
+    const v = videoRef.current;
+    if (!v) return;
+    changeVolume(Math.max(0, Math.min(1, (v.muted ? 0 : v.volume) + delta)));
+  }, [changeVolume]);
+
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen();
     else wrapRef.current?.requestFullscreen().catch(() => {});
@@ -222,6 +231,13 @@ export default function VideoPlayer({
       if (["INPUT", "TEXTAREA", "SELECT"].includes(el?.tagName)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
+      // Un bottone cliccato con il mouse resta col focus: da lì in poi lo
+      // spazio "ripremeva" quel bottone invece di mettere in pausa — dopo un
+      // click su schermo intero lo spazio entrava e usciva dallo schermo
+      // intero. Togliamo il focus dai comandi del player prima di gestire il
+      // tasto, così le scorciatoie valgono sempre le stesse.
+      if (el && el !== document.body && wrapRef.current?.contains(el)) el.blur();
+
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       switch (key) {
         case " ":
@@ -229,6 +245,8 @@ export default function VideoPlayer({
         case "f": toggleFullscreen(); break;
         case "ArrowLeft": skip(-SKIP_SECONDS); break;
         case "ArrowRight": skip(SKIP_SECONDS); break;
+        case "ArrowUp": nudgeVolume(VOLUME_STEP); break;
+        case "ArrowDown": nudgeVolume(-VOLUME_STEP); break;
         case "m": toggleMute(); break;
         case "c": toggleSubtitles(); break;
         case "t": onToggleTheater?.(); break;
@@ -239,7 +257,7 @@ export default function VideoPlayer({
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [togglePlay, toggleFullscreen, skip, toggleMute, toggleSubtitles, onToggleTheater, bumpControls]);
+  }, [togglePlay, toggleFullscreen, skip, nudgeVolume, toggleMute, toggleSubtitles, onToggleTheater, bumpControls]);
 
   // ── Barra di avanzamento ───────────────────────────────────────────────
   function timeFromPointer(e) {

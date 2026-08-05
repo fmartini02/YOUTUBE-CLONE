@@ -814,6 +814,38 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/lan-address")
+async def lan_address():
+    """
+    Indirizzo del server come lo vede il resto della rete locale.
+
+    Serve al Chromecast: la TV scarica il video da sé, quindi un URL su
+    localhost punterebbe alla TV stessa e il cast fallirebbe. Finché non
+    c'era questo endpoint il bottone Cast si limitava a rifiutare quando la
+    pagina era aperta su localhost — cioè quasi sempre, visto che il server
+    gira sullo stesso PC da cui si guarda.
+
+    Il socket UDP non manda nessun pacchetto: serve solo a farsi dire dal
+    sistema operativo quale interfaccia userebbe per uscire verso la rete,
+    che è quella giusta anche con più schede (Wi-Fi + Ethernet + Docker).
+    """
+    import socket
+
+    ip = ""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except OSError:
+        ip = ""
+    finally:
+        s.close()
+
+    if not ip or ip.startswith("127."):
+        return {"address": "", "port": SERVER_PORT}
+    return {"address": f"http://{ip}:{SERVER_PORT}", "ip": ip, "port": SERVER_PORT}
+
+
 # ─── Startup: avvia sync scheduler ───────────────────────────────────────────
 
 @app.on_event("startup")
@@ -1123,6 +1155,28 @@ async def update_prefs(body: PrefsUpdate):
 frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 
 
+# index.html non va mai messa in cache, gli asset con l'hash nel nome sempre.
+#
+# Senza questa distinzione il browser tiene index.html per conto suo (nessun
+# header di cache = cache "euristica") e continua a caricare il bundle vecchio
+# anche dopo un `npm run build`: la UI resta indietro di una versione e
+# ricaricare la pagina non basta, servirebbe svuotare la cache a mano. Gli
+# asset invece hanno l'hash del contenuto nel nome (index-BesxxQRe.js), quindi
+# un file con quel nome non cambierà mai: si possono tenere per sempre.
+NO_CACHE = "no-cache, must-revalidate"
+IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
+
+
+class HashedStaticFiles(StaticFiles):
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        resp = super().file_response(full_path, stat_result, scope, status_code)
+        name = str(full_path)
+        resp.headers["Cache-Control"] = (
+            IMMUTABLE_CACHE if "/assets/" in name.replace("\\", "/") else NO_CACHE
+        )
+        return resp
+
+
 @app.get("/watch")
 @app.get("/search")
 @app.get("/subscriptions")
@@ -1138,11 +1192,11 @@ async def spa_routes():
     index = frontend_dist / "index.html"
     if not index.exists():
         raise HTTPException(404)
-    return FileResponse(index)
+    return FileResponse(index, headers={"Cache-Control": NO_CACHE})
 
 
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="static")
+    app.mount("/", HashedStaticFiles(directory=str(frontend_dist), html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

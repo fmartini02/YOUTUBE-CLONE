@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { isCastableOrigin } from "../api";
+import { resolveCastBase } from "../api";
 import { CAST_UNAVAILABLE_MESSAGE, CAST_ERROR_MESSAGE } from "../hooks/useCast.jsx";
 
 /**
@@ -28,17 +28,21 @@ export default function CastButton({ cast, media, onNotice }) {
       cast.stopCast();
       return;
     }
-    // Il Chromecast scarica il video da sé: se la pagina è aperta su
-    // localhost, l'URL che gli passeremmo punterebbe alla TV stessa.
-    if (!isCastableOrigin()) {
-      onNotice?.("Per trasmettere apri YTProxy dall'IP di rete (es. http://192.168.1.11:8090), non da localhost");
-      return;
-    }
     if (!media?.videoId || busy) return;
 
     setBusy(true);
     try {
-      const { ok, error } = await cast.startCast(media);
+      // Il Chromecast scarica il video da sé: un URL su localhost punterebbe
+      // alla TV stessa. Se la pagina è aperta così, ci facciamo dare
+      // dal server il suo indirizzo di rete e riscriviamo solo l'origine.
+      const base = await resolveCastBase();
+      if (!base) {
+        onNotice?.("Non riesco a ricavare l'indirizzo di rete del server: apri YTProxy dall'IP della LAN (es. http://192.168.1.11:8090) per trasmettere.");
+        return;
+      }
+      const streamUrl = media.streamUrl.replace(/^https?:\/\/[^/]+/, base);
+
+      const { ok, error } = await cast.startCast({ ...media, streamUrl });
       if (ok) onNotice?.(`📺 In riproduzione su ${cast.deviceName || "TV"}`);
       else if (error !== "cancel") onNotice?.(CAST_ERROR_MESSAGE[error] || CAST_ERROR_MESSAGE.load);
     } finally {
