@@ -30,7 +30,7 @@ export const CAST_UNAVAILABLE_MESSAGE = {
 
 export const CAST_ERROR_MESSAGE = {
   unavailable: "Trasmissione non disponibile in questo browser.",
-  "no-device": "Nessun dispositivo Chromecast trovato sulla rete.",
+  "no-device": "Nessun dispositivo trovato: accendi la TV (in standby non si annuncia) e controlla che sia sulla stessa rete Wi-Fi del PC, senza isolamento client. Le TV solo AirPlay o DLNA non compaiono qui.",
   load: "Il Chromecast non è riuscito ad avviare il video. Riprova, o scegli una qualità più bassa.",
 };
 
@@ -79,6 +79,18 @@ function loadCastSdk() {
 }
 
 const PLAYER_STATE = { PLAYING: "playing", PAUSED: "paused", BUFFERING: "buffering", IDLE: "idle" };
+
+/**
+ * Aspetta che la scoperta dei dispositivi dia un esito, al massimo `ms`.
+ * Torna false solo se dopo l'attesa non si è ancora annunciato nessuno.
+ */
+async function waitForDevices(ctx, ms = 3000) {
+  const scaduto = Date.now() + ms;
+  while (ctx.getCastState() === "NO_DEVICES_AVAILABLE" && Date.now() < scaduto) {
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return ctx.getCastState() !== "NO_DEVICES_AVAILABLE";
+}
 
 function buildMediaInfo(media) {
   const cc = window.chrome.cast;
@@ -182,6 +194,15 @@ export function useCast() {
     if (!available || !ctx) return { ok: false, error: "unavailable" };
 
     if (!ctx.getCurrentSession()) {
+      // Il selettore di Chrome/Brave si apre anche quando in rete non c'è
+      // nessun dispositivo: mostra una finestra vuota, e siccome
+      // requestSession() non risponde finché l'utente non la chiude, il
+      // bottone resta su "Connessione…" senza spiegare niente. Meglio
+      // accorgersene prima e dirlo. La scoperta però è pigra (parte quando
+      // serve), quindi NO_DEVICES_AVAILABLE subito dopo il caricamento della
+      // pagina non è ancora una risposta: le diamo qualche secondo.
+      if (!await waitForDevices(ctx)) return { ok: false, error: "no-device" };
+
       try {
         await ctx.requestSession();
       } catch (err) {
