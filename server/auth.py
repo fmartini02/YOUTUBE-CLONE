@@ -566,6 +566,7 @@ class AuthManager:
         che mostra i trending.
         """
         COOKIE_FILE.write_text(content)
+        self.invalidate_feeds()
         pairs = list(self._parse_netscape(content))
         valid = "# Netscape HTTP Cookie File" in content or any(
             d.endswith("youtube.com") for d, _ in pairs
@@ -597,6 +598,19 @@ class AuthManager:
     # comunque anonimi. Un file così sembra pieno ma dà feed vuoti.
     _AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "LOGIN_INFO", "SAPISID"}
     _CANDIDATE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "vivaldi", "opera")
+
+    # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
+    #
+    # yt-dlp sa leggere i cookie direttamente dal database del browser, ma su
+    # Linux cerca solo il percorso standard (~/.config/...). Se il browser è
+    # installato via snap (comune su Ubuntu: Brave, Chromium, Firefox), snap
+    # confina i suoi dati reali in ~/snap/<pkg>/... e quel percorso standard è
+    # vuoto o non aggiornato — va indicato esplicitamente.
+    _SNAP_PROFILE_HINTS = {
+        "brave": "~/snap/brave/current/.config/BraveSoftware/Brave-Browser",
+        "chromium": "~/snap/chromium/current/.config/chromium",
+        "firefox": "~/snap/firefox/common/.mozilla/firefox",
+    }
 
     @classmethod
     def _youtube_auth_cookies(cls, names_by_domain) -> set:
@@ -657,61 +671,8 @@ class AuthManager:
         if not auth:
             return {"valid": False, "cookie_count": count, "logged_in": False}
         out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
+        self.invalidate_feeds()
         return {"valid": True, "cookie_count": count, "logged_in": True}
-
-    # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
-    #
-    # yt-dlp sa leggere i cookie direttamente dal database del browser, ma su
-    # Linux cerca solo il percorso standard (~/.config/...). Se il browser è
-    # installato via snap (comune su Ubuntu: Brave, Chromium, Firefox), snap
-    # confina i suoi dati reali in ~/snap/<pkg>/... e quel percorso standard è
-    # vuoto o non aggiornato — va indicato esplicitamente.
-    _SNAP_PROFILE_HINTS = {
-        "brave": "~/snap/brave/current/.config/BraveSoftware/Brave-Browser",
-        "chromium": "~/snap/chromium/current/.config/chromium",
-        "firefox": "~/snap/firefox/common/.mozilla/firefox",
-    }
-    _AUTH_COOKIE_NAMES = {"SID", "__Secure-1PSID", "LOGIN_INFO", "SAPISID"}
-    _CANDIDATE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "vivaldi", "opera")
-
-    def _browser_profile_path(self, browser: str) -> Optional[str]:
-        hint = self._SNAP_PROFILE_HINTS.get(browser)
-        if not hint:
-            return None
-        path = os.path.expanduser(hint)
-        return path if os.path.isdir(path) else None
-
-    def _extract_browser_jar(self, browser: str):
-        import yt_dlp.cookies as ytc
-        return ytc.extract_cookies_from_browser(browser, self._browser_profile_path(browser))
-
-    def detect_browsers_with_youtube_login(self) -> list:
-        """Prova ogni browser noto e ritorna quelli con una sessione YouTube/Google attiva."""
-        found = []
-        for browser in self._CANDIDATE_BROWSERS:
-            try:
-                jar = self._extract_browser_jar(browser)
-            except Exception:
-                continue
-            names = {ck.name for ck in jar if ck.domain.endswith(("youtube.com", "google.com"))}
-            if names & self._AUTH_COOKIE_NAMES:
-                found.append(browser)
-        return found
-
-    def import_cookies_from_browser(self, browser: str) -> dict:
-        """Estrae i cookie YouTube/Google dal browser indicato e li salva come cookies.txt — nessun passaggio manuale."""
-        import yt_dlp.cookies as ytc
-        jar = self._extract_browser_jar(browser)
-        out_jar = ytc.YoutubeDLCookieJar()
-        count = 0
-        for ck in jar:
-            if ck.domain.endswith(("youtube.com", "google.com")):
-                out_jar.set_cookie(ck)
-                count += 1
-        if count == 0:
-            return {"valid": False, "cookie_count": 0}
-        out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
-        return {"valid": True, "cookie_count": count}
 
     def get_cookie_path(self) -> Optional[str]:
         if COOKIE_FILE.exists() and COOKIE_FILE.stat().st_size > 0:
@@ -747,6 +708,7 @@ class AuthManager:
     def delete_cookies(self):
         if COOKIE_FILE.exists():
             COOKIE_FILE.unlink()
+        self.invalidate_feeds()
 
     # ── Watch history ─────────────────────────────────────────────────────────
 
@@ -836,6 +798,15 @@ class AuthManager:
                     break
 
             items = feed.items
+            # Un feed che non ha prodotto NIENTE non va tenuto in cache: è uno
+            # stato di errore (sessione rifiutata, estrazione fallita, blocco
+            # temporaneo di YouTube), non un risultato. Tenendolo, ogni
+            # richiesta successiva rispondeva "vuoto" senza nemmeno riprovare
+            # fino alla scadenza del TTL — mezz'ora in cui reimportare i cookie
+            # non cambiava niente, perché il feed guasto restava lì.
+            if not items:
+                self._drop_feed(key)
+
             return {
                 "results": items[offset:offset + limit],
                 "total": len(items),
@@ -843,6 +814,25 @@ class AuthManager:
                 # memoria voci oltre la pagina appena servita.
                 "has_more": ((not feed.exhausted) and len(items) < cap) or offset + limit < len(items),
             }
+
+    def _drop_feed(self, key: str):
+        """Chiude e dimentica un feed aperto, se c'è."""
+        feed = self._feeds.pop(key, None)
+        if feed is not None:
+            feed.close()
+
+    def invalidate_feeds(self):
+        """
+        Butta via tutti i feed aperti.
+
+        Serve quando cambiano i cookie: ogni LazyFeed tiene viva un'istanza di
+        yt-dlp con la sessione di PRIMA: senza questa chiamata, reimportare i
+        cookie non aveva effetto sulla home finché il feed non scadeva da solo.
+        I lock restano dove sono — appartengono alle richieste in corso, non ai
+        feed.
+        """
+        for key in list(self._feeds):
+            self._drop_feed(key)
 
     def _remember_feed(self, key: str, feed: "LazyFeed"):
         """
