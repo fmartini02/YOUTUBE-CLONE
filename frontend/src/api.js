@@ -166,14 +166,25 @@ export function formatDate(s) {
   if (!s) return "";
   return new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`).toLocaleDateString("it-IT", { year:"numeric", month:"short", day:"numeric" });
 }
+// Unità in ordine dalla più lunga: la prima che ci sta dentro almeno una volta
+// è quella da usare. Singolare e plurale sono entrambi scritti perché in
+// italiano non si ricavano l'uno dall'altro ("1 mese" / "3 mesi").
+const ETA_UNITA = [
+  [31557600, "anno", "anni"],
+  [2629800, "mese", "mesi"],
+  [604800, "settimana", "settimane"],
+  [86400, "giorno", "giorni"],
+  [3600, "ora", "ore"],
+  [60, "minuto", "minuti"],
+];
+
 export function timeAgo(ts) {
   if (!ts) return "";
   const diff = (Date.now()/1000) - ts;
-  if (diff < 60) return "ora";
-  if (diff < 3600) return `${Math.floor(diff/60)}min fa`;
-  if (diff < 86400) return `${Math.floor(diff/3600)}h fa`;
-  if (diff < 604800) return `${Math.floor(diff/86400)}g fa`;
-  if (diff < 2629800) return `${Math.floor(diff/604800)}sett fa`;
-  if (diff < 31557600) return `${Math.floor(diff/2629800)}mesi fa`;
-  return `${Math.floor(diff/31557600)}anni fa`;
+  if (diff < 60) return "adesso";
+  for (const [secondi, singolare, plurale] of ETA_UNITA) {
+    const n = Math.floor(diff / secondi);
+    if (n >= 1) return `${n} ${n === 1 ? singolare : plurale} fa`;
+  }
+  return "adesso";
 }
