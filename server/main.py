@@ -1028,30 +1028,15 @@ async def channel_avatars(ids: str = Query(...)):
 
 
 @app.get("/api/channel/{channel_id}/videos")
-async def channel_videos(channel_id: str):
-    """Ultimi video di un canale."""
-    try:
-        opts = {**ydl_opts_base(), "playlistend": 20}
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/channel/{channel_id}/videos", download=False)
-            entries = (info or {}).get("entries", [])
-            results = []
-            for e in (entries or []):
-                if not is_video_entry(e):
-                    continue
-                results.append({
-                    "id": e.get("id"),
-                    "title": e.get("title"),
-                    "channel": e.get("uploader") or e.get("channel"),
-                    "channel_id": e.get("channel_id"),
-                    "duration": e.get("duration"),
-                    "views": e.get("view_count"),
-                    "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                    "published": _timestamp_to_upload_date(e.get("timestamp")),
-                })
-            return {"results": results}
-    except Exception as ex:
-        raise HTTPException(500, str(ex))
+async def channel_videos(channel_id: str, limit: int = 30, offset: int = 0):
+    """
+    Video di un canale, a pagine, più l'intestazione del canale in `channel`
+    (nome, logo, copertina, iscritti) — che arriva con la stessa estrazione,
+    quindi non costa una richiesta in più.
+
+    Estrazione pigra come la home: scorrere poco costa poche richieste.
+    """
+    return await auth_manager.get_channel_page(channel_id, offset, limit, ydl_opts_base)
 
 
 # ─── Cookies ──────────────────────────────────────────────────────────────────
@@ -1181,6 +1166,7 @@ class HashedStaticFiles(StaticFiles):
 @app.get("/search")
 @app.get("/subscriptions")
 @app.get("/settings")
+@app.get("/channel")
 async def spa_routes():
     """
     Route "finte": il frontend naviga tra le pagine con la vera History API

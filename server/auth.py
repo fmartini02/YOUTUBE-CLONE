@@ -42,6 +42,8 @@ RELATED_MAX = 2000             # nessuno scorre così tanto la sidebar dei corre
 # Il ripiego a ricerca non ha continuazioni infinite come il Mix: oltre questo
 # numero YouTube smette comunque di dare risultati pertinenti.
 RELATED_SEARCH_MAX = 60
+CHANNEL_CHUNK = 30             # la scheda "Video" di un canale pagina a ~30
+CHANNEL_MAX = 600              # 600 video sono già anni di caricamenti per un canale
 # Ogni feed aperto tiene viva un'istanza di yt-dlp: la home più i mix degli
 # ultimi video guardati bastano, gli altri si chiudono.
 MAX_OPEN_FEEDS = 6
@@ -131,6 +133,36 @@ def map_video_entry(e: dict) -> dict:
     }
 
 
+def channel_meta(info: dict, channel_id: str) -> dict:
+    """
+    Intestazione della pagina canale, dai metadati della scheda "Video".
+
+    Le miniature di un canale sono due cose diverse nella stessa lista: il logo
+    è quadrato, la copertina è molto più larga che alta. Distinguerle per
+    proporzione è l'unico modo affidabile — yt-dlp non le etichetta tutte.
+    """
+    thumbs = [t for t in (info.get("thumbnails") or []) if t.get("url")]
+
+    def _piu_grande(scelte):
+        return max(scelte, key=lambda t: t.get("width") or 0)["url"] if scelte else None
+
+    quadrate = [t for t in thumbs if t.get("width") and t.get("height")
+                and 0.9 <= t["width"] / t["height"] <= 1.1]
+    larghe = [t for t in thumbs if t.get("width") and t.get("height")
+              and t["width"] / t["height"] >= 3]
+
+    return {
+        "id": info.get("channel_id") or channel_id,
+        "name": info.get("channel") or info.get("uploader"),
+        "handle": info.get("uploader_id"),
+        "avatar": _piu_grande(quadrate),
+        "banner": _piu_grande(larghe),
+        "subscribers": info.get("channel_follower_count"),
+        "description": info.get("description"),
+        "verified": bool(info.get("channel_is_verified")),
+    }
+
+
 class LazyFeed:
     """
     Estrazione pigra di un feed YouTube, a blocchi.
@@ -152,6 +184,11 @@ class LazyFeed:
         # mantiene pigro il generatore.
         info = self._ydl.extract_info(url, download=False, process=False)
         self._iter = iter((info or {}).get("entries") or [])
+        # Metadati della lista (nome canale, iscritti, loghi...): arrivano già
+        # con questa estrazione, quindi conservarli evita una seconda richiesta
+        # a YouTube per l'intestazione della pagina canale. Senza "entries",
+        # che è il generatore consumato pigramente qui sopra.
+        self.info = {k: v for k, v in (info or {}).items() if k != "entries"}
         self.url = url
         self.items: list = []
         self.exhausted = False
@@ -780,17 +817,24 @@ class AuthManager:
         self._save_prefs()
         return self.get_prefs()
 
-    # ── Paginazione pigra condivisa (home e correlati) ───────────────────────
+    # ── Paginazione pigra condivisa (home, correlati e canali) ───────────────
 
     async def _lazy_page(self, key: str, url: str, offset: int, limit: int,
-                         opts: dict, chunk: int, cap: int) -> dict:
+                         opts: dict, chunk: int, cap: int,
+                         with_info: bool = False) -> dict:
         """
         Una pagina di un feed estratto pigramente, tenendo vivo il generatore
         di yt-dlp fra una richiesta e l'altra (vedi LazyFeed).
 
         `key` identifica il feed da riprendere: "home" per le raccomandazioni,
-        "related:<id>" per il mix di un video. I feed aperti restano in una
-        piccola cache LRU perché ognuno tiene aperta un'istanza di yt-dlp.
+        "related:<id>" per il mix di un video, "channel:<id>" per la scheda
+        video di un canale. I feed aperti restano in una piccola cache LRU
+        perché ognuno tiene aperta un'istanza di yt-dlp.
+
+        Con `with_info` la risposta porta anche `info`, i metadati della lista
+        (per il canale: nome, iscritti, logo). Vengono letti anche quando il
+        feed è vuoto e quindi già scartato, perché servono a intestare la
+        pagina pure in quel caso.
         """
         lock = self._feed_locks.setdefault(key, asyncio.Lock())
         # Un solo estrattore alla volta per feed: il generatore di yt-dlp non è
@@ -809,7 +853,8 @@ class AuthManager:
                     self._feeds.pop(key, None)
                 feed = await self._open_lazy_feed(url, opts)
                 if feed is None:
-                    return {"results": [], "total": 0, "has_more": False}
+                    vuoto = {"results": [], "total": 0, "has_more": False}
+                    return {**vuoto, "info": {}} if with_info else vuoto
             self._remember_feed(key, feed)
 
             # Estende quanto basta a coprire la pagina richiesta: scorrere poco
@@ -840,13 +885,16 @@ class AuthManager:
             if not items:
                 self._drop_feed(key)
 
-            return {
+            page = {
                 "results": items[offset:offset + limit],
                 "total": len(items),
                 # C'è altro se il feed può ancora crescere, o se abbiamo già in
                 # memoria voci oltre la pagina appena servita.
                 "has_more": ((not feed.exhausted) and len(items) < cap) or offset + limit < len(items),
             }
+            if with_info:
+                page["info"] = feed.info
+            return page
 
     def _drop_feed(self, key: str):
         """Chiude e dimentica un feed aperto, se c'è."""
@@ -1013,6 +1061,48 @@ class AuthManager:
         except Exception as e:
             print(f"[auth] Titolo non recuperabile per {video_id}: {e}")
             return None
+
+    # ── Pagina canale ──────────────────────────────────────────────────────
+
+    async def get_channel_page(self, channel_id: str, offset: int, limit: int,
+                               ydl_opts_base_fn) -> dict:
+        """
+        Una pagina della scheda "Video" di un canale, più l'intestazione.
+
+        Stesso meccanismo pigro di home e correlati: la scheda video di un
+        canale può contenere migliaia di video e scaricarla tutta per mostrarne
+        i primi trenta sarebbe una raffica di richieste per niente.
+
+        I cookie non servono (un canale è pubblico) ma se ci sono si usano lo
+        stesso, altrimenti YouTube tratta la sessione come anonima e in certi
+        casi chiede la verifica dell'età.
+        """
+        opts = {**ydl_opts_base_fn()}
+        cookie_path = self.get_cookie_path()
+        if cookie_path:
+            opts["cookiefile"] = cookie_path
+
+        page = await self._lazy_page(
+            f"channel:{channel_id}",
+            f"https://www.youtube.com/channel/{channel_id}/videos",
+            offset, limit, opts, CHANNEL_CHUNK, CHANNEL_MAX, with_info=True,
+        )
+        info = page.pop("info", {}) or {}
+        meta = channel_meta(info, channel_id)
+
+        # Nella scheda di un canale yt-dlp non ripete l'autore su ogni voce
+        # (è implicito): senza questo le card uscirebbero senza nome canale.
+        for v in page["results"]:
+            v["channel"] = v.get("channel") or meta["name"]
+            v["channel_id"] = v.get("channel_id") or meta["id"]
+
+        page["channel"] = meta
+        if not page["total"]:
+            # Distinguere "canale che non esiste / non raggiungibile" da
+            # "canale senza video caricati": la pagina lo spiega invece di
+            # restare vuota.
+            page["reason"] = "canale-non-trovato" if not meta["name"] else "nessun-video"
+        return page
 
     # ── Feed Iscrizioni ────────────────────────────────────────────────────
 

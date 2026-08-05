@@ -114,7 +114,10 @@ export const api = {
   // Per il Chromecast: URL assoluto (la TV scarica da sé) e codec compatibili.
   castUrl: (id, quality = "best") => `${getLanBase()}/api/mux/${id}?quality=${quality}&compat=1`,
   suggestions: (q) => apiFetch(`/api/suggestions?q=${encodeURIComponent(q)}`),
-  channelVideos: (id) => apiFetch(`/api/channel/${id}/videos`),
+  // Oltre ai video restituisce `channel` (nome, logo, copertina, iscritti):
+  // l'intestazione della pagina canale arriva dalla stessa estrazione.
+  channelVideos: (id, limit = 30, offset = 0) =>
+    apiFetch(`/api/channel/${id}/videos?limit=${limit}&offset=${offset}`),
   authStatus: () => apiFetch("/api/auth/status"),
   getAuthUrl: (client_id, client_secret) => apiFetch("/api/auth/url", {
     method: "POST", headers: { "Content-Type": "application/json" },

@@ -31,7 +31,11 @@ export default function VideoCard({ video, navigate, onPlay, onDownload, avatarU
           <div className="video-title">{video.title}</div>
           <div className="video-channel">{video.channel}</div>
           <div className="video-stats">
-            {formatViews(video.views)}{video.published ? ` • ${formatDate(video.published)}` : ""}
+            {/* Il separatore solo se c'è davvero qualcosa da separare: YouTube
+                non dà le visualizzazioni per i video appena usciti, e senza
+                questo la riga cominciava con un "• " orfano. */}
+            {[formatViews(video.views), video.published ? formatDate(video.published) : ""]
+              .filter(Boolean).join(" • ")}
           </div>
         </div>
       </div>

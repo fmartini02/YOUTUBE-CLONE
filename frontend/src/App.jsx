@@ -4,6 +4,7 @@ import HomePage from "./pages/HomePage";
 import VideoPage from "./pages/VideoPage";
 import SettingsPage from "./pages/SettingsPage";
 import SubscriptionsPage from "./pages/SubscriptionsPage";
+import ChannelPage from "./pages/ChannelPage";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import ServerSetup from "./components/ServerSetup";
@@ -35,6 +36,7 @@ function pageToUrl(page, params = {}) {
     case "search": return `/search?q=${encodeURIComponent(params.query || "")}`;
     case "video": return `/watch?v=${encodeURIComponent(params.videoId || "")}`;
     case "subscriptions": return "/subscriptions";
+    case "channel": return `/channel?id=${encodeURIComponent(params.channelId || "")}`;
     case "settings": return "/settings";
     default: return "/";
   }
@@ -46,6 +48,9 @@ function urlToPage() {
   if (path === "/watch") return { page: "video", params: { videoId: sp.get("v") || "" } };
   if (path === "/search") return { page: "search", params: { query: sp.get("q") || "" } };
   if (path === "/subscriptions") return { page: "subscriptions", params: {} };
+  // channelName non sta nell'URL: è solo un'anteprima del titolo, il nome vero
+  // lo restituisce il server insieme ai video.
+  if (path === "/channel") return { page: "channel", params: { channelId: sp.get("id") || "" } };
   if (path === "/settings") return { page: "settings", params: {} };
   return { page: "home", params: {} };
 }
@@ -157,6 +162,7 @@ export default function App() {
             {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}
             {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} authStatus={authStatus} />}
             {page === "subscriptions" && <SubscriptionsPage navigate={navigate} />}
+            {page === "channel"       && <ChannelPage channelId={pageParams.channelId} channelName={pageParams.channelName} navigate={navigate} />}
             {page === "settings"      && <SettingsPage navigate={navigate} />}
           </main>
         </div>
