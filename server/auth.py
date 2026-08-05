@@ -39,6 +39,9 @@ FEED_CHUNK = 30                # video per blocco (≈ 1 richiesta di continuazi
 FEED_CACHE_TTL = 1800          # 30 min: dopo tanto, un nuovo scroll riparte da capo
 RELATED_CHUNK = 25             # il mix di YouTube arriva a blocchi di ~25
 RELATED_MAX = 2000             # nessuno scorre così tanto la sidebar dei correlati
+# Il ripiego a ricerca non ha continuazioni infinite come il Mix: oltre questo
+# numero YouTube smette comunque di dare risultati pertinenti.
+RELATED_SEARCH_MAX = 60
 # Ogni feed aperto tiene viva un'istanza di yt-dlp: la home più i mix degli
 # ultimi video guardati bastano, gli altri si chiudono.
 MAX_OPEN_FEEDS = 6
@@ -149,6 +152,7 @@ class LazyFeed:
         # mantiene pigro il generatore.
         info = self._ydl.extract_info(url, download=False, process=False)
         self._iter = iter((info or {}).get("entries") or [])
+        self.url = url
         self.items: list = []
         self.exhausted = False
         self.created_at = time.time()
@@ -948,7 +952,67 @@ class AuthManager:
         # Il primo elemento del mix è il video di partenza: fuori posto in una
         # lista di "correlati".
         page["results"] = [v for v in page["results"] if v.get("id") != video_id]
+
+        # Non tutti i video hanno un Mix: YouTube non lo genera per i video
+        # poco visti o dei canali piccoli, e lì yt-dlp avvisa "Unable to
+        # recognize playlist" e ricade sul solo video di partenza. La sidebar
+        # restava vuota senza dire perché — capita proprio sui video che si
+        # aprono dalla home personalizzata.
+        if not page["total"]:
+            return await self._related_by_search(video_id, offset, limit, opts)
+
+        # Dalla seconda pagina in poi il feed aperto può già essere quello del
+        # ripiego: l'etichetta va letta da lì, non data per scontata.
+        page["source"] = self._related_source(video_id)
         return page
+
+    def _related_source(self, video_id: str) -> str:
+        """"mix" o "ricerca", secondo il feed effettivamente aperto per questo video."""
+        feed = self._feeds.get(f"related:{video_id}")
+        return "ricerca" if feed is not None and feed.url.startswith("ytsearch") else "mix"
+
+    async def _related_by_search(self, video_id: str, offset: int, limit: int, opts: dict) -> dict:
+        """
+        Ripiego quando il Mix non esiste: una ricerca sul titolo del video.
+
+        Meno "personale" del Mix e non infinita, ma per un video di nicchia i
+        risultati sono quasi sempre a tema — molto meglio di una colonna vuota.
+        """
+        title = await self._video_title(video_id, opts)
+        if not title:
+            return {"results": [], "total": 0, "has_more": False, "source": "nessuna"}
+
+        page = await self._lazy_page(
+            f"related:{video_id}", f"ytsearch{RELATED_SEARCH_MAX}:{title}",
+            offset, limit, opts, RELATED_CHUNK, RELATED_SEARCH_MAX,
+        )
+        # La ricerca per titolo restituisce quasi sempre il video stesso in cima.
+        page["results"] = [v for v in page["results"] if v.get("id") != video_id]
+        page["source"] = "ricerca"
+        return page
+
+    async def _video_title(self, video_id: str, opts: dict) -> Optional[str]:
+        """
+        Titolo di un video, al costo più basso possibile.
+
+        process=False evita a yt-dlp di risolvere i formati di riproduzione,
+        che è il pezzo lento: qui serve solo una stringa da cercare.
+        """
+        def _estrai():
+            import yt_dlp
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}",
+                    download=False, process=False,
+                )
+
+        try:
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(None, _estrai)
+            return (info or {}).get("title")
+        except Exception as e:
+            print(f"[auth] Titolo non recuperabile per {video_id}: {e}")
+            return None
 
     # ── Feed Iscrizioni ────────────────────────────────────────────────────
 
