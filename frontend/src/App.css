@@ -266,6 +266,11 @@ body {
 .video-channel { font-size: 12px; color: var(--text2); margin-bottom: 2px; }
 .video-stats { font-size: 12px; color: var(--text2); }
 
+/* Nome/logo del canale cliccabile (vedi ChannelLink): inline-block perché su
+   un elemento inline la parte cliccabile salterebbe a capo con il testo. */
+.channel-link { cursor: pointer; display: inline-block; max-width: 100%; }
+.channel-link:hover { color: var(--text); }
+
 /* ── VIDEO PAGE ────────────────────────────────── */
 .video-page { max-width: 1760px; margin: 0 auto; margin-top: 16px; }
 .video-page-layout { display: flex; gap: 24px; }

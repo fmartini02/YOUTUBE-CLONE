@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api, formatDuration, formatViews, formatDate } from "../api";
 import { useToast } from "../hooks/useToast";
+import ChannelLink from "../components/ChannelLink";
 
 export default function SearchPage({ query, navigate }) {
   const [results, setResults] = useState([]);
@@ -56,9 +57,12 @@ export default function SearchPage({ query, navigate }) {
             <div className="search-meta">
               <div className="search-title">{v.title}</div>
               <div className="search-stats">
-                {formatViews(v.views)}{v.published ? ` • ${formatDate(v.published)}` : ""}
+                {[formatViews(v.views), v.published ? formatDate(v.published) : ""]
+                  .filter(Boolean).join(" • ")}
               </div>
-              <div className="search-channel">{v.channel}</div>
+              <div className="search-channel">
+                <ChannelLink channelId={v.channel_id} name={v.channel} navigate={navigate} />
+              </div>
               <div className="search-actions" onClick={e => e.stopPropagation()}>
                 <button className="action-btn primary" onClick={() => navigate("video", { videoId: v.id })}>
                   ▶ Guarda

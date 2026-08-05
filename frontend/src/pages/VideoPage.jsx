@@ -5,6 +5,7 @@ import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
 import Comments from "../components/Comments";
 import VideoPlayer from "../components/VideoPlayer";
+import ChannelLink from "../components/ChannelLink";
 import { useChannelAvatars } from "../hooks/useChannelAvatars";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
@@ -222,13 +223,15 @@ export default function VideoPage({ videoId, navigate, authStatus }) {
               {/* Canale a sinistra, azioni a destra sulla stessa riga — come YouTube */}
               <div className="video-meta-row">
                 <div className="channel-row">
-                  <div className="channel-avatar">
+                  <ChannelLink channelId={info.channel_id} name={info.channel} navigate={navigate} className="channel-avatar">
                     {channelAvatar
                       ? <img src={channelAvatar} alt={info.channel} referrerPolicy="no-referrer" />
                       : (info.channel || "?")[0]}
-                  </div>
+                  </ChannelLink>
                   <div>
-                    <div className="channel-name">{info.channel}</div>
+                    <div className="channel-name">
+                      <ChannelLink channelId={info.channel_id} name={info.channel} navigate={navigate} />
+                    </div>
                     <div className="channel-subs">{formatViews(info.views)}</div>
                   </div>
                 </div>
@@ -272,6 +275,7 @@ export default function VideoPage({ videoId, navigate, authStatus }) {
                 videoId={videoId}
                 channelId={info.channel_id}
                 authStatus={authStatus}
+                navigate={navigate}
                 onToast={addToast}
               />
             </>
@@ -289,7 +293,9 @@ export default function VideoPage({ videoId, navigate, authStatus }) {
               </div>
               <div className="related-meta">
                 <div className="related-title">{v.title}</div>
-                <div className="related-channel">{v.channel}</div>
+                <div className="related-channel">
+                  <ChannelLink channelId={v.channel_id} name={v.channel} navigate={navigate} />
+                </div>
                 <div className="related-views">{formatViews(v.views)}</div>
               </div>
             </div>

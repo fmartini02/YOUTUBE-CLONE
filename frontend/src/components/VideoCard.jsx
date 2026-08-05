@@ -1,4 +1,5 @@
 import { formatDuration, formatViews, formatDate } from "../api";
+import ChannelLink from "./ChannelLink";
 
 export default function VideoCard({ video, navigate, onPlay, onDownload, avatarUrl }) {
   const avatar = video.avatar || avatarUrl;
@@ -19,17 +20,19 @@ export default function VideoCard({ video, navigate, onPlay, onDownload, avatarU
         </div>
       </div>
       <div className="video-info">
-        <div className="avatar">
+        <ChannelLink channelId={video.channel_id} name={video.channel} navigate={navigate} className="avatar">
           {/* referrerPolicy no-referrer: con il Referer di localhost i server
               yt3.ggpht.com rispondono 429 con una pagina HTML, e Chromium la
               blocca (ERR_BLOCKED_BY_ORB) — senza questo il logo resta vuoto. */}
           {avatar
             ? <img src={avatar} alt={video.channel} loading="lazy" referrerPolicy="no-referrer" />
             : (video.channel || "?")[0]}
-        </div>
+        </ChannelLink>
         <div className="video-meta">
           <div className="video-title">{video.title}</div>
-          <div className="video-channel">{video.channel}</div>
+          <div className="video-channel">
+            <ChannelLink channelId={video.channel_id} name={video.channel} navigate={navigate} />
+          </div>
           <div className="video-stats">
             {/* Il separatore solo se c'è davvero qualcosa da separare: YouTube
                 non dà le visualizzazioni per i video appena usciti, e senza

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, timeAgo, formatViews } from "../api";
+import ChannelLink from "./ChannelLink";
 
 /**
  * Sezione commenti della pagina video.
@@ -31,13 +32,27 @@ function errorMessage(e, fallback) {
   return raw.slice(0, 160) || fallback;
 }
 
-function Avatar({ src, name, size = 36 }) {
+/**
+ * Avatar di chi ha scritto. Con `channelId` e `navigate` porta al canale
+ * dell'autore; la casella di scrittura passa solo l'immagine, quindi lì resta
+ * un tondo qualsiasi.
+ */
+function Avatar({ src, name, size = 36, channelId, navigate }) {
   return (
-    <div className="channel-avatar" style={{ width: size, height: size, fontSize: size / 2.8, flexShrink: 0, overflow: "hidden" }}>
+    <ChannelLink
+      channelId={channelId}
+      name={name}
+      navigate={navigate}
+      className="channel-avatar"
+      style={{ width: size, height: size, fontSize: size / 2.8, flexShrink: 0, overflow: "hidden" }}
+    >
+      {/* referrerPolicy no-referrer come nelle card: con il Referer di
+          localhost yt3.ggpht.com risponde 429 e Chromium blocca la risposta —
+          senza, al posto dei loghi si vedeva il testo alternativo. */}
       {src
-        ? <img src={src} alt={name || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ? <img src={src} alt={name || ""} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         : (name || "?").replace("@", "")[0]}
-    </div>
+    </ChannelLink>
   );
 }
 
@@ -88,7 +103,7 @@ function CommentBox({ me, placeholder, busy, onSubmit, onCancel, autoFocus }) {
   );
 }
 
-function CommentItem({ c, videoId, me, canComment, supportsReplies, onToast }) {
+function CommentItem({ c, videoId, me, canComment, supportsReplies, navigate, onToast }) {
   const [replies, setReplies] = useState([]);
   const [repliesToken, setRepliesToken] = useState("");
   const [repliesOpen, setRepliesOpen] = useState(false);
@@ -132,10 +147,15 @@ function CommentItem({ c, videoId, me, canComment, supportsReplies, onToast }) {
 
   return (
     <div style={{ display: "flex", gap: 12 }}>
-      <Avatar src={c.author_thumbnail} name={c.author} />
+      <Avatar src={c.author_thumbnail} name={c.author} channelId={c.author_channel_id} navigate={navigate} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>{c.author}</span>
+          <ChannelLink
+            channelId={c.author_channel_id}
+            name={c.author}
+            navigate={navigate}
+            style={{ fontSize: 13, fontWeight: 500 }}
+          />
           {c.author_is_uploader && (
             <span style={{ fontSize: 10, color: "var(--accent)", border: "1px solid var(--accent)", borderRadius: 4, padding: "0 4px" }}>
               AUTORE
@@ -188,10 +208,15 @@ function CommentItem({ c, videoId, me, canComment, supportsReplies, onToast }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 12, paddingLeft: 8, borderLeft: "2px solid var(--border)" }}>
             {replies.map(r => (
               <div key={r.id} style={{ display: "flex", gap: 10 }}>
-                <Avatar src={r.author_thumbnail} name={r.author} size={26} />
+                <Avatar src={r.author_thumbnail} name={r.author} size={26} channelId={r.author_channel_id} navigate={navigate} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>{r.author}</span>
+                    <ChannelLink
+                      channelId={r.author_channel_id}
+                      name={r.author}
+                      navigate={navigate}
+                      style={{ fontSize: 12, fontWeight: 500 }}
+                    />
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>{timeAgo(r.published)}</span>
                   </div>
                   <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
@@ -217,7 +242,7 @@ function CommentItem({ c, videoId, me, canComment, supportsReplies, onToast }) {
   );
 }
 
-export default function Comments({ videoId, channelId, authStatus, onToast }) {
+export default function Comments({ videoId, channelId, authStatus, navigate, onToast }) {
   const [comments, setComments] = useState([]);
   const [count, setCount] = useState(null);
   const [nextToken, setNextToken] = useState("");
@@ -342,6 +367,7 @@ export default function Comments({ videoId, channelId, authStatus, onToast }) {
                 me={me}
                 canComment={canComment}
                 supportsReplies={supportsReplies}
+                navigate={navigate}
                 onToast={toast}
               />
             ))}
