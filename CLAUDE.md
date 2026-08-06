@@ -58,6 +58,8 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 
 Sui cookie c'è una trappola che vale la pena ricordare: contano solo quelli di **prima parte sul dominio `youtube.com`** (`SID`, `__Secure-1PSID`, `LOGIN_INFO`, `SAPISID`). Essere loggati su `google.com` non basta — un profilo browser loggato su Google ma che non ha mai aperto YouTube produce un `cookies.txt` di decine di cookie in cui YouTube ti vede comunque anonimo, quindi feed vuoti. `_youtube_auth_cookies()` in `auth.py` è il controllo che distingue i due casi, e `get_cookie_status()` lo espone come `logged_in`.
 
+Da quella trappola discende una regola: **yt-dlp si istanzia sempre con `crea_ydl()` (`auth.py`), mai con `yt_dlp.YoutubeDL()`**. `YoutubeDL.close()` chiama sempre `save_cookies()`, quindi ogni estrazione riscrive `cookies.txt` con il jar che ha in memoria — e se YouTube ha appena invalidato la sessione quel jar contiene un logout, che così diventa permanente sul file. `crea_ydl()` mette il controllo sul cookie jar: la rotazione normale dei cookie si salva, la cancellazione della sessione no.
+
 Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
 
 ### Fallback dei feed (catena voluta, non accidentale)

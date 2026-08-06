@@ -108,6 +108,62 @@ def youtube_auth_cookies(names_by_domain) -> set:
     }
 
 
+_logout_segnalato = False
+
+
+def segnala_logout_youtube(segnala: bool = True):
+    """Avvisa una volta sola che la sessione è caduta; `False` riarma l'avviso."""
+    global _logout_segnalato
+    if not segnala:
+        _logout_segnalato = False
+        return
+    if _logout_segnalato:
+        return
+    _logout_segnalato = True
+    print("[auth] YouTube ha invalidato la sessione: cookies.txt lasciato "
+          "intatto. Reimporta i cookie dalle Impostazioni.")
+
+
+def crea_ydl(opts: dict):
+    """
+    Istanza yt-dlp che non può scrivere un logout su cookies.txt.
+
+    **Va usata al posto di `yt_dlp.YoutubeDL(...)` ovunque nel server**, perché
+    la scrittura pericolosa non è una nostra chiamata: `YoutubeDL.close()`
+    chiama sempre `save_cookies()`, quindi ogni estrazione riversa sul file il
+    proprio jar quando finisce — anche un jar appena rimasto senza sessione.
+
+    E succede: quando YouTube decide di invalidare la sessione manda dei
+    Set-Cookie che scadono i cookie di autenticazione, yt-dlp li toglie dal jar
+    e alla chiusura li cancella dal file. Da lì in poi cookies.txt è anonimo per
+    sempre: reimportarlo lo ripara per qualche richiesta, poi succede di nuovo.
+    Lo stesso vale per due estrazioni in parallelo, dove l'ultima che chiude
+    sovrascrive i cookie ruotati dall'altra.
+
+    Qui il controllo sta sul cookie jar, cioè sotto ogni possibile salvataggio:
+    se l'autenticazione è sparita dal jar il file resta com'è, perché quei
+    cookie sono l'unica copia che abbiamo. Finché invece la sessione è viva si
+    salva normalmente — è necessario, YouTube ruota i cookie ad ogni richiesta
+    e si aspetta che il client usi i nuovi.
+    """
+    import yt_dlp
+    ydl = yt_dlp.YoutubeDL(opts)
+    if not opts.get("cookiefile"):
+        return ydl
+
+    jar = ydl.cookiejar
+    salva_davvero = jar.save
+
+    def save(*args, **kwargs):
+        if not youtube_auth_cookies((c.domain, c.name) for c in jar):
+            segnala_logout_youtube()
+            return
+        salva_davvero(*args, **kwargs)
+
+    jar.save = save
+    return ydl
+
+
 def is_video_entry(e) -> bool:
     """
     Scarta le voci che non sono video singoli. I feed di YouTube includono
@@ -178,8 +234,7 @@ class LazyFeed:
     """
 
     def __init__(self, url: str, opts: dict):
-        import yt_dlp
-        self._ydl = yt_dlp.YoutubeDL(opts)
+        self._ydl = crea_ydl(opts)
         # process=False evita che yt-dlp materializzi l'intera lista: è ciò che
         # mantiene pigro il generatore.
         info = self._ydl.extract_info(url, download=False, process=False)
@@ -193,13 +248,11 @@ class LazyFeed:
         self.items: list = []
         self.exhausted = False
         self.created_at = time.time()
-        self._logout_segnalato = False
         self._persist_cookies()
 
     def _persist_cookies(self):
         """
-        Riscrive su disco i cookie aggiornati da YouTube — ma solo finché
-        restano cookie di una sessione valida.
+        Riscrive su disco i cookie aggiornati da YouTube, ad ogni blocco.
 
         Ad ogni richiesta YouTube ruota alcuni cookie di sessione (SIDCC e
         simili) e si aspetta che il client usi i nuovi. yt-dlp lo fa in memoria
@@ -208,24 +261,11 @@ class LazyFeed:
         ripartire da cookie ormai vecchi — ed è così che la sessione viene
         invalidata da YouTube.
 
-        Il controllo prima di scrivere serve al caso opposto, ed è il motivo
-        per cui la home poteva svuotarsi da sola e non tornare più: quando
-        YouTube decide di invalidare la sessione manda dei Set-Cookie che
-        scadono i cookie di autenticazione, yt-dlp li toglie dal jar e questo
-        salvataggio scriveva il logout sul file. Da lì in poi cookies.txt era
-        anonimo per sempre — reimportarlo lo riparava per qualche richiesta, poi
-        succedeva di nuovo. Se l'autenticazione è sparita dal jar, il file
-        resta com'è: quei cookie sono l'unica copia che abbiamo.
+        Scrivere il logout deciso da YouTube invece non è possibile: ci pensa il
+        jar protetto di `crea_ydl`.
         """
         try:
-            jar = self._ydl.cookiejar
-            if not youtube_auth_cookies((c.domain, c.name) for c in jar):
-                if not self._logout_segnalato:
-                    self._logout_segnalato = True
-                    print("[auth] YouTube ha invalidato la sessione: cookies.txt "
-                          "lasciato intatto. Reimporta i cookie dalle Impostazioni.")
-                return
-            jar.save()
+            self._ydl.save_cookies()
         except Exception as e:
             print(f"[auth] Impossibile salvare i cookie aggiornati: {e}")
 
@@ -639,8 +679,9 @@ class AuthManager:
         personalizzato, ed è meglio dirlo subito che farlo scoprire da una home
         che mostra i trending.
         """
+        self.invalidate_feeds()  # prima di scrivere: vedi invalidate_feeds()
         COOKIE_FILE.write_text(content)
-        self.invalidate_feeds()
+        segnala_logout_youtube(False)  # sessione nuova: l'avviso può tornare utile
         pairs = list(self._parse_netscape(content))
         valid = "# Netscape HTTP Cookie File" in content or any(
             d.endswith("youtube.com") for d, _ in pairs
@@ -740,8 +781,9 @@ class AuthManager:
         auth = self._youtube_auth_cookies((ck.domain, ck.name) for ck in jar)
         if not auth:
             return {"valid": False, "cookie_count": count, "logged_in": False}
+        self.invalidate_feeds()  # prima di scrivere: vedi invalidate_feeds()
         out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
-        self.invalidate_feeds()
+        segnala_logout_youtube(False)  # sessione nuova: l'avviso può tornare utile
         return {"valid": True, "cookie_count": count, "logged_in": True}
 
     def get_cookie_path(self) -> Optional[str]:
@@ -911,6 +953,11 @@ class AuthManager:
         cookie non aveva effetto sulla home finché il feed non scadeva da solo.
         I lock restano dove sono — appartengono alle richieste in corso, non ai
         feed.
+
+        Chi reimporta i cookie deve chiamarla PRIMA di scrivere il file nuovo:
+        chiudere un feed fa salvare a yt-dlp la sua copia dei cookie, che
+        sovrascriverebbe quelli appena importati con quelli della sessione
+        vecchia.
         """
         for key in list(self._feeds):
             self._drop_feed(key)
@@ -1047,8 +1094,7 @@ class AuthManager:
         che è il pezzo lento: qui serve solo una stringa da cercare.
         """
         def _estrai():
-            import yt_dlp
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            with crea_ydl(opts) as ydl:
                 return ydl.extract_info(
                     f"https://www.youtube.com/watch?v={video_id}",
                     download=False, process=False,
@@ -1121,13 +1167,12 @@ class AuthManager:
             if self._cookie_feed_cache and time.time() - self._cookie_feed_cache_at < COOKIE_FEED_CACHE_TTL:
                 return self._cookie_feed_cache
             try:
-                import yt_dlp
                 opts = {
                     **ydl_opts_base_fn(),
                     "cookiefile": cookie_path,
                     "playlistend": 100,
                 }
-                with yt_dlp.YoutubeDL(opts) as ydl:
+                with crea_ydl(opts) as ydl:
                     info = ydl.extract_info("https://www.youtube.com/feed/subscriptions", download=False)
                     entries = (info or {}).get("entries", [])
                     results = []
@@ -1166,7 +1211,6 @@ class AuthManager:
 
     async def _fetch_channel_latest(self, ch: dict, ydl_opts_base_fn, sem: asyncio.Semaphore) -> list:
         """Ultimi video di UN canale iscritto, con logo già allegato (gratis, viene da sync_subscriptions)."""
-        import yt_dlp
         if not ch.get("id"):
             return []
         async with sem:
@@ -1175,7 +1219,7 @@ class AuthManager:
                 loop = asyncio.get_event_loop()
 
                 def _extract():
-                    with yt_dlp.YoutubeDL(opts) as ydl:
+                    with crea_ydl(opts) as ydl:
                         return ydl.extract_info(f"https://www.youtube.com/channel/{ch['id']}/videos", download=False)
 
                 info = await loop.run_in_executor(None, _extract)

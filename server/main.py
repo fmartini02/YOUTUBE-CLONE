@@ -14,9 +14,10 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
-import yt_dlp
 
-from auth import auth_manager, is_video_entry, YouTubeAPIError
+# crea_ydl al posto di yt_dlp.YoutubeDL: stessa istanza, ma incapace di
+# cancellare la sessione da cookies.txt quando chiude (vedi il suo docstring).
+from auth import auth_manager, crea_ydl, is_video_entry, YouTubeAPIError
 from sync import scheduler
 from ytdlp_patch import applica_patch_collaborazioni
 
@@ -146,7 +147,7 @@ async def search(q: str = Query(...), page: int = 1):
             **ydl_opts_base(),
             "playlist_items": f"{(page - 1) * per_page + 1}-{want}",
         }
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"ytsearch{want}:{q}", download=False)
             entries = info.get("entries", [])
             results = []
@@ -198,7 +199,7 @@ async def trending(limit: int = 24, offset: int = 0):
             **ydl_opts_base(),
             "playlistend": 120,
         }
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info("https://www.youtube.com/results?search_query=trending+italia&sp=CAISAhAB", download=False)
             entries = (info or {}).get("entries", [])
             results = []
@@ -230,7 +231,7 @@ async def video_info(video_id: str):
     """Get video metadata."""
     try:
         opts = {**ydl_opts_base(), "extract_flat": False}
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             return {
                 "id": info.get("id"),
@@ -285,7 +286,7 @@ def _extract_comments_ytdlp(video_id: str, sort: str, max_comments: int) -> dict
             "comment_sort": ["top" if sort != "new" else "new"],
         }},
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    with crea_ydl(opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     comments = []
     for c in (info.get("comments") or []):
@@ -479,7 +480,7 @@ async def list_subtitles(video_id: str):
     """Lingue sottotitoli disponibili per il video (quasi sempre solo automatici — i sottotitoli caricati a mano sono rari)."""
     try:
         opts = {**ydl_opts_base(), "extract_flat": False}
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
         merged = _subtitle_tracks(info)
         # YouTube traduce automaticamente in ~150 lingue: senza filtro il menu
@@ -503,7 +504,7 @@ async def get_subtitle_vtt(video_id: str, lang: str):
     """Proxy del sottotitolo WebVTT — scaricato qui invece che puntare il <track> direttamente a YouTube per evitare problemi di CORS."""
     try:
         opts = {**ydl_opts_base(), "extract_flat": False}
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
         merged = _subtitle_tracks(info)
         entry = merged.get(lang)
@@ -532,7 +533,7 @@ async def stream_video(video_id: str, quality: str = "best"):
             "extract_flat": False,
             "format": _progressive_format_selector(quality),
         }
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             url = info.get("url")
             if not url:
@@ -557,7 +558,7 @@ async def watch(video_id: str, quality: str = "best"):
             "extract_flat": False,
             "format": _progressive_format_selector(quality),
         }
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             url = info.get("url")
             if not url:
@@ -605,7 +606,7 @@ def _mux_formats(video_id: str, quality: str, compat: bool):
     # assoluto, che sarebbe AV1+Opus e la TV non lo riprodurrebbe.
     selector = _cast_format_selector(quality) if compat else _adaptive_format_selector(quality)
     opts = {**ydl_opts_base(), "extract_flat": False, "format": selector}
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    with crea_ydl(opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
 
     requested = info.get("requested_formats")
@@ -774,7 +775,7 @@ async def download_video(video_id: str, quality: str = "best"):
             "merge_output_format": "mp4",
             "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
         }
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with crea_ydl(opts) as ydl:
             ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
 
         # find actual file
