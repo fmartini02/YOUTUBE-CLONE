@@ -151,6 +151,43 @@ iscrizioni reale. Due modi:
 
 I cookie scadono: dopo 2 settimane l'app mostra un avviso per rigenerarli.
 
+#### Si configurano una volta sola, dal PC
+
+I cookie vivono **sul server**, in un unico `data/cookies.txt`, e valgono per
+tutti i client insieme: caricali una volta e home e iscrizioni personalizzate
+compaiono anche sull'APK e sulla Smart TV, senza toccare nulla su quei
+dispositivi. Su telefono e TV non c'è niente da configurare, e non è previsto
+farci il login: il login di Google dentro una WebView è bloccato dalla policy
+"secure browsers", e l'alternativa approvata (Chrome Custom Tabs) tiene i cookie
+nel browser, dove l'app non può leggerli.
+
+Quindi, con il **server su un'altra macchina** (secondo PC, Raspberry, NAS):
+
+1. dal tuo PC apri `http://<ip-del-server>:8090` in un browser normale;
+2. vai su ⚙️ **Impostazioni** → sezione *Cookie YouTube*;
+3. apri una scheda su **youtube.com**, verifica di essere loggato ed esporta i
+   cookie **di quel solo sito** con l'estensione;
+4. trascina il `cookies.txt` nel riquadro. Il file viene caricato via HTTP,
+   quindi funziona da qualsiasi macchina della rete.
+
+In questo caso il pulsante di **import automatico non compare**, e non è un
+guasto: quel controllo legge i profili dei browser installati sulla macchina
+che *esegue* il server, non su quella da cui stai guardando la pagina. Stesso
+sintomo se il server gira con un utente diverso dal tuo (servizio systemd,
+`sudo`, container): home diversa, profili non trovati.
+
+> ⚠️ Il `cookies.txt` **è una sessione già aperta**: chi ce l'ha entra come te
+> senza password e senza 2FA, che non viene mai chiesto. Esportalo dal solo
+> dominio `youtube.com`, cancellalo da `~/Downloads` dopo averlo caricato e non
+> passarlo mai su chat o mail. Se ti scappa, revocalo da *account Google →
+> Sicurezza → esci da tutti i dispositivi*. È già in `.gitignore`; su una
+> macchina condivisa vale un `chmod 600 data/cookies.txt`.
+
+Evita infine di tenere **due server accesi sugli stessi cookie**: YouTube ruota
+i cookie di sessione ad ogni estrazione, e due copie che ruotano in parallelo
+finiscono per invalidarsi a vicenda. Spegni il vecchio, o riesporta un file
+nuovo per la macchina nuova.
+
 ### 🔑 Account Google → iscrizioni, loghi dei canali e commenti
 
 Serve per la YouTube Data API v3: elenco canali iscritti, avatar, e i commenti
