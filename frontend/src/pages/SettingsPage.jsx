@@ -361,17 +361,33 @@ function CastDiagnostics() {
   // http in rete locale, segnalarlo come errore mandava fuori strada. Quello
   // che conta davvero è che l'indirizzo non sia localhost, perché è la TV a
   // scaricare il video.
+  //
+  // Ci sono poi piattaforme dove il componente Cast non esiste proprio: l'app
+  // Android, Electron, i browser non Chromium. Lì le righe sull'SDK sarebbero
+  // tutte rosse senza dire niente di più della frase di spiegazione — anzi,
+  // facevano sembrare guasto qualcosa che semplicemente non c'è.
+  const senzaSupporto = ["app-android", "electron", "browser"].includes(cast?.unavailableReason);
+
   const rows = [
     ["Indirizzo dato alla TV", castBase === null ? "…" : (castBase || `non ricavabile (pagina su ${origin})`), !!castBase],
-    ["Script Google Cast caricato", script ? "sì" : "no", script],
-    ["API chrome.cast presente", chromeCast ? "sì" : "no", chromeCast],
-    ["Framework Cast pronto", castFw ? "sì" : "no", castFw],
+    ...(senzaSupporto ? [] : [
+      ["Script Google Cast caricato", script ? "sì" : "no", script],
+      ["API chrome.cast presente", chromeCast ? "sì" : "no", chromeCast],
+      ["Framework Cast pronto", castFw ? "sì" : "no", castFw],
+    ]),
     ["Trasmissione disponibile", cast?.available ? "sì" : "no", !!cast?.available],
     ["Dispositivo collegato", cast?.connected ? cast.deviceName || "sì" : "no", !!cast?.connected],
   ];
 
   return (
     <div>
+      {/* La spiegazione sta sopra la tabella: quando la trasmissione non è
+          proprio possibile è l'unica riga che serve leggere. */}
+      {!cast?.available && cast?.unavailableReason && (
+        <p style={{ fontSize: 13, color: "#ffc800", marginBottom: 12, lineHeight: 1.6 }}>
+          {CAST_UNAVAILABLE_MESSAGE[cast.unavailableReason] || cast.unavailableReason}
+        </p>
+      )}
       <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
         <tbody>
           {rows.map(([label, value, ok]) => (
@@ -384,11 +400,6 @@ function CastDiagnostics() {
           ))}
         </tbody>
       </table>
-      {!cast?.available && cast?.unavailableReason && (
-        <p style={{ fontSize: 13, color: "#ffc800", marginTop: 12, lineHeight: 1.6 }}>
-          {CAST_UNAVAILABLE_MESSAGE[cast.unavailableReason] || cast.unavailableReason}
-        </p>
-      )}
     </div>
   );
 }

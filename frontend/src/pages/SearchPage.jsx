@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { api, formatDuration, formatViews, formatDate } from "../api";
 import { useToast } from "../hooks/useToast";
-import ChannelLink from "../components/ChannelLink";
+import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
 
 export default function SearchPage({ query, navigate }) {
   const [results, setResults] = useState([]);
@@ -49,7 +49,14 @@ export default function SearchPage({ query, navigate }) {
       </p>
       <div className="search-results">
         {results.map(v => (
-          <div key={v.id} className="search-card" onClick={() => navigate("video", { videoId: v.id })}>
+          <div
+            key={v.id}
+            className="search-card"
+            onClick={e => {
+              if (daLinkCanale(e)) return;   // tocco sul canale: si va al canale
+              navigate("video", { videoId: v.id });
+            }}
+          >
             <div className="search-thumb">
               <img src={v.thumbnail} alt={v.title} loading="lazy" />
               {v.duration && <span className="search-duration">{formatDuration(v.duration)}</span>}

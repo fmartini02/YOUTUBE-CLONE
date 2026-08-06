@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- enableOnBackInvokedCallback: il tasto Indietro e la gesture passano
+         dall'OnBackPressedDispatcher (vedi MainActivity). Su Android 13/14 va
+         chiesto esplicitamente; da Android 15 con targetSdk 35+ è già così. -->
     <application
+        android:enableOnBackInvokedCallback="true"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../api";
+import { useTouchDevice } from "../hooks/useMediaQuery";
 
 /**
  * Player con controlli propri, al posto di quelli nativi del browser.
@@ -38,6 +39,19 @@ function isBuffered(video, t) {
 const SKIP_SECONDS = 10;
 const VOLUME_STEP = 0.05;
 
+// Quanto si aspetta un secondo tocco prima di dare per buono il primo. È anche
+// il ritardo con cui il tocco singolo mette in pausa: sotto i ~250ms i doppi
+// tocchi veri sfuggono, sopra i ~400ms il player sembra lento a rispondere.
+const DOUBLE_TAP_MS = 300;
+// Oltre questa distanza il dito stava scorrendo la pagina, non toccando il
+// video: senza il controllo, ogni scorrimento partito dal player lo metteva
+// in pausa.
+const TAP_SLOP_PX = 12;
+// Terzo sinistro e terzo destro saltano avanti/indietro; la fascia centrale no,
+// altrimenti un doppio tocco al centro (dove si mira per la pausa) muoverebbe
+// il video invece di fermarlo.
+const TAP_SIDE_RATIO = 0.35;
+
 export default function VideoPlayer({
   videoId,
   quality,
@@ -56,6 +70,9 @@ export default function VideoPlayer({
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
   const barRef = useRef(null);
+  // Dito o mouse: cambia proprio il modo di comandare il player (vedi la
+  // sezione "Tocchi sullo schermo" più sotto), non solo l'aspetto.
+  const touch = useTouchDevice();
 
   // `start` è il secondo da cui il flusso corrente è stato aperto; `n` serve a
   // forzare la riapertura anche quando si torna sullo stesso secondo.
@@ -203,6 +220,83 @@ export default function VideoPlayer({
   // Con il menu aperto i controlli non devono sparire da sotto il puntatore.
   useEffect(() => { if (settingsOpen) { clearTimeout(hideTimer.current); setControlsVisible(true); } }, [settingsOpen]);
 
+  // ── Tocchi sullo schermo ───────────────────────────────────────────────
+  // Col dito valgono regole diverse dal mouse, le stesse dell'app di YouTube:
+  //
+  //   un tocco    → mostra i comandi; SOLO se erano già visibili mette in
+  //                 pausa o riparte. Prima bastava un tocco qualsiasi per
+  //                 fermare il video, anche quando si voleva solo vedere a che
+  //                 punto era — cioè quasi sempre.
+  //   due tocchi  → a sinistra indietro di 10 secondi, a destra avanti di 10.
+  //
+  // I tocchi ravvicinati si sommano (10, 20, 30…) e il salto vero parte una
+  // volta sola alla fine: ogni salto riapre il flusso da /api/mux, farne tre di
+  // fila vorrebbe dire tre ffmpeg per niente.
+  const tapRef = useRef({ time: 0, side: null, timer: null, start: null });
+  const seekBurstRef = useRef({ delta: 0, timer: null });
+  const [seekFlash, setSeekFlash] = useState(null);   // {side, seconds}
+  const flashTimer = useRef(null);
+
+  useEffect(() => () => {
+    clearTimeout(tapRef.current.timer);
+    clearTimeout(seekBurstRef.current.timer);
+    clearTimeout(flashTimer.current);
+  }, []);
+
+  function flashSeek(side, seconds) {
+    setSeekFlash({ side, seconds });
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setSeekFlash(null), 600);
+  }
+
+  function onVideoPointerDown(e) {
+    tapRef.current.start = { x: e.clientX, y: e.clientY };
+  }
+
+  function onVideoPointerUp(e) {
+    const t = tapRef.current;
+    const start = t.start;
+    t.start = null;
+    if (!start) return;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const side = x < rect.width * TAP_SIDE_RATIO ? "left"
+      : x > rect.width * (1 - TAP_SIDE_RATIO) ? "right"
+      : "center";
+
+    const now = Date.now();
+    const doubleTap = side !== "center" && side === t.side && now - t.time < DOUBLE_TAP_MS;
+    t.time = now;
+    t.side = side;
+
+    if (doubleTap) {
+      clearTimeout(t.timer);            // il tocco singolo in attesa non vale più
+      const burst = seekBurstRef.current;
+      burst.delta += side === "left" ? -SKIP_SECONDS : SKIP_SECONDS;
+      flashSeek(side, Math.abs(burst.delta));
+      clearTimeout(burst.timer);
+      burst.timer = setTimeout(() => {
+        const delta = burst.delta;
+        burst.delta = 0;
+        skip(delta);
+      }, DOUBLE_TAP_MS);
+      bumpControls();
+      return;
+    }
+
+    // Primo tocco: si decide solo dopo aver escluso il secondo. `controlsVisible`
+    // è quello del momento del tocco, ed è giusto così: conta cosa vedeva
+    // l'utente quando ha toccato.
+    const wasVisible = controlsVisible;
+    clearTimeout(t.timer);
+    t.timer = setTimeout(() => {
+      if (wasVisible) togglePlay();
+      bumpControls();
+    }, DOUBLE_TAP_MS);
+  }
+
   // ── Schermo intero: stato + correzione ─────────────────────────────────
   // Su alcune piattaforme (iOS, o un doppio click intercettato dal browser) a
   // schermo intero va il solo <video>, e la barra dei controlli — che vive nel
@@ -296,15 +390,27 @@ export default function VideoPlayer({
     <div
       className={`player-wrap${controlsVisible ? "" : " hide-controls"}`}
       ref={wrapRef}
-      onPointerMove={bumpControls}
-      onPointerLeave={() => { if (playing && !settingsOpen) setControlsVisible(false); }}
+      // Solo il mouse fa comparire i comandi muovendosi: col dito un tocco
+      // genera comunque un pointermove, e i comandi sarebbero già "visibili"
+      // prima ancora che il tocco venga interpretato. Stesso motivo per
+      // pointerleave, che al termine di ogni tocco li faceva sparire subito.
+      onPointerMove={e => { if (e.pointerType === "mouse") bumpControls(); }}
+      onPointerLeave={e => {
+        if (e.pointerType === "mouse" && playing && !settingsOpen) setControlsVisible(false);
+      }}
     >
       <video
         ref={videoRef}
         className={`subtitle-size-${subtitleSize}`}
         playsInline
-        onClick={togglePlay}
-        onDoubleClick={toggleFullscreen}
+        // Mouse e dito si escludono a vicenda: col dito il click arriverebbe
+        // comunque dopo il pointerup e metterebbe in pausa due volte, e il
+        // doppio click aprirebbe lo schermo intero al posto del salto di 10s.
+        onClick={touch ? undefined : togglePlay}
+        onDoubleClick={touch ? undefined : toggleFullscreen}
+        onPointerDown={touch ? onVideoPointerDown : undefined}
+        onPointerUp={touch ? onVideoPointerUp : undefined}
+        onPointerCancel={touch ? () => { tapRef.current.start = null; } : undefined}
         onPlay={() => { setPlaying(true); bumpControls(); }}
         onPause={() => { setPlaying(false); setControlsVisible(true); }}
         onWaiting={() => setBuffering(true)}
@@ -344,6 +450,17 @@ export default function VideoPlayer({
 
       {buffering && <div className="player-spinner" />}
 
+      {/* Riscontro del doppio tocco: senza, un salto che deve ancora riaprire
+          il flusso sembra un tocco andato a vuoto. */}
+      {seekFlash && (
+        <div className={`player-seek-flash ${seekFlash.side}`}>
+          <span className="material-symbols-outlined">
+            {seekFlash.side === "left" ? "fast_rewind" : "fast_forward"}
+          </span>
+          <span>{seekFlash.seconds} s</span>
+        </div>
+      )}
+
       {!playing && !buffering && (
         <button className="player-big-play" onClick={togglePlay} aria-label="Riproduci">
           <span className="material-symbols-outlined">play_arrow</span>
@@ -351,7 +468,7 @@ export default function VideoPlayer({
       )}
 
       {/* ── Barra dei controlli ──────────────────────────────────────── */}
-      <div className="player-bar" onPointerMove={bumpControls}>
+      <div className="player-bar" onPointerMove={e => { if (e.pointerType === "mouse") bumpControls(); }}>
         <div
           className="player-progress"
           ref={barRef}

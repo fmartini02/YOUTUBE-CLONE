@@ -21,6 +21,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const RECEIVER_APP_ID = import.meta.env.VITE_CAST_APP_ID || "CC1AD845";
 
 export const CAST_UNAVAILABLE_MESSAGE = {
+  "app-android": "La trasmissione non è disponibile nell'app Android: il componente Google Cast esiste solo in Chrome, Brave o Edge su computer. Per mandare un video sulla TV apri YTProxy dal browser del PC; in alternativa usa la trasmissione schermo di Android.",
   electron: "La trasmissione non è disponibile nell'app desktop: apri YTProxy in Chrome, Brave o Edge.",
   browser: "Serve un browser Chrome, Brave o Edge per trasmettere.",
   blocked: "Lo script di Google Cast è stato bloccato (Brave Shields o adblocker). Disattiva lo scudo su questo sito e ricarica.",
@@ -49,6 +50,14 @@ function loadCastSdk() {
 
     if (/Electron/i.test(navigator.userAgent) || window.__YTPROXY_ELECTRON__) {
       return resolve({ ok: false, reason: "electron" });
+    }
+    // WebView di Android (app Capacitor): la UA contiene "Chrome" e supera il
+    // controllo qui sotto, ma il componente Cast non c'è. Senza questo caso si
+    // scaricava lo script di Google per niente e si aspettavano 8 secondi per
+    // dire "timeout", cioè un motivo sbagliato: non è un problema di rete o di
+    // impostazioni del browser, su Android quel componente non esiste.
+    if (window.Capacitor?.isNativePlatform?.() || /;\s*wv\)/.test(navigator.userAgent)) {
+      return resolve({ ok: false, reason: "app-android" });
     }
     if (!/Chrome|Edg|Brave|Chromium/i.test(navigator.userAgent)) {
       return resolve({ ok: false, reason: "browser" });

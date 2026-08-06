@@ -1,11 +1,20 @@
 import { formatDuration, formatViews, formatDate } from "../api";
-import ChannelLink from "./ChannelLink";
+import ChannelLink, { daLinkCanale } from "./ChannelLink";
 
 export default function VideoCard({ video, navigate, onPlay, onDownload, avatarUrl }) {
   const avatar = video.avatar || avatarUrl;
 
   return (
-    <div className="video-card" onClick={() => navigate("video", { videoId: video.id })}>
+    <div
+      className="video-card"
+      onClick={e => {
+        // Il tocco sul logo o sul nome del canale porta al canale, non al
+        // video: qui si controlla la provenienza invece di fidarsi solo dello
+        // stopPropagation del link (col dito quel click può non arrivare).
+        if (daLinkCanale(e)) return;
+        navigate("video", { videoId: video.id });
+      }}
+    >
       <div className="thumbnail-wrap">
         <img src={video.thumbnail} alt={video.title} loading="lazy" />
         {video.duration && <span className="duration">{formatDuration(video.duration)}</span>}

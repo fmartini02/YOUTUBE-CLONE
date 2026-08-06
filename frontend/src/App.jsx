@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
 import SearchPage from "./pages/SearchPage";
 import HomePage from "./pages/HomePage";
 import VideoPage from "./pages/VideoPage";
@@ -9,6 +9,7 @@ import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import ServerSetup from "./components/ServerSetup";
 import { useCast } from "./hooks/useCast.jsx";
+import { useMobileLayout } from "./hooks/useMediaQuery";
 import { api, isCapacitor, getServerBase, checkServerReachable } from "./api";
 import "./App.css";
 
@@ -70,6 +71,13 @@ export default function App() {
   // prima volta (o quando quello salvato non risponde più, es. IP cambiato).
   const [serverReady, setServerReady] = useState(!isCapacitor());
   const castSDK = useCast();
+  // Sul telefono la barra laterale non sta ACCANTO alla pagina ma SOPRA:
+  // cambia il comportamento, non solo la larghezza, quindi va saputo anche in
+  // JS e non solo nel CSS.
+  const mobileLayout = useMobileLayout();
+  // Quante pagine sono state aperte da dentro l'app: serve al tasto Indietro
+  // di Android per sapere se c'è ancora dove tornare (vedi più sotto).
+  const depthRef = useRef(0);
 
   useEffect(() => {
     if (!isCapacitor()) return;
@@ -90,12 +98,13 @@ export default function App() {
   // cronologia con lo state giusto: la registriamo subito, così anche il
   // primissimo "Indietro" ha di che tornare.
   useEffect(() => {
-    window.history.replaceState({ page, params: pageParams }, "", pageToUrl(page, pageParams));
+    window.history.replaceState({ page, params: pageParams, depth: 0 }, "", pageToUrl(page, pageParams));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     function onPopState(e) {
       const { page: p, params } = e.state || urlToPage();
+      depthRef.current = e.state?.depth || 0;
       setPage(p);
       setPageParams(params);
       window.scrollTo(0, 0);
@@ -107,9 +116,33 @@ export default function App() {
   const navigate = useCallback((to, params = {}) => {
     setPage(to);
     setPageParams(params);
+    // Sul telefono il pannello laterale copre la pagina: se restasse aperto
+    // dopo aver scelto una voce si finirebbe su una pagina che non si vede.
+    // Sul desktop invece la barra sta accanto al contenuto e resta com'è.
+    if (mobileLayout) setSidebarOpen(false);
     window.scrollTo(0, 0);
-    window.history.pushState({ page: to, params }, "", pageToUrl(to, params));
-  }, []);
+    depthRef.current += 1;
+    window.history.pushState({ page: to, params, depth: depthRef.current }, "", pageToUrl(to, params));
+  }, [mobileLayout]);
+
+  // ── Tasto Indietro / gesture di Android ────────────────────────────────
+  // Capacitor 8 non gestisce più il tasto da sé: senza il plugin @capacitor/app
+  // l'app si chiudeva invece di tornare indietro. MainActivity.java lo gira a
+  // questa funzione, che risponde se ha gestito lei il tasto — altrimenti
+  // l'app si chiude, come dalla schermata iniziale di qualsiasi app.
+  //
+  // Il conteggio in `depthRef` serve perché `history.length` conta anche quello
+  // che c'era prima dell'app, e `history.back()` su una cronologia vuota non fa
+  // niente: senza, si resterebbe bloccati sulla stessa schermata.
+  useEffect(() => {
+    window.ytproxyHandleBack = () => {
+      if (sidebarOpen) { setSidebarOpen(false); return true; }
+      if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return true; }
+      if (depthRef.current > 0) { window.history.back(); return true; }
+      return false;
+    };
+    return () => { delete window.ytproxyHandleBack; };
+  }, [sidebarOpen]);
 
   // Avviso cookie: si può chiudere, ma la chiusura vale per QUEL problema.
   // Se il motivo cambia (i cookie erano solo vecchi e ora manca la sessione
@@ -157,6 +190,10 @@ export default function App() {
 
         <div className="app-body">
           <Sidebar open={sidebarOpen} navigate={navigate} currentPage={page} authStatus={authStatus} />
+          {/* Solo sul telefono (il CSS lo mostra solo lì): toccare fuori dal
+              pannello lo chiude, come ci si aspetta da un menu che copre la
+              pagina. */}
+          <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
           <main className="main-content" style={{ paddingBottom: 24 }}>
             {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
             {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}

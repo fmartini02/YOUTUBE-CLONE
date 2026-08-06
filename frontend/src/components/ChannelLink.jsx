@@ -1,3 +1,5 @@
+import { useRef, useEffect } from "react";
+
 /**
  * Nome (o logo) di un canale che porta alla sua pagina.
  *
@@ -9,12 +11,51 @@
  * stopPropagation è obbligatorio: questi nomi stanno quasi sempre dentro
  * elementi già cliccabili (la card del video, la riga dei correlati), e senza
  * fermare l'evento cliccare il canale farebbe partire il video.
+ *
+ * Col dito non ci si affida al solo `click`: nella WebView di Android quel
+ * click a volte non arriva (il tocco finisce interpretato come inizio di una
+ * selezione di testo o di uno scorrimento), e allora il logo sembra morto —
+ * oppure, dentro una card, il tocco arriva alla card e parte il video. Quindi
+ * il tocco si gestisce con i pointer event, tenendo il click come strada
+ * principale: se arriva, annulla il ripiego, così non si naviga due volte.
  */
+
+// Quanto si aspetta il `click` prima di darlo per perso: abbastanza da
+// lasciarlo arrivare nel caso normale, poco da non sembrare un ritardo.
+const CLICK_FALLBACK_MS = 350;
+// Oltre questa distanza il dito stava scorrendo la pagina, non toccando.
+const TAP_SLOP_PX = 12;
+
+/**
+ * L'evento viene da un link canale?
+ *
+ * Lo usano i contenitori cliccabili (card, riga dei correlati) per non aprire
+ * il video quando il tocco è sul canale: lo stopPropagation del link basta
+ * finché il click parte davvero, ma col dito può non partire — e allora la
+ * card se lo prendeva come tocco su di sé.
+ */
+export function daLinkCanale(e) {
+  return !!e.target?.closest?.(".channel-link");
+}
+
 export default function ChannelLink({ channelId, name, navigate, className = "", style, title, children }) {
   const contenuto = children ?? name;
+  const tapRef = useRef({ start: null, timer: null, done: 0 });
+
+  useEffect(() => () => clearTimeout(tapRef.current.timer), []);
 
   if (!channelId || !navigate) {
     return <span className={className} style={style}>{contenuto}</span>;
+  }
+
+  function vai() {
+    const t = tapRef.current;
+    clearTimeout(t.timer);
+    // Click e ripiego possono scattare tutti e due: la seconda navigazione a
+    // ruota della prima va ignorata.
+    if (Date.now() - t.done < 800) return;
+    t.done = Date.now();
+    navigate("channel", { channelId, channelName: name });
   }
 
   return (
@@ -22,9 +63,25 @@ export default function ChannelLink({ channelId, name, navigate, className = "",
       className={`channel-link ${className}`.trim()}
       style={style}
       title={title || `Vai al canale ${name || ""}`.trim()}
+      onPointerDown={e => {
+        if (e.pointerType === "mouse") return;
+        e.stopPropagation();
+        tapRef.current.start = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={e => {
+        if (e.pointerType === "mouse") return;
+        e.stopPropagation();
+        const start = tapRef.current.start;
+        tapRef.current.start = null;
+        if (!start) return;
+        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return;
+        clearTimeout(tapRef.current.timer);
+        tapRef.current.timer = setTimeout(vai, CLICK_FALLBACK_MS);
+      }}
+      onPointerCancel={() => { tapRef.current.start = null; }}
       onClick={e => {
         e.stopPropagation();
-        navigate("channel", { channelId, channelName: name });
+        vai();
       }}
     >
       {contenuto}

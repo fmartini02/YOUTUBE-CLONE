@@ -192,6 +192,11 @@ body {
   font-size: 10px; white-space: normal; text-align: center; line-height: 1.2;
 }
 
+/* Sfondo scuro dietro il pannello a scomparsa: esiste solo sul telefono
+   (vedi la sezione RESPONSIVE), dove la barra laterale copre la pagina invece
+   di starle accanto. Toccarlo chiude il pannello. */
+.sidebar-backdrop { display: none; }
+
 .sidebar-divider { height: 1px; background: var(--border); margin: 8px 0; }
 .sidebar-section { padding: 8px 24px 4px; font-size: 12px; color: var(--text3); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
 .sidebar.collapsed .sidebar-section { display: none; }
@@ -271,10 +276,32 @@ body {
 .channel-link { cursor: pointer; display: inline-block; max-width: 100%; }
 .channel-link:hover { color: var(--text); }
 
+/* Col dito il nome di un canale (12-13px di testo) è un bersaglio minuscolo:
+   il tocco finisce facilmente appena fuori, cioè sulla card o sulla riga dei
+   correlati, che aprono il video. Qui l'area toccabile si allarga senza
+   spostare niente, perché il margine negativo compensa il padding.
+   Gli avatar sono esclusi: hanno una misura fissa e con box-sizing: border-box
+   il padding rimpicciolirebbe il logo dentro il tondo. */
+@media (hover: none) and (pointer: coarse) {
+  .channel-link:not(.channel-avatar):not(.avatar) {
+    padding: 6px 4px; margin: -6px -4px;
+  }
+  /* Il tondo del canale sotto il player: 40px si centrano col mouse, non col
+     pollice. (Gli avatar dei commenti hanno la misura nello style inline e
+     restano quelli.) */
+  .channel-avatar { width: 48px; height: 48px; }
+}
+
 /* ── VIDEO PAGE ────────────────────────────────── */
 .video-page { max-width: 1760px; margin: 0 auto; margin-top: 16px; }
 .video-page-layout { display: flex; gap: 24px; }
-.video-main { flex: 1; min-width: 0; }
+
+/* Colonna di sinistra: player+informazioni sopra, commenti sotto. Esiste per
+   poterli separare sul telefono, dove i correlati vanno IN MEZZO ai due (vedi
+   RESPONSIVE): finché i commenti stavano dentro .video-main, in colonna
+   singola i correlati finivano dopo centinaia di commenti, cioè mai. */
+.video-left { flex: 1; min-width: 0; }
+.video-main { min-width: 0; }
 
 /* ── Modalità cinema ───────────────────────────────────────────────────
    Come su YouTube: il player prende tutta la larghezza dell'area contenuti e
@@ -403,6 +430,39 @@ body {
 .player-big-play:hover { background: var(--accent); }
 .player-big-play .material-symbols-outlined { font-size: 40px; }
 
+/* ── Riscontro del doppio tocco (±10 s) ────────────────────────────────── */
+.player-seek-flash {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 16;
+  width: 84px; height: 84px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+  font-size: 13px; font-weight: 600;
+  pointer-events: none;
+  animation: seekFlash 0.6s ease forwards;
+}
+.player-seek-flash.left { left: 6%; }
+.player-seek-flash.right { right: 6%; }
+@keyframes seekFlash {
+  0% { opacity: 0; transform: translateY(-50%) scale(0.8); }
+  25% { opacity: 1; transform: translateY(-50%) scale(1); }
+  100% { opacity: 0; transform: translateY(-50%) scale(1); }
+}
+
+/* ── Comandi col dito ───────────────────────────────────────────────────
+   Il doppio tocco per il salto di 10s funziona solo se il browser non se lo
+   prende per ingrandire la pagina: `touch-action: manipulation` è quello che
+   glielo impedisce. Le aree toccabili crescono perché 38px di bottone e 4px
+   di barra si centrano col mouse, non col pollice. */
+@media (hover: none) and (pointer: coarse) {
+  .player-wrap video { touch-action: manipulation; user-select: none; }
+  .player-btn { width: 44px; height: 44px; }
+  .player-progress { height: 26px; }
+  .player-progress-track { height: 5px; }
+  .player-progress-handle { transform: translateY(-50%) scale(1); }
+  .player-bar { padding: 0 8px 8px; }
+}
+
 /* ── Menu impostazioni (qualità/sottotitoli) ───────────────────────────── */
 .player-settings-backdrop {
   position: absolute; inset: 0; z-index: 21;
@@ -524,10 +584,14 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
 }
 .related-item:hover { background: var(--bg2); padding: 8px; margin: 0 -8px; }
 
+/* Larghezza in proporzione alla riga invece che in pixel fissi: così la
+   miniatura si adatta a qualsiasi schermo da sola, senza una misura diversa
+   per ogni breakpoint. `max-width` la ferma prima che diventi enorme sui
+   monitor larghi, `aspect-ratio` tiene il 16:9 senza il trucco del padding. */
 .related-thumb {
-  width: 160px; flex-shrink: 0;
+  width: 42%; max-width: 180px; flex-shrink: 0;
   border-radius: 8px; overflow: hidden;
-  position: relative; padding-top: calc(160px * 9/16);
+  position: relative; aspect-ratio: 16/9;
   background: var(--bg3);
 }
 .related-thumb img {
@@ -558,10 +622,11 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
 }
 .search-card:hover { background: var(--bg2); }
 
+/* Stessa scelta di .related-thumb: proporzione, non misura fissa. */
 .search-thumb {
-  width: 240px; flex-shrink: 0;
+  width: 38%; max-width: 260px; flex-shrink: 0;
   border-radius: 10px; overflow: hidden;
-  position: relative; padding-top: calc(240px * 9/16);
+  position: relative; aspect-ratio: 16/9;
   background: var(--bg3);
 }
 .search-thumb img {
@@ -626,23 +691,78 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
 /* ── RESPONSIVE ────────────────────────────────── */
 @media (max-width: 1200px) {
   .related-sidebar { width: 300px; }
-  .related-thumb { width: 130px; padding-top: calc(130px * 9/16); }
 }
 
+/* ── Telefono ───────────────────────────────────────────────────────────
+   Soglia allineata a MOBILE_QUERY in hooks/useMediaQuery.jsx: sotto i 900px
+   cambia anche il comportamento, non solo l'aspetto. */
 @media (max-width: 900px) {
-  .video-page-layout { flex-direction: column; }
-  .related-sidebar { width: 100%; }
   .main-content { margin-left: 0 !important; padding: 12px; }
-  .sidebar { display: none; }
-  .app[data-sidebar="true"] .sidebar,
-  .app[data-sidebar="false"] .sidebar { display: none; }
-  .search-thumb { width: 160px; padding-top: calc(160px * 9/16); }
+
+  /* Barra laterale = pannello a scomparsa, come su YouTube da telefono.
+     Prima era `display: none` e basta: Home, Iscrizioni e Impostazioni non
+     erano raggiungibili in nessun modo e l'hamburger non apriva niente.
+     `.sidebar.collapsed` va nominata esplicitamente perché ha specificità
+     maggiore di `.sidebar` e le media query non ne aggiungono. */
+  .sidebar,
+  .sidebar.collapsed {
+    display: block;
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    transition: transform var(--transition);
+    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.6);
+    z-index: 110;
+  }
+  .app[data-sidebar="true"] .sidebar { transform: none; }
+
+  /* Nella barra stretta le voci sono icona-sopra-etichetta: qui il pannello è
+     sempre largo, quindi tornano affiancate anche se la classe `collapsed` è
+     rimasta attaccata (succede ruotando il telefono a pannello chiuso). */
+  .sidebar.collapsed .sidebar-item {
+    flex-direction: row; gap: 20px;
+    padding: 12px 24px; margin: 2px 8px; border-radius: 10px;
+  }
+  .sidebar.collapsed .sidebar-item .icon { width: 24px; }
+  .sidebar.collapsed .sidebar-label { font-size: 14px; text-align: left; }
+  .sidebar.collapsed .sidebar-section { display: block; }
+
+  .app[data-sidebar="true"] .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 96;
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  /* Header: senza il `min-width: 200px` e senza il badge ci sta tutto anche a
+     360px. Prima la riga era più larga dello schermo e il pezzo finale
+     (ricerca e account) veniva tagliato via da `overflow-x: hidden`. */
+  .header { padding: 0 8px; gap: 8px; }
+  .header-left { min-width: 0; gap: 4px; flex-shrink: 0; }
+  .logo { gap: 4px; }
+  .logo-badge { display: none; }
+  .search-form { min-width: 0; }
+  .search-input { padding: 0 12px; font-size: 15px; }
+  .header-right { gap: 0; }
+
+  /* Ordine sul telefono: player, poi i correlati, poi i commenti — come
+     sull'app di YouTube. Serve `display: contents` perché player e commenti
+     stanno nella stessa colonna solo sul desktop. */
+  .video-page-layout,
+  .video-page-layout.theater { flex-direction: column; }
+  .video-left { display: contents; }
+  .video-main { order: 1; }
+  .related-sidebar { order: 2; width: 100%; }
+  .video-comments { order: 3; }
+
   .video-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 }
 
 @media (max-width: 600px) {
-  .search-thumb { width: 120px; padding-top: calc(120px * 9/16); }
+  /* Resta la sola icona rossa: il nome per esteso si mangiava metà della
+     barra di ricerca su uno schermo da 360px. */
+  .logo-text { display: none; }
+  .search-btn { width: 48px; }
+
   .search-title { font-size: 14px; }
   .video-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .header-right .icon-btn:not(:last-child) { display: none; }
+  .video-title-big { font-size: 16px; }
 }
