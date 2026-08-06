@@ -77,6 +77,8 @@ React 18 + Vite, senza router né librerie di stato. `App.jsx` implementa il rou
 
 `api.js` centralizza le chiamate e il rilevamento del dispositivo. `getServerBase()` è vuoto sul web/Electron (stessa origine) ma su Android/Capacitor legge da localStorage l'indirizzo impostato in `ServerSetup`; `getLanBase()` serve al Chromecast, che scarica il video da sé e quindi ha bisogno di un URL assoluto e non-localhost.
 
+Sull'APK c'è una trappola legata a quell'indirizzo: `capacitor.config.json` deve tenere `server.androidScheme: "http"`. Di default Capacitor serve la WebView su `https://localhost`, e da un'origine https ogni chiamata a `http://<ip-del-pc>:8090` è **contenuto misto**, che la WebView blocca in silenzio (`allowMixedContent` è `false` di default: `Bridge.initWebView()` chiama `setMixedContentMode(ALWAYS_ALLOW)` solo se attivo). Il sintomo è inconfondibile — dal browser del telefono il server si apre, dall'app no, e l'onboarding dice "non raggiungibile" anche con l'IP giusto. Non basta `usesCleartextTraffic="true"` nel manifest: quello autorizza l'HTTP in chiaro, non lo sblocca da un'origine sicura. Nota che cambiare schema cambia l'origine, quindi chi aggiorna l'APK perde l'indirizzo salvato in localStorage e deve reinserirlo una volta.
+
 Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non in Electron, non in Chromium open-source — e l'hook espone il motivo dell'indisponibilità per poterlo spiegare all'utente. L'unico comando è `CastButton` nella pagina video: sempre visibile, spiega il motivo invece di sparire quando il cast non è disponibile.
 
 ## Nota sulla porta 8090
