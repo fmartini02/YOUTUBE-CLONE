@@ -194,16 +194,34 @@ Serve per la YouTube Data API v3: elenco canali iscritti, avatar, e i commenti
 (paginazione completa, risposte ai thread e **pubblicazione** dei propri
 commenti — senza account i commenti restano leggibili ma in sola lettura). Devi
 creare un **Client ID OAuth gratuito** su
-[console.cloud.google.com](https://console.cloud.google.com) (progetto → API e
-servizi → Credenziali → OAuth 2.0, abilitando *YouTube Data API v3*), con questo
-**Authorized redirect URI**:
+[console.cloud.google.com](https://console.cloud.google.com): progetto → API e
+servizi → abilita *YouTube Data API v3* → Credenziali → ID client OAuth, di tipo
+**"TV e dispositivi con input limitato"**.
 
-```
-http://localhost:8090/api/auth/callback-page
-```
+Quel tipo di client **non chiede nessun URI di reindirizzamento**, ed è il
+motivo per cui si usa: il login passa dal *device flow*, cioè un codice da
+digitare invece di un rimando al browser. Il server chiede il codice, tu lo
+digiti su `google.com/device` da un dispositivo qualsiasi, e il server intanto
+aspetta e si collega da solo appena confermi.
 
-Client ID e Secret si incollano in Impostazioni. Da lì in poi le iscrizioni si
-risincronizzano da sole ogni ora.
+1. incolla **Client ID** e **Client Secret** in ⚙️ Impostazioni e premi
+   *Accedi con Google*;
+2. compare un codice di poche cifre: aprilo su `google.com/device` **da questo
+   o da qualsiasi altro dispositivo** — telefono compreso — e digitalo;
+3. autorizza. La pagina delle Impostazioni si aggiorna da sola.
+
+Da lì in poi le iscrizioni si risincronizzano da sole ogni ora.
+
+> **Perché non il solito login con redirect.** Per gli URI `http://` Google
+> accetta soltanto `localhost`/`127.0.0.1` e rifiuta gli indirizzi IP privati.
+> Con il server su un'altra macchina della rete, quel redirect rimanderebbe il
+> browser al `localhost` di *chi sta guardando*, dove non c'è nessun server: la
+> schermata di consenso passa e subito dopo la pagina non carica, un sintomo che
+> sembra una caduta di rete. Il device flow non ha redirect, quindi funziona
+> identico su localhost, su IP di LAN e in headless. Il vecchio flusso resta nel
+> codice (`/api/auth/url` + `/api/auth/callback-page`) per chi ha già un client
+> di tipo *Applicazione web* collegato e funzionante, ma l'interfaccia non lo usa
+> più.
 
 > Se avevi già collegato l'account prima di poter commentare, **rifai il login**
 > dalle Impostazioni: il permesso di scrittura (`youtube.force-ssl`) va concesso
@@ -317,9 +335,11 @@ cd frontend && npm run dev
 Il server serve i file già buildati in `frontend/dist/`, che **è versionato**:
 dopo aver modificato il frontend esegui `npm run build` e committa anche la
 build. La porta 8090 è ripetuta in più file (`server/main.py`,
-`frontend/vite.config.js`, `electron/main.js`, gli script di avvio e il redirect
-URI su Google Cloud Console): se la cambi, allineali tutti — oppure imposta la
-variabile d'ambiente `YTPROXY_PORT` lato server.
+`frontend/vite.config.js`, `electron/main.js` e gli script di avvio): se la
+cambi, allineali tutti — oppure imposta la variabile d'ambiente `YTPROXY_PORT`
+lato server. Il login Google non entra più in questo elenco: il device flow non
+ha redirect URI, quindi su Google Cloud Console non c'è nessuna porta da tenere
+allineata.
 
 ---
 
