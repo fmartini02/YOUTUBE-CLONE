@@ -1,5 +1,8 @@
 {
   "appId": "com.ytproxy.app",
   "appName": "YTProxy",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  }
 }
