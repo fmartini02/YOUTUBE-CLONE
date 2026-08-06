@@ -58,6 +58,15 @@ COMMENT_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 OAUTH_SCOPES = f"https://www.googleapis.com/auth/youtube.readonly {COMMENT_SCOPE}"
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+# Device flow ("TV e dispositivi con input limitato"): il server chiede un
+# codice, l'utente lo digita su google.com/device da un qualsiasi telefono o
+# PC, il server intanto fa polling. Non esiste redirect_uri, quindi funziona
+# identico se il server sta su localhost, su un IP di LAN o su un Raspberry
+# headless — al contrario del flow web, il cui redirect può puntare solo a
+# localhost (Google rifiuta gli IP privati) e quindi si rompe appena il server
+# non gira sulla stessa macchina del browser.
+OAUTH_DEVICE_URL = "https://oauth2.googleapis.com/device/code"
+DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
@@ -378,20 +387,58 @@ class AuthManager:
             data = r.json()
             if "error" in data:
                 raise ValueError(data.get("error_description", data["error"]))
+            return self._store_token(data, client_id, client_secret)
 
-            self._token = {
-                "access_token": data["access_token"],
-                "refresh_token": data.get("refresh_token"),
-                "expires_at": time.time() + data.get("expires_in", 3600),
+    def _store_token(self, data: dict, client_id: str, client_secret: str) -> dict:
+        """Salva su disco il token appena ottenuto (da code o da device flow)."""
+        self._token = {
+            "access_token": data["access_token"],
+            "refresh_token": data.get("refresh_token"),
+            "expires_at": time.time() + data.get("expires_in", 3600),
+            "client_id": client_id,
+            "client_secret": client_secret,
+            # Google restituisce gli scope effettivamente concessi: li
+            # teniamo per sapere se questo token può anche commentare.
+            "scope": data.get("scope", ""),
+        }
+        self._me = None  # identità dell'account: da rileggere
+        self._save_token()
+        return self._token
+
+    async def start_device_flow(self, client_id: str) -> dict:
+        """Device flow, passo 1: chiede a Google il codice da mostrare all'utente."""
+        async with httpx.AsyncClient() as client:
+            r = await client.post(OAUTH_DEVICE_URL, data={
+                "client_id": client_id,
+                "scope": OAUTH_SCOPES,
+            })
+            data = r.json()
+            if "error" in data:
+                raise ValueError(data.get("error_description", data["error"]))
+            return data
+
+    async def poll_device_token(self, device_code: str, client_id: str, client_secret: str) -> dict:
+        """Device flow, passo 2: chiede se l'utente ha già autorizzato.
+
+        Finché non lo fa Google risponde con un errore che non è un guasto
+        (`authorization_pending`, `slow_down`): lo giriamo al chiamante come
+        stato, non come eccezione.
+        """
+        async with httpx.AsyncClient() as client:
+            r = await client.post(OAUTH_TOKEN_URL, data={
                 "client_id": client_id,
                 "client_secret": client_secret,
-                # Google restituisce gli scope effettivamente concessi: li
-                # teniamo per sapere se questo token può anche commentare.
-                "scope": data.get("scope", ""),
-            }
-            self._me = None  # identità dell'account: da rileggere
-            self._save_token()
-            return self._token
+                "device_code": device_code,
+                "grant_type": DEVICE_GRANT_TYPE,
+            })
+            data = r.json()
+            err = data.get("error")
+            if err in ("authorization_pending", "slow_down"):
+                return {"status": err}
+            if err:
+                return {"status": "error", "message": data.get("error_description", err)}
+            self._store_token(data, client_id, client_secret)
+            return {"status": "ok"}
 
     async def refresh_access_token(self) -> Optional[str]:
         """Rinnova automaticamente l'access token."""

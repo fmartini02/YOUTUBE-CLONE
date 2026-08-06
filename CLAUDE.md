@@ -54,13 +54,15 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 | | A cosa serve | Dove |
 |---|---|---|
 | `data/cookies.txt` | Feed home reale e feed iscrizioni reale (via yt-dlp) | upload manuale o import automatico dal browser (`/api/cookies/import`, gestisce i percorsi snap su Linux) |
-| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) + lettura/pubblicazione commenti | l'utente crea il proprio Client ID; redirect su `/api/auth/callback-page` |
+| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) + lettura/pubblicazione commenti | l'utente crea il proprio Client ID di tipo "TV e dispositivi con input limitato"; device flow su `/api/auth/device/*` |
 
 Sui cookie c'è una trappola che vale la pena ricordare: contano solo quelli di **prima parte sul dominio `youtube.com`** (`SID`, `__Secure-1PSID`, `LOGIN_INFO`, `SAPISID`). Essere loggati su `google.com` non basta — un profilo browser loggato su Google ma che non ha mai aperto YouTube produce un `cookies.txt` di decine di cookie in cui YouTube ti vede comunque anonimo, quindi feed vuoti. `_youtube_auth_cookies()` in `auth.py` è il controllo che distingue i due casi, e `get_cookie_status()` lo espone come `logged_in`.
 
 Da quella trappola discende una regola: **yt-dlp si istanzia sempre con `crea_ydl()` (`auth.py`), mai con `yt_dlp.YoutubeDL()`**. `YoutubeDL.close()` chiama sempre `save_cookies()`, quindi ogni estrazione riscrive `cookies.txt` con il jar che ha in memoria — e se YouTube ha appena invalidato la sessione quel jar contiene un logout, che così diventa permanente sul file. `crea_ydl()` mette il controllo sul cookie jar: la rotazione normale dei cookie si salva, la cancellazione della sessione no.
 
 Senza nessuna delle due, ricerca, trending e riproduzione funzionano lo stesso.
+
+**L'OAuth usa il device flow, e non è un dettaglio estetico.** Il flow web classico ha un redirect URI, e Google per l'`http://` accetta solo `localhost`/`127.0.0.1` — gli IP privati li rifiuta come URI autorizzato. Quindi con il server su un'altra macchina della rete (Raspberry, NAS) il redirect rimanda il browser al `localhost` di *chi sta guardando*, dove non c'è nessun server: la schermata di consenso passa e subito dopo la pagina non carica, sintomo che sembra una caduta di rete. Il device flow (`start_device_flow` / `poll_device_token` in `auth.py`) non ha redirect: il server chiede un codice, l'utente lo digita su `google.com/device` da un dispositivo qualsiasi, il server intanto fa polling. Funziona identico su localhost, su IP di LAN e in headless. Il vecchio flow (`/api/auth/url` + `/api/auth/callback-page`) resta nel codice per chi ha già un client "Applicazione web" collegato, ma l'UI non lo usa più.
 
 ### Fallback dei feed (catena voluta, non accidentale)
 
@@ -83,4 +85,4 @@ Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non
 
 ## Nota sulla porta 8090
 
-È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`, e l'Authorized redirect URI registrato su Google Cloud Console per l'OAuth.
+È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`. Su Google Cloud Console invece non va più registrata: col device flow non c'è nessun redirect URI (conta solo per il vecchio flow web, rimasto per retrocompatibilità).

@@ -9,6 +9,8 @@ export default function SettingsPage({ navigate }) {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [oauthStep, setOauthStep] = useState("idle"); // idle | waiting | done
+  const [device, setDevice] = useState(null); // { user_code, verification_url } durante il device flow
+  const pollRef = useRef();
   const [cookieDrag, setCookieDrag] = useState(false);
   const [detectedBrowsers, setDetectedBrowsers] = useState(null); // null = ancora in rilevamento
   const [importingBrowser, setImportingBrowser] = useState(null);
@@ -49,23 +51,56 @@ export default function SettingsPage({ navigate }) {
     } catch {}
   }
 
+  // Device flow: il server chiede un codice a Google, l'utente lo digita su
+  // google.com/device da dove gli pare, noi intanto chiediamo se ha finito.
+  // Nessun redirect, quindi funziona identico col server su un altro computer.
   async function startOAuth() {
     if (!clientId || !clientSecret) {
       addToast("⚠️ Inserisci Client ID e Client Secret");
       return;
     }
     try {
-      const { auth_url } = await api.getAuthUrl(clientId, clientSecret);
-      window.open(auth_url, "_blank", "width=500,height=700");
+      const d = await api.deviceStart(clientId, clientSecret);
+      setDevice(d);
       setOauthStep("waiting");
-      addToast("🔑 Finestra di login aperta — accedi con Google");
+      // Il popup può essere bloccato: il codice e il link restano comunque a video.
+      window.open(d.verification_url, "_blank");
+      pollDevice(d.device_code, (d.interval || 5) * 1000);
     } catch (e) {
       addToast("❌ Errore: " + e.message);
     }
   }
 
+  function pollDevice(deviceCode, interval) {
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.devicePoll(deviceCode);
+        if (res.status === "ok") {
+          stopPolling();
+          setOauthStep("done");
+          addToast("✅ Account collegato!");
+          await loadStatus();
+        } else if (res.status === "error") {
+          stopPolling();
+          setOauthStep("idle");
+          addToast("❌ " + res.message);
+        }
+        // authorization_pending / slow_down: l'utente non ha ancora finito
+      } catch {}
+    }, interval);
+  }
+
+  function stopPolling() {
+    clearInterval(pollRef.current);
+    setDevice(null);
+  }
+
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
   async function handleLogout() {
     await api.logout();
+    stopPolling();
     setOauthStep("idle");
     await loadStatus();
     addToast("Account disconnesso");
@@ -174,7 +209,13 @@ export default function SettingsPage({ navigate }) {
               <a href="https://console.cloud.google.com" target="_blank" style={{ color: "var(--accent)" }}>
                 console.cloud.google.com
               </a>
-              {" "}→ Crea progetto → API & Servizi → Credenziali → OAuth 2.0 → <em>YouTube Data API v3</em>
+              {" "}→ Crea progetto → abilita <em>YouTube Data API v3</em> → Credenziali → ID client OAuth →
+              tipo <strong>“TV e dispositivi con input limitato”</strong>.
+              <br />
+              <span style={{ fontSize: 13, color: "var(--text3)" }}>
+                Quel tipo non chiede nessun URI di reindirizzamento: il login funziona anche quando il
+                server gira su un'altra macchina della rete (Raspberry, NAS).
+              </span>
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -198,9 +239,29 @@ export default function SettingsPage({ navigate }) {
               </button>
             </div>
 
-            {oauthStep === "waiting" && (
-              <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(255,200,0,0.1)", borderRadius: 8, fontSize: 13, color: "#ffc800" }}>
-                ⏳ Aspettando il login nella finestra aperta...
+            {oauthStep === "waiting" && device && (
+              <div style={{ marginTop: 14, padding: 16, background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 12 }}>
+                <p style={{ fontSize: 14, color: "var(--text2)", marginBottom: 12, lineHeight: 1.6 }}>
+                  Apri{" "}
+                  <a href={device.verification_url} target="_blank" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                    {(device.verification_url || "").replace(/^https?:\/\//, "")}
+                  </a>{" "}
+                  da questo o da qualsiasi altro dispositivo e digita il codice:
+                </p>
+                <div
+                  onClick={() => { navigator.clipboard?.writeText(device.user_code); addToast("📋 Codice copiato"); }}
+                  title="Clicca per copiare"
+                  style={{
+                    fontFamily: "monospace", fontSize: 30, fontWeight: 700, letterSpacing: 4,
+                    textAlign: "center", padding: "14px 10px", background: "var(--bg)",
+                    border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", userSelect: "all",
+                  }}
+                >
+                  {device.user_code}
+                </div>
+                <p style={{ fontSize: 13, color: "#ffc800", marginTop: 12 }}>
+                  ⏳ In attesa dell'autorizzazione... si collega da solo appena confermi.
+                </p>
               </div>
             )}
           </div>

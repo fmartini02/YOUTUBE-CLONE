@@ -38,8 +38,13 @@ DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "ytproxy_cache"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 # Porta del server: deve combaciare con vite.config.js (proxy /api), start_server.sh/.bat
-# ed electron/main.js, ed essere registrata come Authorized redirect URI su Google Cloud Console.
+# ed electron/main.js.
 SERVER_PORT = int(os.environ.get("YTPROXY_PORT", 8090))
+# Vecchio flow web, tenuto solo per chi ha già collegato un client "Applicazione
+# web": vale unicamente col server sulla stessa macchina del browser, perché
+# Google come redirect http accetta solo localhost e non gli IP privati. Il
+# login nuovo passa dal device flow (/api/auth/device/*), che di redirect non ne
+# ha e quindi funziona anche col server su un altro computer della rete.
 OAUTH_REDIRECT_URI = f"http://localhost:{SERVER_PORT}/api/auth/callback-page"
 
 # ─── YouTube Data API (no key needed: scraping via yt-dlp) ───────────────────
@@ -903,6 +908,47 @@ async def get_auth_url(body: OAuthSetup):
     tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
     tmp.write_text(json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
     return {"auth_url": url}
+
+
+class DeviceStart(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+class DevicePoll(BaseModel):
+    device_code: str
+
+
+@app.post("/api/auth/device/start")
+async def auth_device_start(body: DeviceStart):
+    """Device flow: chiede il codice da digitare su google.com/device.
+
+    È il metodo consigliato perché non usa nessun redirect: vale anche quando
+    il server gira su un altro computer della rete (Raspberry, NAS), dove il
+    redirect a localhost del flow web finirebbe sul browser invece che qui.
+    """
+    data = await auth_manager.start_device_flow(body.client_id)
+    (Path(__file__).parent.parent / "data").mkdir(exist_ok=True)
+    tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
+    tmp.write_text(json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
+    return {
+        "device_code": data["device_code"],
+        "user_code": data["user_code"],
+        "verification_url": data.get("verification_url") or data.get("verification_uri"),
+        "interval": data.get("interval", 5),
+        "expires_in": data.get("expires_in", 1800),
+    }
+
+
+@app.post("/api/auth/device/poll")
+async def auth_device_poll(body: DevicePoll):
+    """Device flow: l'utente ha autorizzato? Risponde pending finché non lo fa."""
+    tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
+    setup = json.loads(tmp.read_text())
+    res = await auth_manager.poll_device_token(body.device_code, setup["client_id"], setup["client_secret"])
+    if res["status"] == "ok":
+        asyncio.create_task(scheduler.force_sync(auth_manager, ydl_opts_base))
+    return res
 
 
 @app.get("/api/auth/callback-page")
