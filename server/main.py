@@ -18,6 +18,11 @@ import yt_dlp
 
 from auth import auth_manager, is_video_entry, YouTubeAPIError
 from sync import scheduler
+from ytdlp_patch import applica_patch_collaborazioni
+
+# Va applicata prima di qualsiasi estrazione: recupera l'id del canale nelle card
+# dei video in collaborazione, che altrimenti restano senza logo e non cliccabili.
+applica_patch_collaborazioni()
 
 app = FastAPI(title="YTProxy")
 

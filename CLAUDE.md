@@ -41,6 +41,7 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 - `server/main.py` — endpoint HTTP + selettori di formato yt-dlp + mount di `frontend/dist` su `/`.
 - `server/auth.py` — `auth_manager` (singleton): OAuth Google, cookie YouTube, feed, cronologia, preferenze, cache loghi canale. Carica tutti i JSON in memoria all'avvio e riscrive il file intero ad ogni modifica.
 - `server/sync.py` — `scheduler` (singleton): loop orario che rinnova le iscrizioni via API e ricostruisce la cache del feed iscrizioni. Avviato da `on_startup`.
+- `server/ytdlp_patch.py` — correzioni all'estrattore di yt-dlp, applicate all'avvio da `main.py`. Oggi una sola: l'id del canale nelle card dei video in collaborazione, che yt-dlp non trova (vedi il docstring). Ogni patch agisce solo se il dato manca, così non fa danni quando yt-dlp si aggiorna.
 
 **yt-dlp è l'unica fonte dei dati YouTube** (niente API key per ricerca/trending/video/commenti/sottotitoli). La YouTube Data API v3 serve solo per l'elenco iscrizioni e i loghi dei canali, e richiede l'OAuth.
 
