@@ -53,14 +53,13 @@ const TAP_SLOP_PX = 12;
 const TAP_SIDE_RATIO = 0.35;
 
 // ── Velocità di riproduzione ────────────────────────────────────────────
-// La barra si muove a tacche da mezza velocità; i preset qui sotto arrivano
-// dove la barra non passa (1.25, 1.75…), quindi la barra deve saper mostrare
-// anche un valore fuori tacca — motivo per cui è disegnata a mano invece di
-// essere un <input type="range">, che il browser riporta d'ufficio alla tacca
-// più vicina.
+// La barra si muove a tacche da 0.05. Le tacche vere sono quindi cinquanta:
+// troppe da etichettare, e le scritte sotto la barra sono ogni mezza velocità
+// (SPEED_LABEL_STEP) solo per dare il riferimento.
 const SPEED_MIN = 0.5;
 const SPEED_MAX = 3;
-const SPEED_STEP = 0.5;
+const SPEED_STEP = 0.05;
+const SPEED_LABEL_STEP = 0.5;
 const SPEED_PRESETS = [1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
 // Velocità del "tieni premuto", e quanto va tenuto premuto prima che parta.
 // Sotto i ~350ms scattava per sbaglio sui tocchi lenti (che devono mettere in
@@ -80,18 +79,18 @@ function roundSpeed(s) {
 }
 
 /**
- * Barra della velocità: trascinamento e frecce si fermano sulle tacche da
- * `SPEED_STEP`, ma un valore qualsiasi (arrivato da un preset) viene comunque
- * mostrato nella sua posizione esatta.
+ * Barra della velocità: trascinamento e frecce si spostano di una tacca
+ * (`SPEED_STEP`) alla volta. È disegnata a mano, come quella di avanzamento,
+ * per avere le etichette sotto e lo stesso aspetto dentro il player.
  */
 function SpeedSlider({ value, onChange }) {
   const ref = useRef(null);
   const draggingRef = useRef(false);
   const pct = ((value - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)) * 100;
 
-  // Le tacche disegnate sotto la barra, una ogni mezza velocità.
+  // I riferimenti scritti sotto la barra, uno ogni mezza velocità.
   const ticks = [];
-  for (let s = SPEED_MIN; s <= SPEED_MAX + 0.001; s += SPEED_STEP) ticks.push(roundSpeed(s));
+  for (let s = SPEED_MIN; s <= SPEED_MAX + 0.001; s += SPEED_LABEL_STEP) ticks.push(roundSpeed(s));
 
   function speedFromPointer(e) {
     const rect = ref.current.getBoundingClientRect();
@@ -121,18 +120,12 @@ function SpeedSlider({ value, onChange }) {
         onPointerUp={() => { draggingRef.current = false; }}
         onPointerCancel={() => { draggingRef.current = false; }}
         onKeyDown={e => {
-          // Dalla tacca corrente, non dal valore esatto: partendo da 1.25 la
-          // freccia destra porta a 1.5, non a 1.75.
           const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? SPEED_STEP
             : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -SPEED_STEP
             : 0;
           if (!step) return;
           e.preventDefault();
-          const tacca = Math.round(value / SPEED_STEP) * SPEED_STEP;
-          const next = roundSpeed(step > 0
-            ? (tacca > value ? tacca : tacca + step)
-            : (tacca < value ? tacca : tacca + step));
-          onChange(next);
+          onChange(roundSpeed(value + step));
         }}
       >
         <div className="player-speed-fill" style={{ width: `${pct}%` }} />
