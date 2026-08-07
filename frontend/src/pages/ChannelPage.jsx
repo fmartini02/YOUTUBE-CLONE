@@ -44,7 +44,7 @@ export default function ChannelPage({ channelId, channelName, navigate }) {
   const [hasMore, setHasMore] = useState(false);
   const [emptyReason, setEmptyReason] = useState(null);
   const [descOpen, setDescOpen] = useState(false);
-  const { addToast, ToastContainer } = useToast();
+  const { ToastContainer } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -93,13 +93,6 @@ export default function ChannelPage({ channelId, channelName, navigate }) {
     loading: loading || loadingMore,
     onLoadMore: loadMore,
   });
-
-  function handleDownload(video) {
-    const url = api.downloadUrl(video.id);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${video.title}.mp4`; a.click();
-    addToast(`⬇ Download avviato: ${video.title.slice(0, 40)}...`);
-  }
 
   const nome = channel?.name || channelName || "Canale";
   const descrizione = (channel?.description || "").trim();
@@ -186,7 +179,6 @@ export default function ChannelPage({ channelId, channelName, navigate }) {
                 key={v.id}
                 video={v}
                 navigate={navigate}
-                onDownload={handleDownload}
                 avatarUrl={channel?.avatar}
               />
             ))}

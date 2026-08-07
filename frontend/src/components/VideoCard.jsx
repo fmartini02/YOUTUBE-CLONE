@@ -1,7 +1,7 @@
 import { formatDuration, formatViews, formatDate } from "../api";
 import ChannelLink, { daLinkCanale } from "./ChannelLink";
 
-export default function VideoCard({ video, navigate, onPlay, onDownload, avatarUrl }) {
+export default function VideoCard({ video, navigate, onPlay, avatarUrl }) {
   const avatar = video.avatar || avatarUrl;
 
   return (
@@ -18,15 +18,8 @@ export default function VideoCard({ video, navigate, onPlay, onDownload, avatarU
       <div className="thumbnail-wrap">
         <img src={video.thumbnail} alt={video.title} loading="lazy" />
         {video.duration && <span className="duration">{formatDuration(video.duration)}</span>}
-        {/* Niente stopPropagation qui: cliccare ovunque sulla copertina deve
-            far partire il video subito, come su YouTube. Solo il bottone
-            download ferma la propagazione, altrimenti cliccarlo navigherebbe
-            anche alla pagina video. */}
-        <div className="download-overlay">
-          <button className="dl-btn" onClick={e => { e.stopPropagation(); onDownload && onDownload(video); }}>
-            ⬇ Download
-          </button>
-        </div>
+        {/* Sulla copertina non c'è nessun comando: cliccare ovunque fa partire
+            il video, come su YouTube. Il download sta solo nella pagina video. */}
       </div>
       <div className="video-info">
         <ChannelLink channelId={video.channel_id} name={video.channel} navigate={navigate} className="avatar">
