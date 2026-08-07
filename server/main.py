@@ -5,10 +5,11 @@ import re
 import tempfile
 import time
 import urllib.parse
+from html import escape
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +18,8 @@ import httpx
 
 # crea_ydl al posto di yt_dlp.YoutubeDL: stessa istanza, ma incapace di
 # cancellare la sessione da cookies.txt quando chiude (vedi il suo docstring).
-from auth import auth_manager, crea_ydl, is_video_entry, YouTubeAPIError
+from auth import (auth_manager, crea_ydl, is_video_entry, YouTubeAPIError,
+                  OAUTH_SETUP_FILE, scrivi_privato, proteggi_file_riservati)
 from sync import scheduler
 from ytdlp_patch import applica_patch_collaborazioni
 
@@ -27,9 +29,71 @@ applica_patch_collaborazioni()
 
 app = FastAPI(title="YTProxy")
 
+# ─── Chi può far scrivere il server ──────────────────────────────────────────
+# Il server ascolta su 0.0.0.0 e non ha login. Con allow_origins=["*"] bastava
+# che il browser di casa aprisse un sito qualunque perché quella pagina potesse
+# chiamare le API di YTProxy: cancellare i cookie, disiscrivere da un canale,
+# pubblicare un commento a nome dell'account. L'autenticazione vera resta fuori
+# discussione (è un server domestico), ma le richieste che *scrivono* ora devono
+# dichiarare un'origine locale.
+#
+# Le GET non sono filtrate di proposito: il Chromecast scarica il video da sé,
+# senza mandare Origin, e /api/mux deve restargli raggiungibile.
+
+_HOST_LOCALE = (
+    r"(?:localhost"
+    r"|127\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|\[::1\]"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|[A-Za-z0-9-]+\.local)"
+)
+# capacitor:// e ionic:// non servono finché androidScheme resta "http" (vedi
+# CLAUDE.md), ma coprono senza costi chi dovesse cambiarlo.
+ORIGINI_LOCALI_RE = rf"^(?:https?|capacitor|ionic)://{_HOST_LOCALE}(?::\d+)?$"
+
+# Per chi espone YTProxy dietro un reverse proxy, un dominio o una VPN
+# (Tailscale, DuckDNS…): origini aggiuntive separate da virgola.
+ORIGINI_EXTRA = [o.strip() for o in os.environ.get("YTPROXY_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
+METODI_DI_SCRITTURA = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def origine_ammessa(origin: str, host: str) -> bool:
+    """True se da questa origine si può scrivere.
+
+    `host` è l'header Host della richiesta: se combacia con l'origine siamo in
+    same-origin, che va sempre bene — è la pagina servita dal server stesso,
+    comunque la si raggiunga (localhost, IP di LAN, hostname, Tailscale).
+    """
+    if not origin:
+        # Nessun Origin significa che non è una pagina web: curl, l'app nativa,
+        # il Chromecast. Il browser lo manda sempre sulle richieste di scrittura,
+        # e la pagina ostile da cui ci difendiamo è per forza in un browser.
+        return True
+    if origin in ORIGINI_EXTRA:
+        return True
+    if host and origin.split("://")[-1] == host:
+        return True
+    return bool(re.match(ORIGINI_LOCALI_RE, origin))
+
+
+@app.middleware("http")
+async def blocca_scritture_esterne(request: Request, call_next):
+    if request.method in METODI_DI_SCRITTURA:
+        if not origine_ammessa(request.headers.get("origin", ""),
+                               request.headers.get("host", "")):
+            return JSONResponse({"detail": "Origine non consentita"}, status_code=403)
+    return await call_next(request)
+
+
+# Dichiarato dopo la guardia, quindi gli sta fuori: così il preflight OPTIONS
+# lo gestisce CORSMiddleware e la guardia vede solo le richieste vere.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ORIGINI_EXTRA,
+    allow_origin_regex=ORIGINI_LOCALI_RE,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -861,6 +925,9 @@ async def lan_address():
 
 @app.on_event("startup")
 async def on_startup():
+    # I file di credenziali creati dalle versioni precedenti sono a 0644: qui
+    # vengono riportati a 0600 una volta sola, all'avvio.
+    proteggi_file_riservati()
     # Il loop di sync gira subito un ciclo se già autenticato (vedi sync.py),
     # quindi non serve un altro force_sync qui: raddoppierebbe le richieste
     # (116 canali scansionati due volte ad ogni riavvio del server).
@@ -906,9 +973,8 @@ async def get_auth_url(body: OAuthSetup):
     redirect_uri = OAUTH_REDIRECT_URI
     url = auth_manager.get_auth_url(body.client_id, redirect_uri)
     # Salva temporaneamente client_id/secret per il callback
-    (Path(__file__).parent.parent / "data").mkdir(exist_ok=True)
-    tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
-    tmp.write_text(json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
+    scrivi_privato(OAUTH_SETUP_FILE,
+                   json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
     return {"auth_url": url}
 
 
@@ -930,9 +996,9 @@ async def auth_device_start(body: DeviceStart):
     redirect a localhost del flow web finirebbe sul browser invece che qui.
     """
     data = await auth_manager.start_device_flow(body.client_id)
-    (Path(__file__).parent.parent / "data").mkdir(exist_ok=True)
-    tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
-    tmp.write_text(json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
+    # scrivi_privato: contiene il client secret dell'app OAuth dell'utente.
+    scrivi_privato(OAUTH_SETUP_FILE,
+                   json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
     return {
         "device_code": data["device_code"],
         "user_code": data["user_code"],
@@ -945,8 +1011,7 @@ async def auth_device_start(body: DeviceStart):
 @app.post("/api/auth/device/poll")
 async def auth_device_poll(body: DevicePoll):
     """Device flow: l'utente ha autorizzato? Risponde pending finché non lo fa."""
-    tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
-    setup = json.loads(tmp.read_text())
+    setup = json.loads(OAUTH_SETUP_FILE.read_text())
     res = await auth_manager.poll_device_token(body.device_code, setup["client_id"], setup["client_secret"])
     if res["status"] == "ok":
         asyncio.create_task(scheduler.force_sync(auth_manager, ydl_opts_base))
@@ -955,9 +1020,15 @@ async def auth_device_poll(body: DevicePoll):
 
 @app.get("/api/auth/callback-page")
 async def oauth_callback_page(code: str = None, error: str = None):
-    """Pagina di callback OAuth — riceve il code e completa il flow."""
+    """Pagina di callback OAuth — riceve il code e completa il flow.
+
+    Tutto ciò che finisce nell'HTML passa da escape(): `error` arriva dalla query
+    string, quindi senza escaping bastava un link `?error=<script>...` per far
+    girare codice sulla stessa origine dell'app — cioè con accesso a localStorage
+    e a tutte le API del server.
+    """
     if error:
-        html = f"<html><body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'><div>Errore: {error}</div></body></html>"
+        html = f"<html><body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'><div>Errore: {escape(error)}</div></body></html>"
         return StreamingResponse(iter([html]), media_type="text/html")
 
     if not code:
@@ -965,8 +1036,7 @@ async def oauth_callback_page(code: str = None, error: str = None):
         return StreamingResponse(iter([html]), media_type="text/html")
 
     try:
-        tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
-        setup = json.loads(tmp.read_text())
+        setup = json.loads(OAUTH_SETUP_FILE.read_text())
         redirect_uri = OAUTH_REDIRECT_URI
         await auth_manager.exchange_code(code, setup["client_id"], setup["client_secret"], redirect_uri)
         # Sync immediato
@@ -979,7 +1049,7 @@ async def oauth_callback_page(code: str = None, error: str = None):
   <script>setTimeout(() => window.close(), 2000)</script>
 </body></html>"""
     except Exception as e:
-        html = f"<html><body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'>Errore: {e}</body></html>"
+        html = f"<html><body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'>Errore: {escape(str(e))}</body></html>"
 
     return StreamingResponse(iter([html]), media_type="text/html")
 

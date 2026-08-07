@@ -23,6 +23,41 @@ PREFS_FILE = DATA_DIR / "prefs.json"
 HISTORY_FILE = DATA_DIR / "history.json"
 AVATAR_CACHE_FILE = DATA_DIR / "channel_avatars.json"
 SUBS_FEED_CACHE_FILE = DATA_DIR / "subscriptions_feed_cache.json"
+OAUTH_SETUP_FILE = DATA_DIR / "oauth_setup.json"
+
+# File che contengono credenziali: refresh token Google, client secret e la
+# sessione YouTube. Vanno scritti a 0600 — con i permessi di default (0644)
+# qualsiasi altro utente della macchina se li legge, e su un server sempre
+# acceso (Raspberry, NAS) di utenti ce n'è più di uno.
+FILE_RISERVATI = (TOKEN_FILE, OAUTH_SETUP_FILE, COOKIE_FILE)
+
+
+def scrivi_privato(path: Path, content: str):
+    """Come path.write_text(), ma il file resta leggibile solo dal proprietario.
+
+    Il chmod va rifatto ad ogni scrittura e non solo alla creazione: write_text()
+    su un file che esiste già non ne tocca i permessi, quindi un data/ creato da
+    una versione precedente resterebbe a 0644 per sempre.
+    """
+    path.write_text(content)
+    proteggi_file(path)
+
+
+def proteggi_file(path: Path):
+    """Porta il file a 0600 se esiste. Silenzioso su filesystem senza permessi POSIX."""
+    try:
+        if path.exists():
+            os.chmod(path, 0o600)
+    except OSError:
+        # FAT32/exFAT (chiavetta, share di rete) non hanno i permessi Unix: non
+        # è un errore che debba impedire l'avvio del server.
+        pass
+
+
+def proteggi_file_riservati():
+    """Rimette a 0600 i file di credenziali già presenti su disco (chiamata all'avvio)."""
+    for path in FILE_RISERVATI:
+        proteggi_file(path)
 
 # ── Google OAuth2 (YouTube Data API v3) ──────────────────────────────────────
 # L'utente crea il suo Client ID su Google Cloud Console (gratuito)
@@ -174,6 +209,9 @@ def crea_ydl(opts: dict):
             segnala_logout_youtube()
             return
         salva_davvero(*args, **kwargs)
+        # yt-dlp ricrea il file da zero ad ogni estrazione, quindi i permessi
+        # vanno rimessi qui: è l'unico punto sotto cui passano tutti i salvataggi.
+        proteggi_file(COOKIE_FILE)
 
     jar.save = save
     return ydl
@@ -411,7 +449,8 @@ class AuthManager:
             self._subs_feed_cache = json.loads(SUBS_FEED_CACHE_FILE.read_text())
 
     def _save_token(self):
-        TOKEN_FILE.write_text(json.dumps(self._token, indent=2))
+        # scrivi_privato: contiene il refresh token, non deve essere 0644.
+        scrivi_privato(TOKEN_FILE, json.dumps(self._token, indent=2))
 
     def _save_subs(self):
         SUBS_FILE.write_text(json.dumps(self._subs, indent=2))
@@ -908,7 +947,8 @@ class AuthManager:
         che mostra i trending.
         """
         self.invalidate_feeds()  # prima di scrivere: vedi invalidate_feeds()
-        COOKIE_FILE.write_text(content)
+        # scrivi_privato: è la sessione YouTube dell'utente, vale quanto una password.
+        scrivi_privato(COOKIE_FILE, content)
         segnala_logout_youtube(False)  # sessione nuova: l'avviso può tornare utile
         pairs = list(self._parse_netscape(content))
         valid = "# Netscape HTTP Cookie File" in content or any(
@@ -1011,6 +1051,7 @@ class AuthManager:
             return {"valid": False, "cookie_count": count, "logged_in": False}
         self.invalidate_feeds()  # prima di scrivere: vedi invalidate_feeds()
         out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
+        proteggi_file(COOKIE_FILE)
         segnala_logout_youtube(False)  # sessione nuova: l'avviso può tornare utile
         return {"valid": True, "cookie_count": count, "logged_in": True}
 
