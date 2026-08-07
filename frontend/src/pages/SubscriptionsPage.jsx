@@ -131,14 +131,20 @@ export default function SubscriptionsPage({ navigate, onSubsChange }) {
               <div style={{ marginTop: 10 }}>
                 {/* Annullata l'iscrizione, la scheda sparisce subito: lasciarla
                     lì con scritto "Iscriviti" farebbe sembrare che non sia
-                    successo niente. */}
+                    successo niente. Insieme alla scheda se ne vanno anche i
+                    video di quel canale già caricati nella scheda "Feed": il
+                    server ha ripulito la sua cache, ma la lista che abbiamo
+                    già in pagina no. */}
                 <SubscribeButton
                   channelId={ch.id}
                   channelName={ch.name}
                   thumbnail={ch.thumbnail}
                   onNotice={addToast}
                   onChange={(iscritto, id) => {
-                    if (!iscritto) setSubs(list => list.filter(c => c.id !== id));
+                    if (!iscritto) {
+                      setSubs(list => list.filter(c => c.id !== id));
+                      setFeed(f => f.filter(v => v.channel_id !== id));
+                    }
                     onSubsChange?.();
                   }}
                   small

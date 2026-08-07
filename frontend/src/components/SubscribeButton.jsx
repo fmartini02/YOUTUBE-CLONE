@@ -14,6 +14,12 @@ import { api, errorMessage } from "../api";
  * Lo stato iniziale arriva dal server (copia locale delle iscrizioni): finché
  * non arriva il pulsante è disabilitato, per non mostrare "Iscriviti" su un
  * canale a cui si è già iscritti.
+ *
+ * Disiscriversi chiede conferma, iscriversi no: le due azioni non costano
+ * uguale. Un'iscrizione di troppo si annulla con lo stesso pulsante che si ha
+ * già sotto il dito, mentre per rifare un'iscrizione persa bisogna ritrovare
+ * il canale — e nella lista iscrizioni il pulsante sta dentro una scheda che
+ * a sua volta apre il canale, quindi un tocco storto è tutt'altro che raro.
  */
 export default function SubscribeButton({ channelId, channelName, thumbnail, onNotice, onChange, small = false }) {
   const [stato, setStato] = useState(null);   // null = ancora da leggere
@@ -47,6 +53,8 @@ export default function SubscribeButton({ channelId, channelName, thumbnail, onN
       onNotice?.("L'account collegato può solo leggere: ricollegalo dalle impostazioni per iscriverti");
       return;
     }
+
+    if (iscritto && !window.confirm(`Annullare l'iscrizione a ${channelName || "questo canale"}?`)) return;
 
     setBusy(true);
     try {

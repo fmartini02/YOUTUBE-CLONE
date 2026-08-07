@@ -557,6 +557,10 @@ class AuthManager:
         serve sia per pubblicare commenti sia per iscriversi a un canale.
         Un account collegato prima che esistessero queste funzioni è
         autenticato ma può solo leggere: serve rifare il login.
+
+        Un solo metodo per entrambe le azioni perché lo scope è lo stesso
+        (`youtube.force-ssl`): due nomi diversi suggerirebbero due permessi
+        distinti che YouTube non distingue.
         """
         return self.is_authenticated() and WRITE_SCOPE in (self._token.get("scope") or "")
 
@@ -585,9 +589,13 @@ class AuthManager:
                 timeout=20,
             )
         # Le cancellazioni (subscriptions.delete) rispondono 204 senza corpo:
-        # non c'è JSON da leggere e non è un errore.
+        # non c'è JSON da leggere e non è un errore. Un corpo vuoto con stato
+        # di errore invece esiste, e va distinto: trattarlo come successo
+        # farebbe sparire il canale dalla lista senza averlo disiscritto.
         if r.status_code == 204 or not r.content:
-            return {}
+            if r.is_success:
+                return {}
+            raise YouTubeAPIError(f"Errore YouTube ({r.status_code})", "", r.status_code)
         try:
             data = r.json()
         except Exception:
@@ -790,12 +798,25 @@ class AuthManager:
         """Dalla copia locale delle iscrizioni, quella che alimenta tutta la UI."""
         return any(s.get("id") == channel_id for s in self._subs)
 
+    def _scade_feed_cookie(self):
+        """
+        Fa scadere la cache in memoria del feed iscrizioni letto dai cookie.
+
+        Quel feed lo calcola YouTube, quindi la copia locale non lo tocca: senza
+        scaderla, per un massimo di COOKIE_FEED_CACHE_TTL (5 minuti) le
+        Iscrizioni continuerebbero a mostrare i video di un canale appena
+        lasciato — o a non mostrare quelli di uno appena aggiunto.
+        """
+        self._cookie_feed_cache = []
+        self._cookie_feed_cache_at = 0
+
     def _remember_sub(self, entry: dict):
         """Aggiunge (o aggiorna) un canale nella copia locale, in ordine alfabetico come la sync."""
         self._subs = [s for s in self._subs if s.get("id") != entry["id"]]
         self._subs.append(entry)
         self._subs.sort(key=lambda s: (s.get("name") or "").casefold())
         self._save_subs()
+        self._scade_feed_cookie()
 
     def _forget_sub(self, channel_id: str) -> bool:
         """Toglie il canale dalla copia locale e dalla cache del feed iscrizioni."""
@@ -810,6 +831,7 @@ class AuthManager:
         if len(feed) != len(self._subs_feed_cache):
             self._subs_feed_cache = feed
             self._save_subs_feed_cache()
+        self._scade_feed_cookie()
         return removed
 
     async def subscribe(self, channel_id: str, name: str = "", thumbnail: str = "") -> dict:
@@ -1356,6 +1378,10 @@ class AuthManager:
             v["channel"] = v.get("channel") or meta["name"]
             v["channel_id"] = v.get("channel_id") or meta["id"]
 
+        # Solo l'intestazione: lo stato dell'iscrizione il tasto se lo chiede da
+        # sé con /api/subscriptions/status/<id>, che risponde dalla copia locale
+        # senza interrogare YouTube. Metterlo anche qui vorrebbe dire due fonti
+        # per lo stesso dato, da tenere allineate a mano.
         page["channel"] = meta
         if not page["total"]:
             # Distinguere "canale che non esiste / non raggiungibile" da
