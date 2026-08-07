@@ -327,15 +327,28 @@ body {
 }
 
 /* A schermo intero il contenitore (non solo il <video>) diventa il target:
-   così la barra dei controlli resta visibile invece di sparire — vince sullo
-   style inline max-height, che altrimenti lascerebbe bande nere sopra/sotto. */
+   così la barra dei controlli resta visibile invece di sparire — e va tolto il
+   max-height della regola sopra, che altrimenti lascerebbe bande nere.
+
+   Le misure sono `inset: 0` e non `100vw`/`100vh`: la superficie a schermo
+   intero e il viewport della pagina non sono la stessa cosa. Nell'app Android
+   in particolare `100vh` vale l'altezza della WebView — lo schermo *meno* le
+   barre di sistema, perché Capacitor gliele scala via come padding — mentre la
+   vista a schermo intero copre lo schermo intero davvero. Il contenitore
+   restava quindi più corto della superficie di qualche decina di pixel e sul
+   bordo si vedeva una strisciolina di quello che c'è sotto. Con `inset: 0` e
+   dimensioni `auto` il contenitore si stira sul blocco contenitore reale,
+   qualunque sia, senza dover indovinare quanto misura. */
 .player-wrap:fullscreen {
   display: flex; align-items: center; justify-content: center;
-  width: 100vw; height: 100vh; border-radius: 0;
+  position: fixed; inset: 0; width: auto; height: auto; border-radius: 0;
 }
 .player-wrap:fullscreen video {
-  max-height: 100vh !important; height: 100%; width: 100%; object-fit: contain;
+  max-height: none !important; height: 100%; width: 100%; object-fit: contain;
 }
+/* Lo sfondo dietro all'elemento a schermo intero: nero come il player, così un
+   eventuale pixel scoperto non stona. */
+.player-wrap:fullscreen::backdrop { background: #000; }
 
 /* ── Barra dei controlli ───────────────────────────────────────────────── */
 .player-bar {
