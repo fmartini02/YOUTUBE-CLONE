@@ -52,6 +52,8 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 
 `_progressive_format_selector` / `_adaptive_format_selector` / `_cast_format_selector` in `main.py` non sono intercambiabili — i docstring spiegano il perché (player `<video>` che non gestisce flussi separati, Chromecast che non decodifica AV1/Opus). Il player reale usa **`/api/mux`**: ffmpeg unisce al volo video+audio adattivi in un MP4 frammentato (`-c copy`, `frag_duration` 1s). Conseguenza da tenere a mente: niente `Content-Length`/Range, quindi il `<video>` da solo non sa cercare oltre il buffer. Il seek si fa con il parametro **`start`**: il player riapre il flusso dal secondo richiesto (ffmpeg `-ss` prima degli input, più `-copypriorss 0` per non partire dal keyframe precedente) e mostra `start + currentTime` — vedi `VideoPlayer.jsx`, che per questo ha una barra e dei controlli propri invece di quelli nativi. `/api/watch` resta per i metadati (e restituisce anche uno stream progressivo di riserva).
 
+Da lì discende anche una trappola sulla velocità di riproduzione (menu rotellina → "Riproduzione veloce", e il 2x tenendo premuto sul video): siccome ogni salto riapre il flusso con `load()`, e `load()` riporta `playbackRate` a `defaultPlaybackRate`, la velocità va riapplicata dopo ogni riapertura. In `VideoPlayer.jsx` lo fa un effect che dipende anche da `stream` ed è dichiarato **dopo** quello del caricamento — l'ordine conta, altrimenti scriverebbe la velocità prima di `load()` e verrebbe azzerata subito.
+
 ### Due autenticazioni indipendenti, entrambe facoltative
 
 | | A cosa serve | Dove |

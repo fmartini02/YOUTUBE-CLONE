@@ -52,6 +52,101 @@ const TAP_SLOP_PX = 12;
 // il video invece di fermarlo.
 const TAP_SIDE_RATIO = 0.35;
 
+// ── Velocità di riproduzione ────────────────────────────────────────────
+// La barra si muove a tacche da mezza velocità; i preset qui sotto arrivano
+// dove la barra non passa (1.25, 1.75…), quindi la barra deve saper mostrare
+// anche un valore fuori tacca — motivo per cui è disegnata a mano invece di
+// essere un <input type="range">, che il browser riporta d'ufficio alla tacca
+// più vicina.
+const SPEED_MIN = 0.5;
+const SPEED_MAX = 3;
+const SPEED_STEP = 0.5;
+const SPEED_PRESETS = [1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
+// Velocità del "tieni premuto", e quanto va tenuto premuto prima che parta.
+// Sotto i ~350ms scattava per sbaglio sui tocchi lenti (che devono mettere in
+// pausa), sopra i ~600ms sembra che il video non risponda.
+const HOLD_SPEED = 2;
+const HOLD_MS = 450;
+
+// 1 e non 1.0, 1.25 e non 1.25 troncato: niente zeri inutili.
+function formatSpeed(s) {
+  return String(Number(s.toFixed(2)));
+}
+
+// Le somme in virgola mobile danno 1.5000000000000002: si arrotonda sempre a
+// due decimali, che è la precisione di tutto quello che mostriamo.
+function roundSpeed(s) {
+  return Number(Math.min(SPEED_MAX, Math.max(SPEED_MIN, s)).toFixed(2));
+}
+
+/**
+ * Barra della velocità: trascinamento e frecce si fermano sulle tacche da
+ * `SPEED_STEP`, ma un valore qualsiasi (arrivato da un preset) viene comunque
+ * mostrato nella sua posizione esatta.
+ */
+function SpeedSlider({ value, onChange }) {
+  const ref = useRef(null);
+  const draggingRef = useRef(false);
+  const pct = ((value - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)) * 100;
+
+  // Le tacche disegnate sotto la barra, una ogni mezza velocità.
+  const ticks = [];
+  for (let s = SPEED_MIN; s <= SPEED_MAX + 0.001; s += SPEED_STEP) ticks.push(roundSpeed(s));
+
+  function speedFromPointer(e) {
+    const rect = ref.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const raw = SPEED_MIN + ratio * (SPEED_MAX - SPEED_MIN);
+    return roundSpeed(Math.round(raw / SPEED_STEP) * SPEED_STEP);
+  }
+
+  return (
+    <div className="player-speed-slider">
+      <div
+        className="player-speed-track"
+        ref={ref}
+        tabIndex={0}
+        role="slider"
+        aria-label="Velocità di riproduzione"
+        aria-valuemin={SPEED_MIN}
+        aria-valuemax={SPEED_MAX}
+        aria-valuenow={value}
+        aria-valuetext={`${formatSpeed(value)}x`}
+        onPointerDown={e => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          draggingRef.current = true;
+          onChange(speedFromPointer(e));
+        }}
+        onPointerMove={e => { if (draggingRef.current) onChange(speedFromPointer(e)); }}
+        onPointerUp={() => { draggingRef.current = false; }}
+        onPointerCancel={() => { draggingRef.current = false; }}
+        onKeyDown={e => {
+          // Dalla tacca corrente, non dal valore esatto: partendo da 1.25 la
+          // freccia destra porta a 1.5, non a 1.75.
+          const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? SPEED_STEP
+            : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -SPEED_STEP
+            : 0;
+          if (!step) return;
+          e.preventDefault();
+          const tacca = Math.round(value / SPEED_STEP) * SPEED_STEP;
+          const next = roundSpeed(step > 0
+            ? (tacca > value ? tacca : tacca + step)
+            : (tacca < value ? tacca : tacca + step));
+          onChange(next);
+        }}
+      >
+        <div className="player-speed-fill" style={{ width: `${pct}%` }} />
+        <div className="player-speed-handle" style={{ left: `${pct}%` }} />
+      </div>
+      <div className="player-speed-ticks">
+        {ticks.map(t => (
+          <span key={t} className={t === value ? "on" : undefined}>{formatSpeed(t)}x</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function VideoPlayer({
   videoId,
   quality,
@@ -85,6 +180,13 @@ export default function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Il menu impostazioni ha due schermate: l'elenco e la "finestrina" della
+  // velocità. Una sola alla volta, come nel menu di YouTube.
+  const [settingsPage, setSettingsPage] = useState("main");
+  const [speed, setSpeed] = useState(1);
+  // Velocità temporanea del "tieni premuto": non tocca `speed`, così al
+  // rilascio si torna esattamente alla velocità scelta dall'utente.
+  const [holding, setHolding] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [scrub, setScrub] = useState(null);   // secondi mentre si trascina
   const [hover, setHover] = useState(null);   // secondi sotto il puntatore
@@ -99,6 +201,7 @@ export default function VideoPlayer({
     setPosition(0);
     setBufferedEnd(0);
     setSettingsOpen(false);
+    setSettingsPage("main");
   }
 
   // ── Caricamento / riapertura del flusso ────────────────────────────────
@@ -112,6 +215,20 @@ export default function VideoPlayer({
     setBufferedEnd(stream.start);
     v.play().catch(() => {});   // l'autoplay può essere bloccato: non è un errore
   }, [videoId, quality, stream]);
+
+  // ── Velocità ───────────────────────────────────────────────────────────
+  // Dipende anche da `stream` perché `load()` riporta `playbackRate` a
+  // `defaultPlaybackRate`: senza questo, ogni salto (che riapre il flusso)
+  // rimetteva il video a velocità normale. Impostiamo entrambe le proprietà e
+  // teniamo l'effetto DOPO quello del caricamento, così l'ordine è: nuovo
+  // src → load() → velocità riapplicata.
+  const rate = holding ? HOLD_SPEED : speed;
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.defaultPlaybackRate = rate;
+    v.playbackRate = rate;
+  }, [rate, videoId, quality, stream]);
 
   // ── Salto nel tempo ────────────────────────────────────────────────────
   const seekTo = useCallback((target) => {
@@ -220,6 +337,59 @@ export default function VideoPlayer({
   // Con il menu aperto i controlli non devono sparire da sotto il puntatore.
   useEffect(() => { if (settingsOpen) { clearTimeout(hideTimer.current); setControlsVisible(true); } }, [settingsOpen]);
 
+  // ── Tieni premuto = 2x ─────────────────────────────────────────────────
+  // Vale sia col dito che col mouse. Il tocco singolo (pausa) e il click
+  // arrivano comunque al rilascio: se la pressione lunga è scattata vanno
+  // annullati, altrimenti ogni "tieni premuto" finisce con una pausa.
+  const holdRef = useRef({ timer: null, active: false, from: null, heldAt: 0 });
+
+  function startHold(e) {
+    const h = holdRef.current;
+    h.from = { x: e.clientX, y: e.clientY };
+    clearTimeout(h.timer);
+    h.timer = setTimeout(() => {
+      h.timer = null;
+      // Solo a video in movimento: accelerare un video fermo non vuol dire nulla,
+      // e la pressione lunga su un video in pausa serve a farlo ripartire.
+      if (videoRef.current?.paused) return;
+      h.active = true;
+      setHolding(true);
+    }, HOLD_MS);
+  }
+
+  // Restituisce true se la pressione lunga era attiva, cioè se il gesto era un
+  // "tieni premuto" e non un tocco.
+  function endHold() {
+    const h = holdRef.current;
+    clearTimeout(h.timer);
+    h.timer = null;
+    h.from = null;
+    if (!h.active) return false;
+    h.active = false;
+    // Momento della fine, non un sì/no: se il mouse viene rilasciato fuori dal
+    // video il click non arriva mai, e un flag booleano resterebbe alzato a
+    // mangiarsi il click successivo.
+    h.heldAt = Date.now();
+    setHolding(false);
+    return true;
+  }
+
+  function onVideoPointerMove(e) {
+    const h = holdRef.current;
+    if (!h.timer || !h.from) return;
+    // Dito che scorre o mouse che trascina: non è una pressione ferma.
+    if (Math.hypot(e.clientX - h.from.x, e.clientY - h.from.y) > TAP_SLOP_PX) {
+      clearTimeout(h.timer);
+      h.timer = null;
+    }
+  }
+
+  function onVideoClick() {
+    const h = holdRef.current;
+    if (Date.now() - h.heldAt < 400) { h.heldAt = 0; return; }
+    togglePlay();
+  }
+
   // ── Tocchi sullo schermo ───────────────────────────────────────────────
   // Col dito valgono regole diverse dal mouse, le stesse dell'app di YouTube:
   //
@@ -241,6 +411,7 @@ export default function VideoPlayer({
     clearTimeout(tapRef.current.timer);
     clearTimeout(seekBurstRef.current.timer);
     clearTimeout(flashTimer.current);
+    clearTimeout(holdRef.current.timer);
   }, []);
 
   function flashSeek(side, seconds) {
@@ -250,14 +421,19 @@ export default function VideoPlayer({
   }
 
   function onVideoPointerDown(e) {
-    tapRef.current.start = { x: e.clientX, y: e.clientY };
+    if (e.pointerType === "mouse" && e.button !== 0) return;   // solo tasto sinistro
+    if (touch) tapRef.current.start = { x: e.clientX, y: e.clientY };
+    startHold(e);
   }
 
   function onVideoPointerUp(e) {
+    const held = endHold();
     const t = tapRef.current;
     const start = t.start;
     t.start = null;
-    if (!start) return;
+    // Col mouse il resto lo fa il click; col dito, se era una pressione lunga,
+    // il tocco non deve più valere come pausa.
+    if (held || !touch || !start) return;
     if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -323,6 +499,10 @@ export default function VideoPlayer({
       const el = document.activeElement;
       if (el?.isContentEditable) return;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(el?.tagName)) return;
+      // Il menu impostazioni ha comandi suoi — la barra della velocità si muove
+      // con le frecce, che qui sotto varrebbero come salto di 10 secondi. E il
+      // blur poco più giù toglierebbe comunque il fuoco alla barra al primo tasto.
+      if (el?.closest?.(".player-settings-menu")) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       // Un bottone cliccato con il mouse resta col focus: da lì in poi lo
@@ -406,11 +586,18 @@ export default function VideoPlayer({
         // Mouse e dito si escludono a vicenda: col dito il click arriverebbe
         // comunque dopo il pointerup e metterebbe in pausa due volte, e il
         // doppio click aprirebbe lo schermo intero al posto del salto di 10s.
-        onClick={touch ? undefined : togglePlay}
+        onClick={touch ? undefined : onVideoClick}
         onDoubleClick={touch ? undefined : toggleFullscreen}
-        onPointerDown={touch ? onVideoPointerDown : undefined}
-        onPointerUp={touch ? onVideoPointerUp : undefined}
-        onPointerCancel={touch ? () => { tapRef.current.start = null; } : undefined}
+        // La pressione lunga (2x) vale per entrambi, quindi questi handler ci
+        // sono sempre; dentro, la parte dei tocchi si attiva solo col dito.
+        onPointerDown={onVideoPointerDown}
+        onPointerMove={onVideoPointerMove}
+        onPointerUp={onVideoPointerUp}
+        onPointerCancel={() => { tapRef.current.start = null; endHold(); }}
+        onPointerLeave={() => endHold()}
+        // Col dito, la pressione lunga su un video fa comparire il menu del
+        // browser ("salva video…"), che coprirebbe proprio il gesto del 2x.
+        onContextMenu={touch ? e => e.preventDefault() : undefined}
         onPlay={() => { setPlaying(true); bumpControls(); }}
         onPause={() => { setPlaying(false); setControlsVisible(true); }}
         onWaiting={() => setBuffering(true)}
@@ -458,6 +645,15 @@ export default function VideoPlayer({
             {seekFlash.side === "left" ? "fast_rewind" : "fast_forward"}
           </span>
           <span>{seekFlash.seconds} s</span>
+        </div>
+      )}
+
+      {/* Riscontro del "tieni premuto": senza, il 2x è invisibile finché non si
+          sente l'audio accelerato. */}
+      {holding && (
+        <div className="player-hold-flash">
+          <span>{formatSpeed(HOLD_SPEED)}x</span>
+          <span className="material-symbols-outlined">fast_forward</span>
         </div>
       )}
 
@@ -535,11 +731,14 @@ export default function VideoPlayer({
             </button>
 
             <button
-              className={`player-btn${settingsOpen ? " on" : ""}`}
-              onClick={() => setSettingsOpen(o => !o)}
+              className={`player-btn player-settings-btn${settingsOpen ? " on" : ""}`}
+              onClick={() => { setSettingsPage("main"); setSettingsOpen(o => !o); }}
               title="Impostazioni"
             >
               <span className="material-symbols-outlined">settings</span>
+              {/* La velocità non si vede da nessun'altra parte a menu chiuso:
+                  senza questa targhetta ci si dimentica il video a 2x. */}
+              {speed !== 1 && <span className="player-speed-badge">{formatSpeed(speed)}x</span>}
             </button>
 
             {/* Icone disegnate a mano: il rettangolo largo/stretto della
@@ -568,56 +767,116 @@ export default function VideoPlayer({
         <>
           <div className="player-settings-backdrop" onClick={() => setSettingsOpen(false)} />
           <div className="player-settings-menu">
-            <div className="player-settings-section">
-              <div className="player-settings-label">Qualità</div>
-              {[["best", "Migliore qualità"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["360", "360p"]].map(([v, l]) => (
-                <div
-                  key={v}
-                  className={`player-settings-item${quality === v ? " active" : ""}`}
-                  onClick={() => handleQuality(v)}
-                >
-                  {l}
-                </div>
-              ))}
-            </div>
-
-            <div className="player-settings-section">
-              <div className="player-settings-label">Sottotitoli</div>
-              <div
-                className={`player-settings-item${!subtitleLang ? " active" : ""}`}
-                onClick={() => { onSubtitleLangChange(""); setSettingsOpen(false); }}
-              >
-                Off
-              </div>
-              {subtitleLangs.map(l => (
-                <div
-                  key={l.code}
-                  className={`player-settings-item${subtitleLang === l.code ? " active" : ""}`}
-                  onClick={() => { onSubtitleLangChange(l.code); setSettingsOpen(false); }}
-                >
-                  {l.name}{l.auto ? " (auto)" : ""}
-                </div>
-              ))}
-              {subtitleLangs.length === 0 && (
-                <div className="player-settings-item" style={{ color: "var(--text3)", cursor: "default" }}>
-                  Nessun sottotitolo disponibile
-                </div>
-              )}
-            </div>
-
-            {subtitleLang && (
-              <div className="player-settings-section">
-                <div className="player-settings-label">Dimensione sottotitoli</div>
-                {[["small", "Piccoli"], ["normal", "Normali"], ["large", "Grandi"]].map(([v, l]) => (
-                  <div
-                    key={v}
-                    className={`player-settings-item${subtitleSize === v ? " active" : ""}`}
-                    onClick={() => onSubtitleSizeChange(v)}
+            {settingsPage === "speed" ? (
+              /* La "finestrina" della velocità: prende il posto dell'elenco
+                 invece di aprirsi accanto, che su telefono uscirebbe dallo
+                 schermo. */
+              <div className="player-speed-panel">
+                <div className="player-settings-head">
+                  <button
+                    className="player-settings-back"
+                    onClick={() => setSettingsPage("main")}
+                    aria-label="Indietro"
                   >
-                    {l}
+                    <span className="material-symbols-outlined">arrow_back</span>
+                  </button>
+                  <span>Riproduzione veloce</span>
+                  <strong className="player-speed-current">{formatSpeed(speed)}x</strong>
+                </div>
+
+                <SpeedSlider value={speed} onChange={setSpeed} />
+
+                <div className="player-settings-label">Velocità preimpostate</div>
+                <div className="player-speed-presets">
+                  {SPEED_PRESETS.map(s => (
+                    <button
+                      key={s}
+                      className={`player-speed-preset${speed === s ? " active" : ""}`}
+                      onClick={() => setSpeed(s)}
+                    >
+                      {formatSpeed(s)}x
+                    </button>
+                  ))}
+                </div>
+
+                {speed !== 1 && (
+                  <div className="player-settings-item" onClick={() => setSpeed(1)}>
+                    Torna a velocità normale
                   </div>
-                ))}
+                )}
+
+                <div className="player-speed-hint">
+                  Tieni premuto sul video per andare a {formatSpeed(HOLD_SPEED)}x finché non lasci.
+                </div>
               </div>
+            ) : (
+              <>
+                <div className="player-settings-section">
+                  <div className="player-settings-label">Riproduzione</div>
+                  <div
+                    className="player-settings-item player-settings-row"
+                    onClick={() => setSettingsPage("speed")}
+                  >
+                    <span>Riproduzione veloce</span>
+                    <span className="player-settings-value">
+                      {formatSpeed(speed)}x
+                      <span className="material-symbols-outlined">chevron_right</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="player-settings-section">
+                  <div className="player-settings-label">Qualità</div>
+                  {[["best", "Migliore qualità"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["360", "360p"]].map(([v, l]) => (
+                    <div
+                      key={v}
+                      className={`player-settings-item${quality === v ? " active" : ""}`}
+                      onClick={() => handleQuality(v)}
+                    >
+                      {l}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="player-settings-section">
+                  <div className="player-settings-label">Sottotitoli</div>
+                  <div
+                    className={`player-settings-item${!subtitleLang ? " active" : ""}`}
+                    onClick={() => { onSubtitleLangChange(""); setSettingsOpen(false); }}
+                  >
+                    Off
+                  </div>
+                  {subtitleLangs.map(l => (
+                    <div
+                      key={l.code}
+                      className={`player-settings-item${subtitleLang === l.code ? " active" : ""}`}
+                      onClick={() => { onSubtitleLangChange(l.code); setSettingsOpen(false); }}
+                    >
+                      {l.name}{l.auto ? " (auto)" : ""}
+                    </div>
+                  ))}
+                  {subtitleLangs.length === 0 && (
+                    <div className="player-settings-item" style={{ color: "var(--text3)", cursor: "default" }}>
+                      Nessun sottotitolo disponibile
+                    </div>
+                  )}
+                </div>
+
+                {subtitleLang && (
+                  <div className="player-settings-section">
+                    <div className="player-settings-label">Dimensione sottotitoli</div>
+                    {[["small", "Piccoli"], ["normal", "Normali"], ["large", "Grandi"]].map(([v, l]) => (
+                      <div
+                        key={v}
+                        className={`player-settings-item${subtitleSize === v ? " active" : ""}`}
+                        onClick={() => onSubtitleSizeChange(v)}
+                      >
+                        {l}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>

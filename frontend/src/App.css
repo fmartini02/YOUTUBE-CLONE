@@ -461,6 +461,9 @@ body {
   .player-progress-track { height: 5px; }
   .player-progress-handle { transform: translateY(-50%) scale(1); }
   .player-bar { padding: 0 8px 8px; }
+  .player-speed-track { height: 6px; margin: 14px 0; }
+  .player-speed-handle { width: 18px; height: 18px; margin-left: -9px; }
+  .player-speed-preset { padding: 10px 0; }
 }
 
 /* ── Menu impostazioni (qualità/sottotitoli) ───────────────────────────── */
@@ -486,6 +489,90 @@ body {
 }
 .player-settings-item:hover { background: rgba(255,255,255,0.08); }
 .player-settings-item.active { color: var(--accent); font-weight: 600; }
+
+/* Voce con il valore corrente a destra (es. "Riproduzione veloce   1.5x ›"). */
+.player-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.player-settings-value {
+  display: flex; align-items: center; gap: 2px;
+  color: var(--text3); font-size: 12px; white-space: nowrap;
+}
+.player-settings-value .material-symbols-outlined { font-size: 16px; }
+
+/* ── Finestrina della velocità ─────────────────────────────────────────── */
+.player-speed-panel { padding: 2px 0 8px; width: 268px; max-width: 78vw; }
+.player-settings-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 12px 8px; font-size: 13px; color: var(--text);
+  border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 8px;
+}
+.player-settings-back {
+  background: none; border: none; color: var(--text); cursor: pointer;
+  display: flex; align-items: center; padding: 4px; border-radius: 50%;
+}
+.player-settings-back:hover { background: rgba(255,255,255,0.12); }
+.player-settings-back .material-symbols-outlined { font-size: 20px; }
+.player-speed-current { margin-left: auto; color: var(--accent); font-size: 14px; }
+
+.player-speed-slider { padding: 6px 16px 0; }
+/* `touch-action: none` per lo stesso motivo della barra di avanzamento: senza,
+   il dito che trascina fa scorrere la pagina invece di muovere la barra. */
+.player-speed-track {
+  position: relative; height: 5px; border-radius: 3px;
+  background: rgba(255,255,255,0.25); cursor: pointer; touch-action: none;
+  margin: 10px 0;
+}
+.player-speed-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
+.player-speed-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent); border-radius: 3px;
+}
+.player-speed-handle {
+  position: absolute; top: 50%; width: 15px; height: 15px;
+  margin-left: -7.5px; border-radius: 50%; background: var(--accent);
+  transform: translateY(-50%);
+}
+.player-speed-ticks {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text3); font-variant-numeric: tabular-nums;
+}
+.player-speed-ticks .on { color: var(--text); font-weight: 600; }
+
+.player-speed-presets {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  padding: 2px 14px 8px;
+}
+.player-speed-preset {
+  background: rgba(255,255,255,0.1); border: 1px solid transparent;
+  color: var(--text); font-size: 12px; padding: 7px 0; border-radius: 6px;
+  cursor: pointer; transition: background 0.15s;
+}
+.player-speed-preset:hover { background: rgba(255,255,255,0.2); }
+.player-speed-preset.active {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; font-weight: 600;
+}
+.player-speed-hint {
+  padding: 6px 14px 0; font-size: 11px; line-height: 1.4; color: var(--text3);
+}
+
+/* Targhetta sulla rotellina quando la velocità non è quella normale. */
+.player-settings-btn { position: relative; }
+.player-speed-badge {
+  position: absolute; top: 1px; right: 0;
+  background: var(--accent); color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 1;
+  padding: 2px 3px; border-radius: 4px; pointer-events: none;
+}
+
+/* ── Riscontro del "tieni premuto" (2x) ────────────────────────────────── */
+.player-hold-flash {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 16;
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(0,0,0,0.65); color: #fff;
+  padding: 6px 12px; border-radius: 16px;
+  font-size: 13px; font-weight: 600; pointer-events: none;
+}
+.player-hold-flash .material-symbols-outlined { font-size: 18px; }
 
 /* Dimensione sottotitoli — ::cue è l'unico modo standard per stilizzare i
    sottotitoli nativi del browser senza sostituirli con un rendering custom. */
