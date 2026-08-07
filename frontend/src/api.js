@@ -71,6 +71,19 @@ export async function checkServerReachable(url, timeoutMs = 4000) {
   }
 }
 
+/**
+ * apiFetch rilancia il corpo della risposta così com'è, che per FastAPI è
+ * {"detail": "..."}: qui serve la sola frase, è quella che finisce nel toast.
+ */
+export function errorMessage(e, fallback) {
+  const raw = String(e?.message || e || "");
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.detail) return String(parsed.detail);
+  } catch { /* non era JSON: si usa il testo così com'è */ }
+  return raw.slice(0, 160) || fallback;
+}
+
 export async function apiFetch(path, opts = {}) {
   const res = await fetch(getServerBase() + path, opts);
   if (!res.ok) {
@@ -136,6 +149,10 @@ export const api = {
   logout: () => apiFetch("/api/auth/logout", { method: "POST" }),
   subscriptions: () => apiFetch("/api/subscriptions"),
   syncSubs: () => apiFetch("/api/subscriptions/sync", { method: "POST" }),
+  // Iscrizione/disiscrizione: passano dalla Data API, quindi servono l'account
+  // Google collegato e lo scope di scrittura (vedi can_manage_subs sul server).
+  subscribe: (channelId) => apiFetch(`/api/subscriptions/${channelId}`, { method: "POST" }),
+  unsubscribe: (channelId) => apiFetch(`/api/subscriptions/${channelId}`, { method: "DELETE" }),
   subsFeed: (limit = 30, offset = 0) => apiFetch(`/api/feed/subscriptions?limit=${limit}&offset=${offset}`),
   uploadCookies: (file) => { const fd = new FormData(); fd.append("file", file); return apiFetch("/api/cookies/upload", { method: "POST", body: fd }); },
   deleteCookies: () => apiFetch("/api/cookies", { method: "DELETE" }),

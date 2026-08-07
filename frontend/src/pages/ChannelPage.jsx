@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../api";
 import VideoCard from "../components/VideoCard";
+import SubscribeButton from "../components/SubscribeButton";
 import { useToast } from "../hooks/useToast";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
@@ -153,6 +154,16 @@ export default function ChannelPage({ channelId, channelName, navigate }) {
             </div>
           )}
         </div>
+
+        {channel && (
+          <SubscribeButton
+            channelId={channel.id || channelId}
+            channelName={nome}
+            subscribed={channel.subscribed}
+            canSubscribe={channel.can_subscribe}
+            onToast={addToast}
+          />
+        )}
       </div>
 
       {loading ? (

@@ -482,13 +482,20 @@ class AuthManager:
         if TOKEN_FILE.exists():
             TOKEN_FILE.unlink()
 
-    def can_comment(self) -> bool:
+    def _has_write_scope(self) -> bool:
         """
         True solo se il token collegato comprende lo scope di scrittura.
         Un account collegato prima dell'introduzione dei commenti è
-        autenticato ma non può pubblicare: serve rifare il login.
+        autenticato ma non può scrivere: serve rifare il login.
         """
         return self.is_authenticated() and COMMENT_SCOPE in (self._token.get("scope") or "")
+
+    def can_comment(self) -> bool:
+        return self._has_write_scope()
+
+    def can_manage_subs(self) -> bool:
+        """Iscriversi e disiscriversi vuole lo stesso scope dei commenti (youtube.force-ssl)."""
+        return self._has_write_scope()
 
     # ── Commenti (YouTube Data API v3) ────────────────────────────────────────
     #
@@ -514,6 +521,12 @@ class AuthManager:
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=20,
             )
+        # subscriptions.delete risponde 204 senza corpo: non è un errore, è un
+        # successo che semplicemente non ha nulla da dire.
+        if r.status_code == 204 or not r.content:
+            if r.is_success:
+                return {}
+            raise YouTubeAPIError(f"Errore YouTube ({r.status_code})", "", r.status_code)
         try:
             data = r.json()
         except Exception:
@@ -703,6 +716,70 @@ class AuthManager:
 
     def get_subscriptions(self) -> list:
         return self._subs
+
+    def is_subscribed(self, channel_id: str) -> bool:
+        return any(s.get("id") == channel_id for s in self._subs)
+
+    async def subscribe(self, channel_id: str) -> dict:
+        """
+        Iscrive l'account collegato a un canale (Data API, 50 unità di quota).
+
+        La lista locale viene aggiornata subito con i dati che la stessa
+        risposta restituisce: aspettare il sync orario significherebbe un
+        tasto che torna "Iscriviti" appena ricaricata la pagina.
+        """
+        data = await self._yt_api("POST", "subscriptions", params={"part": "snippet"}, json_body={
+            "snippet": {"resourceId": {"kind": "youtube#channel", "channelId": channel_id}},
+        })
+        snippet = data.get("snippet") or {}
+        if not self.is_subscribed(channel_id):
+            self._subs.append({
+                "id": channel_id,
+                "name": snippet.get("title"),
+                "thumbnail": (snippet.get("thumbnails") or {}).get("default", {}).get("url"),
+                "description": (snippet.get("description") or "")[:100],
+            })
+            self._subs.sort(key=lambda s: (s.get("name") or "").lower())  # come l'ordine del sync
+            self._save_subs()
+        self._invalidate_subs_feed_caches()
+        return {"subscribed": True, "name": snippet.get("title")}
+
+    async def unsubscribe(self, channel_id: str) -> dict:
+        """
+        Disiscrive l'account collegato da un canale.
+
+        La API non cancella per id di canale ma per id dell'iscrizione (che è
+        un'altra cosa: identifica la relazione utente↔canale), quindi va prima
+        cercato con forChannelId. Se non c'è, l'iscrizione non esiste più:
+        allineiamo la lista locale e basta, senza trattarlo come errore.
+        """
+        found = await self._yt_api("GET", "subscriptions", params={
+            "part": "id", "mine": "true", "forChannelId": channel_id,
+        })
+        items = found.get("items") or []
+        if items:
+            await self._yt_api("DELETE", "subscriptions", params={"id": items[0]["id"]})
+
+        before = len(self._subs)
+        self._subs = [s for s in self._subs if s.get("id") != channel_id]
+        if len(self._subs) != before:
+            self._save_subs()
+        # I video del canale restano nella cache del feed finché non la si
+        # ripulisce: senza questo l'utente si disiscrive e continua a vederlo
+        # nelle Iscrizioni per un'ora.
+        self._subs_feed_cache = [v for v in self._subs_feed_cache if v.get("channel_id") != channel_id]
+        self._save_subs_feed_cache()
+        self._invalidate_subs_feed_caches()
+        return {"subscribed": False}
+
+    def _invalidate_subs_feed_caches(self):
+        """
+        Scade la cache in memoria del feed cookie: quel feed lo ricalcola
+        YouTube, ma resterebbe fermo fino a 5 minuti (COOKIE_FEED_CACHE_TTL)
+        e mostrerebbe ancora il canale appena lasciato.
+        """
+        self._cookie_feed_cache = []
+        self._cookie_feed_cache_at = 0
 
     # ── Cookie management ─────────────────────────────────────────────────────
 
@@ -1189,7 +1266,13 @@ class AuthManager:
             v["channel"] = v.get("channel") or meta["name"]
             v["channel_id"] = v.get("channel_id") or meta["id"]
 
-        page["channel"] = meta
+        # Stato dell'iscrizione insieme all'intestazione: il tasto lo sa subito,
+        # senza una richiesta in più (la lista iscrizioni è già in memoria).
+        page["channel"] = {
+            **meta,
+            "subscribed": self.is_subscribed(meta.get("id") or channel_id),
+            "can_subscribe": self.can_manage_subs(),
+        }
         if not page["total"]:
             # Distinguere "canale che non esiste / non raggiungibile" da
             # "canale senza video caricati": la pagina lo spiega invece di

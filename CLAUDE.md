@@ -46,7 +46,7 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 - `server/sync.py` — `scheduler` (singleton): loop orario che rinnova le iscrizioni via API e ricostruisce la cache del feed iscrizioni. Avviato da `on_startup`.
 - `server/ytdlp_patch.py` — correzioni all'estrattore di yt-dlp, applicate all'avvio da `main.py`. Oggi una sola: l'id del canale nelle card dei video in collaborazione, che yt-dlp non trova (vedi il docstring). Ogni patch agisce solo se il dato manca, così non fa danni quando yt-dlp si aggiorna.
 
-**yt-dlp è l'unica fonte dei dati YouTube** (niente API key per ricerca/trending/video/commenti/sottotitoli). La YouTube Data API v3 serve solo per l'elenco iscrizioni e i loghi dei canali, e richiede l'OAuth.
+**yt-dlp è l'unica fonte dei dati YouTube** (niente API key per ricerca/trending/video/commenti/sottotitoli). La YouTube Data API v3 serve solo per le iscrizioni (elenco, iscriversi, disiscriversi) e i loghi dei canali, e richiede l'OAuth.
 
 ### Riproduzione: tre selettori di formato, tre scopi
 
@@ -57,7 +57,9 @@ Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste da
 | | A cosa serve | Dove |
 |---|---|---|
 | `data/cookies.txt` | Feed home reale e feed iscrizioni reale (via yt-dlp) | upload manuale o import automatico dal browser (`/api/cookies/import`, gestisce i percorsi snap su Linux) |
-| OAuth Google | Elenco iscrizioni + loghi canale (Data API v3) + lettura/pubblicazione commenti | l'utente crea il proprio Client ID di tipo "TV e dispositivi con input limitato"; device flow su `/api/auth/device/*` |
+| OAuth Google | Iscrizioni (elenco, iscriversi, disiscriversi) + loghi canale (Data API v3) + lettura/pubblicazione commenti | l'utente crea il proprio Client ID di tipo "TV e dispositivi con input limitato"; device flow su `/api/auth/device/*` |
+
+Iscriversi e disiscriversi vogliono lo **stesso scope di scrittura dei commenti** (`youtube.force-ssl`, vedi `can_manage_subs`): chi si è collegato quando esistevano solo la lettura resta autenticato ma con un token di sola lettura, e deve rifare il login. Il tasto sull'intestazione del canale (`SubscribeButton`) in quel caso resta visibile e lo spiega al clic, invece di sparire. Nota che la disiscrizione costa due chiamate: la Data API cancella per **id dell'iscrizione**, non per id del canale, quindi va prima cercato con `forChannelId`.
 
 Sui cookie c'è una trappola che vale la pena ricordare: contano solo quelli di **prima parte sul dominio `youtube.com`** (`SID`, `__Secure-1PSID`, `LOGIN_INFO`, `SAPISID`). Essere loggati su `google.com` non basta — un profilo browser loggato su Google ma che non ha mai aperto YouTube produce un `cookies.txt` di decine di cookie in cui YouTube ti vede comunque anonimo, quindi feed vuoti. `_youtube_auth_cookies()` in `auth.py` è il controllo che distingue i due casi, e `get_cookie_status()` lo espone come `logged_in`.
 

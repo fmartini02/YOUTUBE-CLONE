@@ -1003,13 +1003,58 @@ async def auth_me():
 
 @app.get("/api/subscriptions")
 async def get_subscriptions():
-    return {"subscriptions": auth_manager.get_subscriptions()}
+    # can_manage: se il token collegato può anche scrivere (vedi can_manage_subs).
+    # Serve alla lista canali per sapere se offrire la disiscrizione.
+    return {"subscriptions": auth_manager.get_subscriptions(), "can_manage": auth_manager.can_manage_subs()}
 
 
 @app.post("/api/subscriptions/sync")
 async def force_sync_subs():
     await scheduler.force_sync(auth_manager, ydl_opts_base)
     return {"subscriptions": auth_manager.get_subscriptions(), "sync": scheduler.get_status()}
+
+
+def _check_subs_write():
+    """Requisiti comuni a iscrizione e disiscrizione (vedi can_manage_subs)."""
+    if not auth_manager.is_authenticated():
+        raise HTTPException(403, "Collega un account Google per gestire le iscrizioni")
+    if not auth_manager.can_manage_subs():
+        raise HTTPException(403, "L'account collegato è di sola lettura: "
+                                 "ricollegalo dalle impostazioni per gestire le iscrizioni")
+
+
+def _subs_write_error(ex: YouTubeAPIError) -> HTTPException:
+    if ex.reason in ("insufficientPermissions", "forbidden"):
+        return HTTPException(403, "Permesso negato da YouTube: ricollega l'account dalle impostazioni")
+    if ex.reason in ("quotaExceeded", "rateLimitExceeded"):
+        return HTTPException(429, "Quota giornaliera della YouTube Data API esaurita")
+    if ex.reason == "subscriptionDuplicate":
+        return HTTPException(400, "Sei già iscritto a questo canale")
+    return HTTPException(400, ex.message)
+
+
+@app.post("/api/subscriptions/{channel_id}")
+async def subscribe_channel(channel_id: str):
+    """Iscrive l'account collegato al canale. Costo quota: 50 unità."""
+    _check_subs_write()
+    try:
+        return await auth_manager.subscribe(channel_id)
+    except YouTubeAPIError as ex:
+        raise _subs_write_error(ex)
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
+
+
+@app.delete("/api/subscriptions/{channel_id}")
+async def unsubscribe_channel(channel_id: str):
+    """Disiscrive l'account collegato dal canale. Costo quota: 51 unità (ricerca + cancellazione)."""
+    _check_subs_write()
+    try:
+        return await auth_manager.unsubscribe(channel_id)
+    except YouTubeAPIError as ex:
+        raise _subs_write_error(ex)
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
 
 
 @app.get("/api/feed/subscriptions")

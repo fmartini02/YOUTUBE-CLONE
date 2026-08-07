@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { api } from "../api";
+import { api, errorMessage } from "../api";
 import VideoCard from "../components/VideoCard";
 import { useChannelAvatars } from "../hooks/useChannelAvatars";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 30;
 
 export default function SubscriptionsPage({ navigate }) {
   const [subs, setSubs] = useState([]);
+  const [canManage, setCanManage] = useState(false);
+  const [leaving, setLeaving] = useState(null);  // id del canale che si sta lasciando
+  const { addToast, ToastContainer } = useToast();
   const [loading, setLoading] = useState(true);
   const [feed, setFeed] = useState([]);
   const [feedLoading, setFeedLoading] = useState(false);
@@ -19,6 +23,7 @@ export default function SubscriptionsPage({ navigate }) {
   useEffect(() => {
     api.subscriptions().then(d => {
       setSubs(d.subscriptions || []);
+      setCanManage(!!d.can_manage);
       setLoading(false);
     }).catch(() => setLoading(false));
 
@@ -43,6 +48,28 @@ export default function SubscriptionsPage({ navigate }) {
       setLoadingMore(false);
     }).catch(() => setLoadingMore(false));
   }, [feed.length, hasMore, loadingMore]);
+
+  /**
+   * Disiscrizione dalla lista canali: la conferma è d'obbligo perché il tasto
+   * sta dentro la card che apre il canale, e un tocco storto costerebbe
+   * un'iscrizione. Il canale sparisce subito dalla lista — il server ha già
+   * aggiornato la sua, quindi non serve richiederla.
+   */
+  async function unsubscribe(ch) {
+    if (leaving) return;
+    if (!window.confirm(`Annullare l'iscrizione a ${ch.name || "questo canale"}?`)) return;
+    setLeaving(ch.id);
+    try {
+      await api.unsubscribe(ch.id);
+      setSubs(list => list.filter(s => s.id !== ch.id));
+      setFeed(f => f.filter(v => v.channel_id !== ch.id));
+      addToast(`Iscrizione annullata: ${ch.name || ch.id}`);
+    } catch (e) {
+      addToast(errorMessage(e, "Disiscrizione non riuscita"));
+    } finally {
+      setLeaving(null);
+    }
+  }
 
   const sentinelRef = useInfiniteScroll({
     // Solo nella vista feed: la lista canali non è paginata.
@@ -112,11 +139,26 @@ export default function SubscriptionsPage({ navigate }) {
           {subs.map(ch => (
             <div
               key={ch.id}
-              style={{ background: "var(--bg2)", borderRadius: 12, padding: 16, cursor: "pointer", textAlign: "center", transition: "background 0.2s" }}
+              style={{ background: "var(--bg2)", borderRadius: 12, padding: 16, cursor: "pointer", textAlign: "center", transition: "background 0.2s", position: "relative" }}
               onClick={() => navigate("channel", { channelId: ch.id, channelName: ch.name })}
               onMouseEnter={e => e.currentTarget.style.background = "var(--bg3)"}
               onMouseLeave={e => e.currentTarget.style.background = "var(--bg2)"}
             >
+              {canManage && (
+                <button
+                  onClick={e => { e.stopPropagation(); unsubscribe(ch); }}
+                  disabled={leaving === ch.id}
+                  title="Annulla iscrizione"
+                  style={{
+                    position: "absolute", top: 6, right: 6, width: 26, height: 26,
+                    borderRadius: "50%", border: "none", cursor: "pointer",
+                    background: "var(--bg3)", color: "var(--text2)", fontSize: 14, lineHeight: 1,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  {leaving === ch.id ? "…" : "✕"}
+                </button>
+              )}
               {ch.thumbnail ? (
                 <img src={ch.thumbnail} alt={ch.name} referrerPolicy="no-referrer" style={{ width: 64, height: 64, borderRadius: "50%", marginBottom: 8, objectFit: "cover" }} />
               ) : (
@@ -129,6 +171,7 @@ export default function SubscriptionsPage({ navigate }) {
           ))}
         </div>
       )}
+      <ToastContainer />
     </div>
   );
 }
