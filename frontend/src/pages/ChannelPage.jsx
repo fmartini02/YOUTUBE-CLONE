@@ -45,7 +45,7 @@ export default function ChannelPage({ channelId, channelName, navigate, onSubsCh
   const [hasMore, setHasMore] = useState(false);
   const [emptyReason, setEmptyReason] = useState(null);
   const [descOpen, setDescOpen] = useState(false);
-  const { ToastContainer } = useToast();
+  const { addToast, ToastContainer } = useToast();
 
   useEffect(() => {
     let cancelled = false;
