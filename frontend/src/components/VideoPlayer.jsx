@@ -101,41 +101,65 @@ function SpeedSlider({ value, onChange }) {
 
   return (
     <div className="player-speed-slider">
-      <div
-        className="player-speed-track"
-        ref={ref}
-        tabIndex={0}
-        role="slider"
-        aria-label="Velocità di riproduzione"
-        aria-valuemin={SPEED_MIN}
-        aria-valuemax={SPEED_MAX}
-        aria-valuenow={value}
-        aria-valuetext={`${formatSpeed(value)}x`}
-        onPointerDown={e => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          draggingRef.current = true;
-          onChange(speedFromPointer(e));
-        }}
-        onPointerMove={e => { if (draggingRef.current) onChange(speedFromPointer(e)); }}
-        onPointerUp={() => { draggingRef.current = false; }}
-        onPointerCancel={() => { draggingRef.current = false; }}
-        onKeyDown={e => {
-          const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? SPEED_STEP
-            : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -SPEED_STEP
-            : 0;
-          if (!step) return;
-          e.preventDefault();
-          onChange(roundSpeed(value + step));
-        }}
+      {/* Col dito la barra è imprecisa: una tacca sono ~4px, e i due tasti sono
+          l'unico modo per centrare 1.35x invece di 1.3x o 1.4x. */}
+      <button
+        className="player-speed-step"
+        onClick={() => onChange(roundSpeed(value - SPEED_STEP))}
+        disabled={value <= SPEED_MIN}
+        aria-label={`Riduci di ${formatSpeed(SPEED_STEP)}`}
+        title={`- ${formatSpeed(SPEED_STEP)}`}
       >
-        <div className="player-speed-fill" style={{ width: `${pct}%` }} />
-        <div className="player-speed-handle" style={{ left: `${pct}%` }} />
+        <span className="material-symbols-outlined">remove</span>
+      </button>
+
+      <div className="player-speed-bar">
+        <div
+          className="player-speed-track"
+          ref={ref}
+          tabIndex={0}
+          role="slider"
+          aria-label="Velocità di riproduzione"
+          aria-valuemin={SPEED_MIN}
+          aria-valuemax={SPEED_MAX}
+          aria-valuenow={value}
+          aria-valuetext={`${formatSpeed(value)}x`}
+          onPointerDown={e => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            draggingRef.current = true;
+            onChange(speedFromPointer(e));
+          }}
+          onPointerMove={e => { if (draggingRef.current) onChange(speedFromPointer(e)); }}
+          onPointerUp={() => { draggingRef.current = false; }}
+          onPointerCancel={() => { draggingRef.current = false; }}
+          onKeyDown={e => {
+            const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? SPEED_STEP
+              : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -SPEED_STEP
+              : 0;
+            if (!step) return;
+            e.preventDefault();
+            onChange(roundSpeed(value + step));
+          }}
+        >
+          <div className="player-speed-fill" style={{ width: `${pct}%` }} />
+          <div className="player-speed-handle" style={{ left: `${pct}%` }} />
+        </div>
+        <div className="player-speed-ticks">
+          {ticks.map(t => (
+            <span key={t} className={t === value ? "on" : undefined}>{formatSpeed(t)}x</span>
+          ))}
+        </div>
       </div>
-      <div className="player-speed-ticks">
-        {ticks.map(t => (
-          <span key={t} className={t === value ? "on" : undefined}>{formatSpeed(t)}x</span>
-        ))}
-      </div>
+
+      <button
+        className="player-speed-step"
+        onClick={() => onChange(roundSpeed(value + SPEED_STEP))}
+        disabled={value >= SPEED_MAX}
+        aria-label={`Aumenta di ${formatSpeed(SPEED_STEP)}`}
+        title={`+ ${formatSpeed(SPEED_STEP)}`}
+      >
+        <span className="material-symbols-outlined">add</span>
+      </button>
     </div>
   );
 }
