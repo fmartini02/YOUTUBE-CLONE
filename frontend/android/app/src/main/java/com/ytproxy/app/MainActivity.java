@@ -5,10 +5,21 @@ import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
 
+import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * Tasto Indietro (e gesture di scorrimento dal bordo) di Android.
+ * Due cose che Capacitor da solo non fa: il tasto Indietro e lo schermo intero.
+ *
+ * ── Schermo intero ─────────────────────────────────────────────────────────
+ * Il WebChromeClient di Capacitor annulla la richiesta di schermo intero della
+ * pagina, quindi il video restava sotto la barra di stato e quella di
+ * navigazione. Lo rimpiazza {@link FullscreenWebChromeClient}, che il docstring
+ * lì spiega per esteso. Va messo dentro onCreate: la classe di Capacitor
+ * registra dei launcher di activity result, e quelli si possono registrare solo
+ * prima che l'activity parta.
+ *
+ * ── Tasto Indietro (e gesture di scorrimento dal bordo) ────────────────────
  *
  * Da Capacitor 7 in poi l'activity non gestisce più il tasto da sola: senza il
  * plugin @capacitor/app il comportamento predefinito è chiudere l'app, quindi
@@ -27,9 +38,17 @@ import com.getcapacitor.BridgeActivity;
  */
 public class MainActivity extends BridgeActivity {
 
+    private FullscreenWebChromeClient chromeClient;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        Bridge bridge = getBridge();
+        if (bridge != null && bridge.getWebView() != null) {
+            chromeClient = new FullscreenWebChromeClient(bridge);
+            bridge.getWebView().setWebChromeClient(chromeClient);
+        }
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
@@ -53,5 +72,16 @@ public class MainActivity extends BridgeActivity {
                 );
             }
         });
+    }
+
+    /**
+     * Al ritorno sull'app (da un'altra app, dal pannello delle notifiche, dal
+     * blocco schermo) Android rimette le barre di sistema: se il video è ancora
+     * a schermo intero vanno rinascoste.
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && chromeClient != null) chromeClient.reapplySystemBars();
     }
 }
