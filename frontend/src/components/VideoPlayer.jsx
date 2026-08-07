@@ -36,6 +36,19 @@ function isBuffered(video, t) {
   return false;
 }
 
+// Averlo in buffer però non basta: il browser sposta `currentTime` solo dentro
+// `seekable`, e sul flusso di /api/mux (niente Content-Length, `Accept-Ranges:
+// none`) Chrome dichiara `seekable` = [0,0]. Lì ogni assegnazione veniva
+// schiacciata a zero — misurato: `v.currentTime = 7.36` si rilegge `0`, cioè il
+// video tornava all'inizio invece di andare avanti. Succedeva a ogni salto
+// corto: barra spostata di poco, tasti ← →, doppio tocco sul telefono.
+function isSeekable(video, t) {
+  for (let i = 0; i < video.seekable.length; i++) {
+    if (t >= video.seekable.start(i) && t <= video.seekable.end(i)) return true;
+  }
+  return false;
+}
+
 const SKIP_SECONDS = 10;
 const VOLUME_STEP = 0.05;
 
@@ -254,13 +267,21 @@ export default function VideoPlayer({
     const max = duration ? duration - 0.5 : Infinity;
     const t = Math.max(0, Math.min(max, target));
     const local = t - stream.start;
-    if (local >= 0 && isBuffered(v, local)) {
-      // Già in buffer: salto istantaneo, il flusso non si tocca.
+    // Già scaricato *e* dichiarato cercabile: salto istantaneo, il flusso non
+    // si tocca. Il risultato si verifica subito rileggendo `currentTime`: se il
+    // browser lo ha spostato altrove (di norma a 0) il salto non è avvenuto e
+    // si passa alla riapertura, invece di lasciare il video all'inizio con la
+    // barra che dice un'altra cosa.
+    if (local >= 0 && isBuffered(v, local) && isSeekable(v, local)) {
       v.currentTime = local;
-      setPosition(t);
-    } else {
-      setStream(s => ({ start: t, n: s.n + 1 }));
+      if (Math.abs(v.currentTime - local) < 0.5) {
+        setPosition(t);
+        return;
+      }
     }
+    // Altrimenti si riapre il flusso dal secondo richiesto: è l'unico modo di
+    // spostarsi davvero su uno stream generato al volo.
+    setStream(s => ({ start: t, n: s.n + 1 }));
   }, [duration, stream.start]);
 
   const skip = useCallback((delta) => seekTo(position + delta), [seekTo, position]);
