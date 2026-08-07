@@ -27,6 +27,9 @@ npm install && npm run build:frontend && npm start
 npm run build                          # electron-builder → dist-electron/
 
 # APK Android (Capacitor)
+./build_apk.sh                         # tutta la catena, APK copiato in ./YTProxy.apk
+./build_apk.sh --install               # e lo installa via adb sul telefono collegato
+# a mano:
 cd frontend && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug
 ```
 
