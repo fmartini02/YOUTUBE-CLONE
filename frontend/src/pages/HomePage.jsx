@@ -38,7 +38,7 @@ export default function HomePage({ navigate, authStatus }) {
   const [category, setCategory] = useState("Tutti");
   const [feedSource, setFeedSource] = useState(null); // null | "youtube-home"
   const [emptyReason, setEmptyReason] = useState(null); // perché la home è vuota
-  const { addToast, ToastContainer } = useToast();
+  const { ToastContainer } = useToast();
   const avatars = useChannelAvatars(videos);
 
   // Da quale elenco stiamo paginando, per proseguire sullo STESSO elenco
@@ -113,13 +113,6 @@ export default function HomePage({ navigate, authStatus }) {
     onLoadMore: loadMore,
   });
 
-  function handleDownload(video) {
-    const url = api.downloadUrl(video.id);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${video.title}.mp4`; a.click();
-    addToast(`⬇ Download avviato: ${video.title.slice(0, 40)}...`);
-  }
-
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
@@ -172,7 +165,7 @@ export default function HomePage({ navigate, authStatus }) {
         <>
           <div className="video-grid">
             {videos.map(v => (
-              <VideoCard key={v.id} video={v} navigate={navigate} onDownload={handleDownload} avatarUrl={avatars[v.channel_id]} />
+              <VideoCard key={v.id} video={v} navigate={navigate} avatarUrl={avatars[v.channel_id]} />
             ))}
           </div>
 

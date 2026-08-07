@@ -226,17 +226,6 @@ body {
   border-radius: 4px;
 }
 
-.download-overlay {
-  position: absolute; inset: 0;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.6) 100%);
-  display: flex; flex-direction: column;
-  align-items: flex-end; justify-content: flex-end; gap: 8px;
-  padding: 8px;
-  opacity: 0; transition: opacity 0.15s;
-  border-radius: var(--radius);
-}
-.video-card:hover .download-overlay { opacity: 1; }
-
 .play-btn {
   background: var(--accent); border: none; color: #fff;
   padding: 8px 16px; border-radius: 18px; cursor: pointer;
@@ -244,14 +233,6 @@ body {
   transition: background var(--transition);
 }
 .play-btn:hover { background: var(--accent2); }
-
-.dl-btn {
-  background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3);
-  color: #fff; padding: 6px 12px; border-radius: 16px; cursor: pointer;
-  font-size: 12px; display: flex; align-items: center; gap: 4px;
-  transition: background var(--transition);
-}
-.dl-btn:hover { background: rgba(0,0,0,0.8); }
 
 .video-info { padding: 12px 0 0; display: flex; gap: 12px; }
 

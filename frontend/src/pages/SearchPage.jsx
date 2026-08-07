@@ -19,14 +19,6 @@ export default function SearchPage({ query, navigate }) {
       .finally(() => setLoading(false));
   }, [query]);
 
-  function handleDownload(e, video) {
-    e.stopPropagation();
-    const url = api.downloadUrl(video.id);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${video.title}.mp4`; a.click();
-    addToast(`⬇ Download avviato: ${video.title.slice(0, 40)}...`);
-  }
-
   if (loading) return (
     <div>
       <p style={{ color: "var(--text2)", marginBottom: 16 }}>Cerco "{query}"...</p>
@@ -73,9 +65,6 @@ export default function SearchPage({ query, navigate }) {
               <div className="search-actions" onClick={e => e.stopPropagation()}>
                 <button className="action-btn primary" onClick={() => navigate("video", { videoId: v.id })}>
                   ▶ Guarda
-                </button>
-                <button className="action-btn" onClick={e => handleDownload(e, v)}>
-                  ⬇ Download
                 </button>
               </div>
             </div>
