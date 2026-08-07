@@ -68,6 +68,38 @@ def ydl_opts_base():
     }
 
 
+async def in_executor(fn, *args):
+    """
+    Esegue codice bloccante fuori dall'event loop.
+
+    yt-dlp e la lettura dei cookie dal browser sono sincroni e lenti (1-3
+    secondi un'estrazione, minuti un download). Chiamarli dentro un `async def`
+    ferma l'INTERO server per tutto quel tempo, perché FastAPI serve ogni
+    richiesta sullo stesso event loop: il sintomo è il video di /api/mux che si
+    inchioda appena si apre una ricerca o un altro video, dato che anche il
+    generatore che legge da ffmpeg smette di essere schedulato.
+
+    Il resto del server lo faceva già (vedi `_mux_formats`, `LazyFeed.extend`,
+    `_extract_comments_ytdlp`): questo helper è solo il posto unico dove dirlo.
+    """
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
+
+
+def _estrai_video(video_id: str, format_selector: Optional[str] = None) -> dict:
+    """
+    Estrazione completa di un singolo video. **Bloccante**: va sempre passata a
+    `in_executor`, mai chiamata direttamente da un `async def`.
+
+    `format_selector` serve solo a chi vuole anche un URL di riproduzione
+    (/api/stream, /api/watch); i soli metadati non ne hanno bisogno.
+    """
+    opts = {**ydl_opts_base(), "extract_flat": False}
+    if format_selector:
+        opts["format"] = format_selector
+    with crea_ydl(opts) as ydl:
+        return ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+
+
 def _timestamp_to_upload_date(ts) -> Optional[str]:
     """Converte un unix timestamp (anche approssimato) nel formato YYYYMMDD usato da 'published'."""
     if not ts:
@@ -148,28 +180,32 @@ async def search(q: str = Query(...), page: int = 1):
         # lista, quindi la pagina 2 tornava sempre vuota.
         per_page = 20
         want = page * per_page
-        opts = {
-            **ydl_opts_base(),
-            "playlist_items": f"{(page - 1) * per_page + 1}-{want}",
-        }
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"ytsearch{want}:{q}", download=False)
-            entries = info.get("entries", [])
-            results = []
-            for e in entries:
-                if not is_video_entry(e):
-                    continue
-                results.append({
-                    "id": e.get("id"),
-                    "title": e.get("title"),
-                    "channel": e.get("uploader") or e.get("channel"),
-                    "channel_id": e.get("channel_id"),
-                    "duration": e.get("duration"),
-                    "views": e.get("view_count"),
-                    "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                    "published": _timestamp_to_upload_date(e.get("timestamp")),
-                })
-            return {"results": results, "query": q, "has_more": len(results) >= per_page}
+
+        def _estrai():
+            opts = {
+                **ydl_opts_base(),
+                "playlist_items": f"{(page - 1) * per_page + 1}-{want}",
+            }
+            with crea_ydl(opts) as ydl:
+                return ydl.extract_info(f"ytsearch{want}:{q}", download=False)
+
+        info = await in_executor(_estrai)
+        entries = (info or {}).get("entries") or []
+        results = []
+        for e in entries:
+            if not is_video_entry(e):
+                continue
+            results.append({
+                "id": e.get("id"),
+                "title": e.get("title"),
+                "channel": e.get("uploader") or e.get("channel"),
+                "channel_id": e.get("channel_id"),
+                "duration": e.get("duration"),
+                "views": e.get("view_count"),
+                "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
+                "published": _timestamp_to_upload_date(e.get("timestamp")),
+            })
+        return {"results": results, "query": q, "has_more": len(results) >= per_page}
     except Exception as ex:
         raise HTTPException(500, str(ex))
 
@@ -199,32 +235,38 @@ async def trending(limit: int = 24, offset: int = 0):
     if _trending_cache and _time.time() - _trending_cache_at < _TRENDING_CACHE_TTL:
         return _page(_trending_cache)
 
-    try:
+    def _estrai():
         opts = {
             **ydl_opts_base(),
             "playlistend": 120,
         }
         with crea_ydl(opts) as ydl:
-            info = ydl.extract_info("https://www.youtube.com/results?search_query=trending+italia&sp=CAISAhAB", download=False)
-            entries = (info or {}).get("entries", [])
-            results = []
-            for e in entries:
-                if not is_video_entry(e):
-                    continue
-                results.append({
-                    "id": e.get("id"),
-                    "title": e.get("title"),
-                    "channel": e.get("uploader") or e.get("channel"),
-                    "channel_id": e.get("channel_id"),
-                    "duration": e.get("duration"),
-                    "views": e.get("view_count"),
-                    "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                    "published": _timestamp_to_upload_date(e.get("timestamp")),
-                })
-            if results:
-                _trending_cache = results
-                _trending_cache_at = _time.time()
-            return _page(results)
+            return ydl.extract_info(
+                "https://www.youtube.com/results?search_query=trending+italia&sp=CAISAhAB",
+                download=False,
+            )
+
+    try:
+        info = await in_executor(_estrai)
+        entries = (info or {}).get("entries") or []
+        results = []
+        for e in entries:
+            if not is_video_entry(e):
+                continue
+            results.append({
+                "id": e.get("id"),
+                "title": e.get("title"),
+                "channel": e.get("uploader") or e.get("channel"),
+                "channel_id": e.get("channel_id"),
+                "duration": e.get("duration"),
+                "views": e.get("view_count"),
+                "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
+                "published": _timestamp_to_upload_date(e.get("timestamp")),
+            })
+        if results:
+            _trending_cache = results
+            _trending_cache_at = _time.time()
+        return _page(results)
     except Exception as ex:
         if _trending_cache:
             return _page(_trending_cache)
@@ -235,22 +277,20 @@ async def trending(limit: int = 24, offset: int = 0):
 async def video_info(video_id: str):
     """Get video metadata."""
     try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            return {
-                "id": info.get("id"),
-                "title": info.get("title"),
-                "description": info.get("description", "")[:500],
-                "channel": info.get("uploader"),
-                "channel_id": info.get("channel_id"),
-                "duration": info.get("duration"),
-                "views": info.get("view_count"),
-                "likes": info.get("like_count"),
-                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
-                "published": info.get("upload_date"),
-                "tags": info.get("tags", [])[:10],
-            }
+        info = await in_executor(_estrai_video, video_id) or {}
+        return {
+            "id": info.get("id"),
+            "title": info.get("title"),
+            "description": (info.get("description") or "")[:500],
+            "channel": info.get("uploader"),
+            "channel_id": info.get("channel_id"),
+            "duration": info.get("duration"),
+            "views": info.get("view_count"),
+            "likes": info.get("like_count"),
+            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+            "published": info.get("upload_date"),
+            "tags": info.get("tags", [])[:10],
+        }
     except Exception as ex:
         raise HTTPException(500, str(ex))
 
@@ -484,9 +524,7 @@ def _subtitle_tracks(info: dict) -> dict:
 async def list_subtitles(video_id: str):
     """Lingue sottotitoli disponibili per il video (quasi sempre solo automatici — i sottotitoli caricati a mano sono rari)."""
     try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        info = await in_executor(_estrai_video, video_id) or {}
         merged = _subtitle_tracks(info)
         # YouTube traduce automaticamente in ~150 lingue: senza filtro il menu
         # sarebbe illeggibile. Teniamo solo le lingue comuni + quelle caricate
@@ -508,9 +546,7 @@ async def list_subtitles(video_id: str):
 async def get_subtitle_vtt(video_id: str, lang: str):
     """Proxy del sottotitolo WebVTT — scaricato qui invece che puntare il <track> direttamente a YouTube per evitare problemi di CORS."""
     try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        info = await in_executor(_estrai_video, video_id) or {}
         merged = _subtitle_tracks(info)
         entry = merged.get(lang)
         if not entry:
@@ -533,17 +569,13 @@ async def stream_video(video_id: str, quality: str = "best"):
     Returns a redirect to the direct video URL from YouTube CDN.
     """
     try:
-        opts = {
-            **ydl_opts_base(),
-            "extract_flat": False,
-            "format": _progressive_format_selector(quality),
-        }
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            url = info.get("url")
-            if not url:
-                raise HTTPException(404, "No stream URL found")
-            return JSONResponse({"stream_url": url, "title": info.get("title"), "ext": info.get("ext", "mp4")})
+        info = await in_executor(
+            _estrai_video, video_id, _progressive_format_selector(quality)
+        ) or {}
+        url = info.get("url")
+        if not url:
+            raise HTTPException(404, "No stream URL found")
+        return JSONResponse({"stream_url": url, "title": info.get("title"), "ext": info.get("ext", "mp4")})
     except HTTPException:
         raise
     except Exception as ex:
@@ -558,31 +590,27 @@ async def watch(video_id: str, quality: str = "best"):
     che il video parta dopo il click sulla copertina.
     """
     try:
-        opts = {
-            **ydl_opts_base(),
-            "extract_flat": False,
-            "format": _progressive_format_selector(quality),
+        info = await in_executor(
+            _estrai_video, video_id, _progressive_format_selector(quality)
+        ) or {}
+        url = info.get("url")
+        if not url:
+            raise HTTPException(404, "No stream URL found")
+        return {
+            "id": info.get("id"),
+            "title": info.get("title"),
+            "description": (info.get("description") or "")[:500],
+            "channel": info.get("uploader"),
+            "channel_id": info.get("channel_id"),
+            "duration": info.get("duration"),
+            "views": info.get("view_count"),
+            "likes": info.get("like_count"),
+            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+            "published": info.get("upload_date"),
+            "tags": info.get("tags", [])[:10],
+            "stream_url": url,
+            "ext": info.get("ext", "mp4"),
         }
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            url = info.get("url")
-            if not url:
-                raise HTTPException(404, "No stream URL found")
-            return {
-                "id": info.get("id"),
-                "title": info.get("title"),
-                "description": info.get("description", "")[:500],
-                "channel": info.get("uploader"),
-                "channel_id": info.get("channel_id"),
-                "duration": info.get("duration"),
-                "views": info.get("view_count"),
-                "likes": info.get("like_count"),
-                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
-                "published": info.get("upload_date"),
-                "tags": info.get("tags", [])[:10],
-                "stream_url": url,
-                "ext": info.get("ext", "mp4"),
-            }
     except HTTPException:
         raise
     except Exception as ex:
@@ -765,7 +793,8 @@ async def download_video(video_id: str, quality: str = "best"):
     """
     cache_path = DOWNLOAD_DIR / f"{video_id}_{quality}.mp4"
 
-    if not cache_path.exists():
+    def _scarica() -> Path:
+        """Scarica e rimuxa il video. Bloccante per minuti: sempre in executor."""
         format_selector = "bestvideo[height<=1080]+bestaudio/best[height<=720]/best"
         if quality == "720":
             format_selector = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
@@ -786,8 +815,11 @@ async def download_video(video_id: str, quality: str = "best"):
         # find actual file
         for f in DOWNLOAD_DIR.glob(f"{video_id}_{quality}.*"):
             if f.suffix != ".part":
-                cache_path = f
-                break
+                return f
+        return cache_path
+
+    if not cache_path.exists():
+        cache_path = await in_executor(_scarica)
 
     if not cache_path.exists():
         raise HTTPException(404, "Download failed")
@@ -1196,7 +1228,9 @@ async def cookies_browsers():
     YouTube attiva — per proporre l'importazione automatica dei cookie senza
     passare da estensioni/export manuale.
     """
-    browsers = auth_manager.detect_browsers_with_youtube_login()
+    # Legge i database dei cookie di 7 browser: lento e sincrono, quindi in
+    # executor come ogni altra chiamata bloccante.
+    browsers = await in_executor(auth_manager.detect_browsers_with_youtube_login)
     return {"browsers": browsers}
 
 
@@ -1204,7 +1238,7 @@ async def cookies_browsers():
 async def import_cookies(browser: str = Query(...)):
     """Importa i cookie YouTube/Google direttamente dal database del browser indicato."""
     try:
-        result = auth_manager.import_cookies_from_browser(browser)
+        result = await in_executor(auth_manager.import_cookies_from_browser, browser)
     except Exception as ex:
         raise HTTPException(500, str(ex))
     if not result["valid"]:
