@@ -232,6 +232,21 @@ fi
 OUT="$DIR/YTProxy.apk"
 cp "$APK" "$OUT"
 
+# ── Verifica della firma ──────────────────────────────────────
+# Un APK firmato con una chiave diversa dal precedente non si installa sopra
+# quello già sul telefono (INSTALL_FAILED_UPDATE_INCOMPATIBLE): meglio saperlo
+# qui che davanti al dialogo di installazione.
+if [ ! -f "$ANDROID_DIR/keystore/keystore.properties" ]; then
+  echo "  ⚠️  keystore/keystore.properties non trovato: APK firmato con la chiave"
+  echo "      di debug dell'SDK. Vedi frontend/android/keystore/README.md."
+fi
+APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+if [ -n "$APKSIGNER" ]; then
+  FINGERPRINT=$("$APKSIGNER" verify --print-certs "$OUT" 2>/dev/null \
+    | grep -i "SHA-256 digest" | head -1 | awk '{print $NF}')
+  [ -n "$FINGERPRINT" ] && echo "✓  Firmato con la chiave $(echo "$FINGERPRINT" | cut -c1-16)…"
+fi
+
 # ── Installazione sul telefono (opzionale) ────────────────────
 if [ $INSTALL -eq 1 ]; then
   ADB="adb"

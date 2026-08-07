@@ -10,9 +10,12 @@ data/history.json
 .env.local
 .env.*.local
 
-# Chiavi di firma Android (se un giorno si genera un keystore di release)
+# Chiavi di firma Android — la chiave privata dell'app e la sua password.
+# Perderle significa non poter più aggiornare l'APK installato sul telefono
+# senza disinstallarlo: tienine una copia fuori dal repo.
 *.keystore
 *.jks
+frontend/android/keystore/keystore.properties
 
 # ── Dipendenze — rigenerabili con npm install ──────────────────────────────
 node_modules/

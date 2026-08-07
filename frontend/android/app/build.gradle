@@ -1,5 +1,28 @@
 apply plugin: 'com.android.application'
 
+// ── Firma dell'APK ────────────────────────────────────────────────────────
+// Senza configurazione l'SDK firma i build di debug con ~/.android/debug.keystore,
+// che protegge la chiave con la password pubblica "android": chiunque può quindi
+// produrre un APK che il telefono accetta come aggiornamento di com.ytproxy.app.
+// keystore/ytproxy.jks contiene la *stessa* chiave privata — l'impronta del
+// certificato non cambia, quindi gli aggiornamenti continuano a installarsi sopra
+// senza disinstallare — ma con una password vera, che sta in keystore.properties
+// fuori da git.
+//
+// Se il file manca (clone fresco, altra macchina) si ricade sulla chiave di debug
+// dell'SDK invece di far fallire il build: il progetto resta compilabile da
+// chiunque, solo che l'APK risulta firmato da un'altra chiave.
+def signingProps = new Properties()
+def signingPropsFile = rootProject.file('keystore/keystore.properties')
+if (signingPropsFile.exists()) {
+    signingPropsFile.withInputStream { signingProps.load(it) }
+}
+def signingKeystore = signingProps['storeFile'] ? rootProject.file(signingProps['storeFile']) : null
+def useOwnKeystore = signingKeystore != null && signingKeystore.exists()
+if (!useOwnKeystore) {
+    logger.lifecycle("YTProxy: keystore/keystore.properties assente — firmo con la chiave di debug dell'SDK")
+}
+
 android {
     namespace = "com.ytproxy.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +39,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (useOwnKeystore) {
+            ytproxy {
+                storeFile signingKeystore
+                storePassword signingProps['storePassword']
+                keyAlias signingProps['keyAlias']
+                keyPassword signingProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
+        debug {
+            if (useOwnKeystore) signingConfig signingConfigs.ytproxy
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Stessa chiave del debug: l'APK non passa da nessuno store, serve solo
+            // che il telefono lo riconosca come aggiornamento di quello installato.
+            if (useOwnKeystore) signingConfig signingConfigs.ytproxy
         }
     }
 }
