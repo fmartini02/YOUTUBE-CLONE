@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../api";
 import VideoCard from "../components/VideoCard";
+import SubscribeButton from "../components/SubscribeButton";
 import { useToast } from "../hooks/useToast";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
@@ -36,7 +37,7 @@ function formatSubscribers(n) {
  * solo a intestare la pagina durante il caricamento: aprendo l'URL diretto non
  * c'è, e il nome vero arriva comunque dalla risposta del server.
  */
-export default function ChannelPage({ channelId, channelName, navigate }) {
+export default function ChannelPage({ channelId, channelName, navigate, onSubsChange }) {
   const [channel, setChannel] = useState(null);
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -145,6 +146,19 @@ export default function ChannelPage({ channelId, channelName, navigate }) {
               {descrizione}
             </div>
           )}
+        </div>
+
+        {/* A destra dell'intestazione, come su YouTube. marginLeft:auto lo
+            spinge in fondo alla riga; se la riga va a capo (schermo stretto)
+            finisce sotto, che è comunque il posto giusto. */}
+        <div style={{ marginLeft: "auto" }}>
+          <SubscribeButton
+            channelId={channelId}
+            channelName={nome}
+            thumbnail={channel?.avatar}
+            onNotice={addToast}
+            onChange={onSubsChange}
+          />
         </div>
       </div>
 

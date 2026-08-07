@@ -660,6 +660,24 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
 .channel-name { font-size: 15px; font-weight: 500; }
 .channel-subs { font-size: 12px; color: var(--text3); }
 
+/* Pulsante Iscriviti / Iscritto. Come su YouTube: rosso pieno quando non sei
+   iscritto, grigio quando lo sei — la differenza di colore è l'unica cosa che
+   si guarda davvero, il testo si legge dopo. */
+.subscribe-btn {
+  border: none; color: #fff; background: var(--accent);
+  padding: 8px 16px; border-radius: 20px; cursor: pointer;
+  font-size: 14px; font-weight: 500; font-family: inherit;
+  white-space: nowrap; flex-shrink: 0;
+  transition: background var(--transition), opacity var(--transition);
+}
+.subscribe-btn:hover { background: var(--accent2); }
+.subscribe-btn.subscribed { background: var(--bg3); color: var(--text); }
+.subscribe-btn.subscribed:hover { background: #3f3f3f; }
+/* In attesa della risposta di YouTube (o dello stato iniziale): resta cliccabile
+   il meno possibile ma non salta via, così la riga non si ricompone sotto il dito. */
+.subscribe-btn:disabled { opacity: 0.6; cursor: default; }
+.subscribe-btn.small { padding: 5px 12px; font-size: 12px; }
+
 .description-box {
   background: var(--bg2); border-radius: 10px;
   padding: 12px; margin: 12px 0;

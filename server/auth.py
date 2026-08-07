@@ -54,13 +54,14 @@ CHANNEL_MAX = 600              # 600 video sono già anni di caricamenti per un 
 MAX_OPEN_FEEDS = 6
 
 # youtube.readonly basta per leggere iscrizioni e loghi, ma NON per scrivere:
-# per pubblicare un commento Google pretende youtube.force-ssl (che include
-# anche tutta la lettura). Chi si era collegato con il vecchio scope ha un
-# refresh token che non lo comprende: il token continua a funzionare per le
-# iscrizioni, ma commentThreads.insert risponde 403 insufficientPermissions
-# finché non rifà il login (vedi can_comment / COMMENT_SCOPE).
-COMMENT_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
-OAUTH_SCOPES = f"https://www.googleapis.com/auth/youtube.readonly {COMMENT_SCOPE}"
+# per pubblicare un commento o iscriversi a un canale Google pretende
+# youtube.force-ssl (che include anche tutta la lettura). Chi si era collegato
+# con il vecchio scope ha un refresh token che non lo comprende: il token
+# continua a funzionare per leggere le iscrizioni, ma commentThreads.insert e
+# subscriptions.insert rispondono 403 insufficientPermissions finché non rifà
+# il login (vedi can_write / WRITE_SCOPE).
+WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
+OAUTH_SCOPES = f"https://www.googleapis.com/auth/youtube.readonly {WRITE_SCOPE}"
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 # Device flow ("TV e dispositivi con input limitato"): il server chiede un
@@ -550,13 +551,14 @@ class AuthManager:
         if TOKEN_FILE.exists():
             TOKEN_FILE.unlink()
 
-    def can_comment(self) -> bool:
+    def can_write(self) -> bool:
         """
-        True solo se il token collegato comprende lo scope di scrittura.
-        Un account collegato prima dell'introduzione dei commenti è
-        autenticato ma non può pubblicare: serve rifare il login.
+        True solo se il token collegato comprende lo scope di scrittura, che
+        serve sia per pubblicare commenti sia per iscriversi a un canale.
+        Un account collegato prima che esistessero queste funzioni è
+        autenticato ma può solo leggere: serve rifare il login.
         """
-        return self.is_authenticated() and COMMENT_SCOPE in (self._token.get("scope") or "")
+        return self.is_authenticated() and WRITE_SCOPE in (self._token.get("scope") or "")
 
     # ── Commenti (YouTube Data API v3) ────────────────────────────────────────
     #
@@ -582,6 +584,10 @@ class AuthManager:
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=20,
             )
+        # Le cancellazioni (subscriptions.delete) rispondono 204 senza corpo:
+        # non c'è JSON da leggere e non è un errore.
+        if r.status_code == 204 or not r.content:
+            return {}
         try:
             data = r.json()
         except Exception:
@@ -771,6 +777,91 @@ class AuthManager:
 
     def get_subscriptions(self) -> list:
         return self._subs
+
+    # ── Iscriversi / disiscriversi (Data API, scope di scrittura) ─────────────
+    #
+    # Iscrizione e cancellazione costano 50 unità di quota ciascuna (su
+    # 10.000/giorno): sono azioni volute dall'utente, non automatismi, quindi
+    # il costo è accettabile — ma è il motivo per cui lo stato "sono iscritto?"
+    # si legge dalla copia locale (subscriptions.json) e non chiedendolo a
+    # YouTube ad ogni pagina canale aperta.
+
+    def is_subscribed(self, channel_id: str) -> bool:
+        """Dalla copia locale delle iscrizioni, quella che alimenta tutta la UI."""
+        return any(s.get("id") == channel_id for s in self._subs)
+
+    def _remember_sub(self, entry: dict):
+        """Aggiunge (o aggiorna) un canale nella copia locale, in ordine alfabetico come la sync."""
+        self._subs = [s for s in self._subs if s.get("id") != entry["id"]]
+        self._subs.append(entry)
+        self._subs.sort(key=lambda s: (s.get("name") or "").casefold())
+        self._save_subs()
+
+    def _forget_sub(self, channel_id: str) -> bool:
+        """Toglie il canale dalla copia locale e dalla cache del feed iscrizioni."""
+        before = len(self._subs)
+        self._subs = [s for s in self._subs if s.get("id") != channel_id]
+        removed = len(self._subs) != before
+        if removed:
+            self._save_subs()
+        # Senza questo il feed continuerebbe a mostrare i video del canale
+        # appena abbandonato fino alla ricostruzione oraria della cache.
+        feed = [v for v in self._subs_feed_cache if v.get("channel_id") != channel_id]
+        if len(feed) != len(self._subs_feed_cache):
+            self._subs_feed_cache = feed
+            self._save_subs_feed_cache()
+        return removed
+
+    async def subscribe(self, channel_id: str, name: str = "", thumbnail: str = "") -> dict:
+        """
+        Iscrive l'account collegato al canale e aggiorna la copia locale.
+
+        `name`/`thumbnail` sono quelli che il frontend ha già sotto gli occhi:
+        servono solo quando YouTube risponde 'sei già iscritto' (nessuno
+        snippet nella risposta) e il canale manca dalla copia locale perché
+        l'iscrizione è stata fatta altrove dopo l'ultima sincronizzazione.
+        """
+        snippet = {}
+        try:
+            data = await self._yt_api("POST", "subscriptions", params={"part": "snippet"}, json_body={
+                "snippet": {"resourceId": {"kind": "youtube#channel", "channelId": channel_id}},
+            })
+            snippet = data.get("snippet") or {}
+        except YouTubeAPIError as e:
+            # Già iscritto: non è un errore da mostrare, l'esito voluto c'è già.
+            if e.reason != "subscriptionDuplicate":
+                raise
+        esistente = next((s for s in self._subs if s.get("id") == channel_id), {})
+        entry = {
+            "id": channel_id,
+            "name": snippet.get("title") or esistente.get("name") or name or channel_id,
+            "thumbnail": (snippet.get("thumbnails", {}).get("default") or {}).get("url")
+                         or esistente.get("thumbnail") or thumbnail or None,
+            "description": (snippet.get("description") or esistente.get("description") or "")[:100],
+        }
+        self._remember_sub(entry)
+        return entry
+
+    async def unsubscribe(self, channel_id: str) -> bool:
+        """
+        Disiscrive l'account dal canale. True se YouTube aveva davvero
+        un'iscrizione da cancellare.
+
+        L'id da cancellare è quello dell'ISCRIZIONE, non del canale, e va
+        chiesto a YouTube: chiederlo ogni volta (1 unità di quota) invece di
+        salvarlo nella copia locale fa funzionare il pulsante anche per le
+        iscrizioni fatte altrove e mai sincronizzate qui.
+        """
+        data = await self._yt_api("GET", "subscriptions", params={
+            "part": "id", "mine": "true", "forChannelId": channel_id, "maxResults": 1,
+        })
+        items = data.get("items") or []
+        if items:
+            await self._yt_api("DELETE", "subscriptions", params={"id": items[0]["id"]})
+        # La copia locale si ripulisce comunque: se YouTube non conosceva
+        # quell'iscrizione, averla in elenco qui era già un errore.
+        self._forget_sub(channel_id)
+        return bool(items)
 
     # ── Cookie management ─────────────────────────────────────────────────────
 

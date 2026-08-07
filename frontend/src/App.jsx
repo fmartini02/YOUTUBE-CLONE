@@ -86,13 +86,20 @@ export default function App() {
     checkServerReachable(base).then(setServerReady);
   }, []);
 
+  // Esposta anche alle pagine (vedi onSubsChange): iscriversi o disiscriversi
+  // cambia il contatore della sidebar, e aspettare il prossimo giro del
+  // timer per vederlo aggiornato sembrerebbe un pulsante che non ha funzionato.
+  const loadAuthStatus = useCallback(
+    () => api.authStatus().then(setAuthStatus).catch(() => {}),
+    [],
+  );
+
   useEffect(() => {
     if (!serverReady) return;
-    const load = () => api.authStatus().then(setAuthStatus).catch(() => {});
-    load();
-    const t = setInterval(load, 60000);
+    loadAuthStatus();
+    const t = setInterval(loadAuthStatus, 60000);
     return () => clearInterval(t);
-  }, [serverReady]);
+  }, [serverReady, loadAuthStatus]);
 
   // Al primo avvio la pagina corrente non ha ancora una entry nella
   // cronologia con lo state giusto: la registriamo subito, così anche il
@@ -197,9 +204,9 @@ export default function App() {
           <main className="main-content" style={{ paddingBottom: 24 }}>
             {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
             {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}
-            {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} authStatus={authStatus} />}
-            {page === "subscriptions" && <SubscriptionsPage navigate={navigate} />}
-            {page === "channel"       && <ChannelPage channelId={pageParams.channelId} channelName={pageParams.channelName} navigate={navigate} />}
+            {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} authStatus={authStatus} onSubsChange={loadAuthStatus} />}
+            {page === "subscriptions" && <SubscriptionsPage navigate={navigate} onSubsChange={loadAuthStatus} />}
+            {page === "channel"       && <ChannelPage channelId={pageParams.channelId} channelName={pageParams.channelName} navigate={navigate} onSubsChange={loadAuthStatus} />}
             {page === "settings"      && <SettingsPage navigate={navigate} />}
           </main>
         </div>

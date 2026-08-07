@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../api";
 import VideoCard from "../components/VideoCard";
+import SubscribeButton from "../components/SubscribeButton";
 import { useChannelAvatars } from "../hooks/useChannelAvatars";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
+import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 30;
 
-export default function SubscriptionsPage({ navigate }) {
+export default function SubscriptionsPage({ navigate, onSubsChange }) {
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [feed, setFeed] = useState([]);
@@ -15,6 +17,7 @@ export default function SubscriptionsPage({ navigate }) {
   const [hasMore, setHasMore] = useState(false);
   const [view, setView] = useState("feed"); // feed | channels
   const avatars = useChannelAvatars(feed);
+  const { addToast, ToastContainer } = useToast();
 
   useEffect(() => {
     api.subscriptions().then(d => {
@@ -125,10 +128,27 @@ export default function SubscriptionsPage({ navigate }) {
                 </div>
               )}
               <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ch.name}</div>
+              <div style={{ marginTop: 10 }}>
+                {/* Annullata l'iscrizione, la scheda sparisce subito: lasciarla
+                    lì con scritto "Iscriviti" farebbe sembrare che non sia
+                    successo niente. */}
+                <SubscribeButton
+                  channelId={ch.id}
+                  channelName={ch.name}
+                  thumbnail={ch.thumbnail}
+                  onNotice={addToast}
+                  onChange={(iscritto, id) => {
+                    if (!iscritto) setSubs(list => list.filter(c => c.id !== id));
+                    onSubsChange?.();
+                  }}
+                  small
+                />
+              </div>
             </div>
           ))}
         </div>
       )}
+      <ToastContainer />
     </div>
   );
 }

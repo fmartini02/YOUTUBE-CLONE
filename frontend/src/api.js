@@ -80,6 +80,19 @@ export async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+/**
+ * apiFetch rilancia il corpo della risposta così com'è, che per FastAPI è
+ * {"detail": "..."}: qui serve la sola frase, è quella che finisce nel toast.
+ */
+export function errorMessage(e, fallback = "") {
+  const raw = String(e?.message || e || "");
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.detail) return String(parsed.detail);
+  } catch { /* non era JSON: si usa il testo così com'è */ }
+  return raw.slice(0, 160) || fallback;
+}
+
 export const api = {
   search: (q, page = 1) => apiFetch(`/api/search?q=${encodeURIComponent(q)}&page=${page}`),
   trending: (limit = 24, offset = 0) => apiFetch(`/api/trending?limit=${limit}&offset=${offset}`),
@@ -136,6 +149,15 @@ export const api = {
   logout: () => apiFetch("/api/auth/logout", { method: "POST" }),
   subscriptions: () => apiFetch("/api/subscriptions"),
   syncSubs: () => apiFetch("/api/subscriptions/sync", { method: "POST" }),
+  // Stato del pulsante "Iscriviti": lo dice il server, che ha la copia locale
+  // delle iscrizioni (nessuna chiamata a YouTube, nessun consumo di quota).
+  subStatus: (id) => apiFetch(`/api/subscriptions/status/${id}`),
+  // name/thumbnail servono solo come ripiego se YouTube dice "già iscritto".
+  subscribe: (id, { name = "", thumbnail = "" } = {}) => apiFetch(`/api/subscriptions/${id}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, thumbnail }),
+  }),
+  unsubscribe: (id) => apiFetch(`/api/subscriptions/${id}`, { method: "DELETE" }),
   subsFeed: (limit = 30, offset = 0) => apiFetch(`/api/feed/subscriptions?limit=${limit}&offset=${offset}`),
   uploadCookies: (file) => { const fd = new FormData(); fd.append("file", file); return apiFetch("/api/cookies/upload", { method: "POST", body: fd }); },
   deleteCookies: () => apiFetch("/api/cookies", { method: "DELETE" }),
