@@ -191,6 +191,10 @@ export default function VideoPlayer({
   onToggleTheater,
   onError,
   onNotice,
+  // Preferenza "Autoplay video" (Impostazioni): decide solo se un video appena
+  // aperto parte da solo. Le riaperture del flusso dovute a un salto o a un
+  // cambio di qualità mantengono invece lo stato di prima.
+  autoplay = true,
 }) {
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
@@ -234,16 +238,45 @@ export default function VideoPlayer({
     setSettingsPage("main");
   }
 
+  // Se il video stava andando prima di una riapertura del flusso. Un ref e non
+  // uno stato: serve dentro l'effect di caricamento, che non deve rieseguirsi
+  // quando cambia.
+  const andavaRef = useRef(false);
+  // Ultimo video effettivamente caricato: distingue "video nuovo" (dove decide
+  // l'autoplay) da "stesso video riaperto" per un salto o un cambio di qualità
+  // (dove si ripristina lo stato di prima).
+  const caricatoRef = useRef(null);
+  // Anche l'autoplay in un ref, e non fra le dipendenze dell'effect: la
+  // preferenza arriva dal server poco dopo il primo render, e vederla cambiare
+  // farebbe riaprire il flusso di un video già partito.
+  const autoplayRef = useRef(autoplay);
+  useEffect(() => { autoplayRef.current = autoplay; }, [autoplay]);
+
   // ── Caricamento / riapertura del flusso ────────────────────────────────
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
+    // Ogni salto riapre il flusso (vedi seekTo), e prima qui c'era un play()
+    // incondizionato: spostare la barra di un video in pausa lo faceva
+    // ripartire da solo. Un video in pausa deve restare in pausa dove l'utente
+    // lo ha portato; uno in riproduzione deve continuare.
+    const nuovo = caricatoRef.current !== videoId;
+    const deveAndare = nuovo ? autoplayRef.current : andavaRef.current;
+    caricatoRef.current = videoId;
+
     v.src = api.muxUrl(videoId, quality, stream.start);
     v.load();
     setBuffering(true);
     setPosition(stream.start);
     setBufferedEnd(stream.start);
-    v.play().catch(() => {});   // l'autoplay può essere bloccato: non è un errore
+    if (deveAndare) {
+      v.play().catch(() => {});   // l'autoplay può essere bloccato: non è un errore
+    } else {
+      // Senza play() il browser non decodifica niente e resterebbe un
+      // rettangolo nero: questo gli chiede il primo fotogramma del nuovo punto.
+      v.preload = "auto";
+      setBuffering(false);
+    }
   }, [videoId, quality, stream]);
 
   // ── Velocità ───────────────────────────────────────────────────────────
@@ -636,7 +669,7 @@ export default function VideoPlayer({
         // Col dito, la pressione lunga su un video fa comparire il menu del
         // browser ("salva video…"), che coprirebbe proprio il gesto del 2x.
         onContextMenu={touch ? e => e.preventDefault() : undefined}
-        onPlay={() => { setPlaying(true); bumpControls(); }}
+        onPlay={() => { setPlaying(true); andavaRef.current = true; bumpControls(); }}
         onPause={() => { setPlaying(false); setControlsVisible(true); }}
         onWaiting={() => setBuffering(true)}
         onPlaying={() => setBuffering(false)}
@@ -658,7 +691,7 @@ export default function VideoPlayer({
           setVolume(v.volume);
           setMuted(v.muted);
         }}
-        onEnded={() => { setPlaying(false); setControlsVisible(true); }}
+        onEnded={() => { setPlaying(false); andavaRef.current = false; setControlsVisible(true); }}
         onError={() => onError?.()}
       >
         {subtitleLang && (

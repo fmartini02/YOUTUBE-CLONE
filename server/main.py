@@ -34,8 +34,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "ytproxy_cache"
-DOWNLOAD_DIR.mkdir(exist_ok=True)
+# Cartella dei download di una volta: /api/download non scrive più su disco
+# (vedi il suo docstring), ma le installazioni già in giro hanno qui dentro
+# video interi che nessuno cancellerà mai. Si svuota all'avvio — vedi
+# _pulisci_cache_download().
+VECCHIA_DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "ytproxy_cache"
 
 # Porta del server: deve combaciare con vite.config.js (proxy /api), start_server.sh/.bat
 # ed electron/main.js.
@@ -402,10 +405,30 @@ async def get_comments(
         except Exception as ex:
             print(f"[comments] Data API errore: {ex}")
 
+    # I due percorsi usano token diversi: la Data API dà una stringa opaca,
+    # il ripiego yt-dlp usa un offset numerico che generiamo noi. Se la API
+    # funziona per la prima pagina e cade dopo (tipico: quota esaurita a metà
+    # scroll), qui arriva il token di Google — che `int()` non sa convertire.
+    # Prima l'eccezione finiva nel catch qui sotto e la risposta era una lista
+    # vuota senza spiegazione: il pulsante "carica altri commenti" smetteva di
+    # fare qualsiasi cosa. Ora si riparte dall'inizio con yt-dlp e si dice al
+    # frontend di sostituire la lista invece di accodarla (`reset`), perché i
+    # commenti già mostrati arrivano dall'altra fonte e si ripeterebbero.
+    offset, reset = 0, False
+    if page_token:
+        if page_token.isdigit():
+            offset = int(page_token)
+        else:
+            reset = True
+            print("[comments] Token della Data API su un ripiego yt-dlp: "
+                  "ricarico i commenti dall'inizio.")
+
     try:
-        out = await _comments_ytdlp_page(video_id, sort, int(page_token or 0), limit)
+        out = await _comments_ytdlp_page(video_id, sort, offset, limit)
         out["can_comment"] = can_comment
         out["supports_replies"] = False
+        if reset:
+            out["reset"] = True
         return out
     except Exception as ex:
         # Non deve mai bloccare la pagina video: se i commenti falliscono
@@ -413,7 +436,8 @@ async def get_comments(
         # semplicemente una sezione vuota invece di un errore.
         return {"comments": [], "comment_count": None, "next_page_token": "",
                 "source": "ytdlp", "can_comment": can_comment,
-                "supports_replies": False, "error": str(ex)}
+                "supports_replies": False,
+                "error": "Commenti non disponibili al momento."}
 
 
 @app.get("/api/comments/{video_id}/replies")
@@ -710,7 +734,26 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
             "-f", "mp4", "pipe:1",
         ]
 
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
+    # "Range: bytes=0-" (come fa sempre per i video) e riceve un 200 invece
+    # del 206 che si aspetta: Chromium resta in attesa cauta invece di committarsi
+    # subito allo streaming progressivo, ritardando l'avvio di diversi secondi.
+    return await _ffmpeg_pipe_response(
+        cmd, f"mux {video_id} (quality={quality}, start={start})",
+        headers={"Accept-Ranges": "none"},
+    )
+
+
+async def _ffmpeg_pipe_response(cmd: list, tag: str, headers: dict = None) -> StreamingResponse:
+    """
+    Fa girare ffmpeg e ne gira l'uscita al client, un blocco alla volta.
+
+    Condivisa da /api/mux e /api/download: entrambi producono un MP4 in tempo
+    reale, e le parti delicate (stderr da consumare, processo da uccidere se il
+    client se ne va) sono le stesse.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
     # stderr letto in parallelo, non scartato: se ffmpeg muore subito il client
     # vede solo un flusso vuoto, e senza questo messaggio nei log non c'è modo
@@ -739,63 +782,89 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
                 yield chunk
             if sent == 0:
                 await asyncio.wait_for(err_task, timeout=2)
-                print(f"[mux] ffmpeg non ha prodotto nulla per {video_id} "
-                      f"(quality={quality}, start={start}): " + " | ".join(errbuf[-5:]))
+                print(f"[ffmpeg] nessun dato per {tag}: " + " | ".join(errbuf[-5:]))
         finally:
             # Il client può disconnettersi a metà (cambio pagina, seek che
-            # ricarica il player): senza questo ffmpeg resterebbe orfano a
-            # scaricare da YouTube all'infinito.
+            # ricarica il player, download annullato): senza questo ffmpeg
+            # resterebbe orfano a scaricare da YouTube all'infinito.
             if proc.returncode is None:
                 proc.kill()
                 await proc.wait()
             err_task.cancel()
 
-    # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
-    # "Range: bytes=0-" (come fa sempre per i video) e riceve un 200 invece
-    # del 206 che si aspetta: Chromium resta in attesa cauta invece di committarsi
-    # subito allo streaming progressivo, ritardando l'avvio di diversi secondi.
-    return StreamingResponse(stream_gen(), media_type="video/mp4", headers={"Accept-Ranges": "none"})
+    return StreamingResponse(stream_gen(), media_type="video/mp4", headers=headers or {})
 
 
 @app.get("/api/download/{video_id}")
 async def download_video(video_id: str, quality: str = "best"):
     """
-    Download video to temp cache and serve it.
-    Used for desktop (then opened in VLC) or mobile download.
+    Scarica il video come MP4, in streaming.
+
+    Stesso meccanismo di /api/mux — ffmpeg unisce video e audio adattivi in
+    sola copia — ma con `Content-Disposition: attachment`, così il browser lo
+    salva invece di riprodurlo.
+
+    Prima passava da una cache su disco in /tmp, e portava con sé tre problemi:
+    quei file non venivano mai cancellati (video interi che restavano lì per
+    sempre, su un Raspberry con una scheda SD piccola è un problema serio); il
+    selettore di formato conosceva solo 720 e 480, quindi chiedendo 360p si
+    scaricava 1080p e chiedendo 1080p pure; e il browser non riceveva un byte
+    finché l'intero video non era sceso e rimuxato, cioè minuti di attesa senza
+    alcun segno che stesse succedendo qualcosa (con il rischio che il proxy o
+    il browser chiudessero la connessione per timeout). Senza file temporanei
+    non c'è più niente da pulire, le qualità le gestisce lo stesso selettore
+    del player, e il salvataggio parte subito.
+
+    I codec sono quelli "compatibili" del Chromecast (H.264 + AAC, vedi
+    _cast_format_selector) e non il meglio assoluto come nel player: il meglio
+    assoluto su YouTube oggi è AV1 + Opus, che va benissimo dentro un browser
+    aggiornato ma è proprio quello che un lettore qualsiasi non apre — e un
+    file scaricato finisce su una chiavetta, su un telefono vecchio o dentro
+    VLC di tre anni fa. A parità di altezza pesa un po' di più, ma è un file
+    che si riesce a guardare ovunque.
+
+    Il rovescio della medaglia, uguale a quello di /api/mux: il flusso è
+    generato al volo, quindi niente Content-Length — il browser mostra un
+    download di dimensione ignota e non può riprenderlo se cade la rete. Il
+    file è un MP4 frammentato: VLC, mpv e i lettori di Android/iOS lo aprono
+    senza problemi.
     """
-    cache_path = DOWNLOAD_DIR / f"{video_id}_{quality}.mp4"
+    try:
+        urls = await asyncio.get_running_loop().run_in_executor(
+            None, _mux_formats, video_id, quality, True
+        )
+    except Exception as ex:
+        raise HTTPException(500, str(ex))
+    if not urls:
+        raise HTTPException(404, "Nessun formato disponibile")
 
-    if not cache_path.exists():
-        format_selector = "bestvideo[height<=1080]+bestaudio/best[height<=720]/best"
-        if quality == "720":
-            format_selector = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
-        elif quality == "480":
-            format_selector = "best[height<=480]/best"
+    video_url, audio_url = urls
+    movflags = "empty_moov+default_base_moof"
+    if audio_url:
+        cmd = [
+            _FFMPEG_BIN, "-loglevel", "error",
+            "-i", video_url, "-i", audio_url,
+            "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+            "-movflags", movflags, "-frag_duration", "1000000",
+            "-f", "mp4", "pipe:1",
+        ]
+    else:
+        cmd = [
+            _FFMPEG_BIN, "-loglevel", "error",
+            "-i", video_url, "-c", "copy",
+            "-movflags", movflags, "-frag_duration", "1000000",
+            "-f", "mp4", "pipe:1",
+        ]
 
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "format": format_selector,
-            "outtmpl": str(cache_path).replace(".mp4", ".%(ext)s"),
-            "merge_output_format": "mp4",
-            "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
-        }
-        with crea_ydl(opts) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-
-        # find actual file
-        for f in DOWNLOAD_DIR.glob(f"{video_id}_{quality}.*"):
-            if f.suffix != ".part":
-                cache_path = f
-                break
-
-    if not cache_path.exists():
-        raise HTTPException(404, "Download failed")
-
-    return FileResponse(
-        cache_path,
-        media_type="video/mp4",
-        headers={"Content-Disposition": f'attachment; filename="{video_id}.mp4"'},
+    # Il nome del file lo mette il frontend con l'attributo `download` del
+    # link (è il titolo del video); qui basta un ripiego sicuro, senza dati
+    # presi dall'utente dentro un header.
+    return await _ffmpeg_pipe_response(
+        cmd, f"download {video_id} (quality={quality})",
+        headers={
+            "Content-Disposition": f'attachment; filename="{video_id}.mp4"',
+            "Accept-Ranges": "none",
+        },
     )
 
 
@@ -859,8 +928,31 @@ async def lan_address():
 
 # ─── Startup: avvia sync scheduler ───────────────────────────────────────────
 
+def _pulisci_cache_download():
+    """
+    Svuota la cartella dei download di una volta.
+
+    /api/download non scrive più niente su disco, ma chi aggiorna si trova in
+    /tmp i video scaricati con la versione precedente — che nessuno cancellava
+    mai, e che su una scheda SD si notano. Sono file rigenerabili in qualsiasi
+    momento, quindi buttarli è sicuro; la cartella sparisce del tutto, così la
+    pulizia avviene una volta sola.
+    """
+    if not VECCHIA_DOWNLOAD_DIR.is_dir():
+        return
+    import shutil
+    try:
+        liberati = sum(f.stat().st_size for f in VECCHIA_DOWNLOAD_DIR.rglob("*") if f.is_file())
+        shutil.rmtree(VECCHIA_DOWNLOAD_DIR)
+        if liberati:
+            print(f"[main] Vecchia cache dei download rimossa ({liberati // 1048576} MB).")
+    except OSError as e:
+        print(f"[main] Cache dei download non rimossa: {e}")
+
+
 @app.on_event("startup")
 async def on_startup():
+    _pulisci_cache_download()
     # Il loop di sync gira subito un ciclo se già autenticato (vedi sync.py),
     # quindi non serve un altro force_sync qui: raddoppierebbe le richieste
     # (116 canali scansionati due volte ad ogni riavvio del server).
@@ -1221,6 +1313,8 @@ class HistoryEntry(BaseModel):
     id: str
     title: str
     channel: Optional[str] = None
+    channel_id: Optional[str] = None
+    duration: Optional[float] = None
     thumbnail: Optional[str] = None
 
 
@@ -1231,14 +1325,21 @@ async def add_history(entry: HistoryEntry):
 
 
 @app.get("/api/history")
-async def get_history():
-    return {"history": auth_manager.get_history()}
+async def get_history(limit: int = 200):
+    """La cronologia locale, dal video più recente al più vecchio."""
+    return {"history": auth_manager.get_history(max(1, min(limit, 500)))}
 
 
 @app.delete("/api/history")
 async def clear_history():
     auth_manager.clear_history()
     return {"ok": True}
+
+
+@app.delete("/api/history/{video_id}")
+async def remove_history(video_id: str):
+    """Toglie un singolo video dalla cronologia (il × sulla card)."""
+    return {"ok": auth_manager.remove_from_history(video_id)}
 
 
 # ─── Preferences ─────────────────────────────────────────────────────────────
@@ -1292,6 +1393,7 @@ class HashedStaticFiles(StaticFiles):
 @app.get("/subscriptions")
 @app.get("/settings")
 @app.get("/channel")
+@app.get("/history")
 async def spa_routes():
     """
     Route "finte": il frontend naviga tra le pagine con la vera History API

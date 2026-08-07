@@ -5,12 +5,14 @@ import VideoPage from "./pages/VideoPage";
 import SettingsPage from "./pages/SettingsPage";
 import SubscriptionsPage from "./pages/SubscriptionsPage";
 import ChannelPage from "./pages/ChannelPage";
+import HistoryPage from "./pages/HistoryPage";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import ServerSetup from "./components/ServerSetup";
 import { useCast } from "./hooks/useCast.jsx";
 import { useMobileLayout } from "./hooks/useMediaQuery";
 import { api, isCapacitor, getServerBase, checkServerReachable } from "./api";
+import { PrefsProvider } from "./hooks/usePrefs";
 import "./App.css";
 
 // Cast context — l'SDK Chromecast si inizializza una volta sola qui e viene
@@ -39,6 +41,7 @@ function pageToUrl(page, params = {}) {
     case "subscriptions": return "/subscriptions";
     case "channel": return `/channel?id=${encodeURIComponent(params.channelId || "")}`;
     case "settings": return "/settings";
+    case "history": return "/history";
     default: return "/";
   }
 }
@@ -53,10 +56,22 @@ function urlToPage() {
   // lo restituisce il server insieme ai video.
   if (path === "/channel") return { page: "channel", params: { channelId: sp.get("id") || "" } };
   if (path === "/settings") return { page: "settings", params: {} };
+  if (path === "/history") return { page: "history", params: {} };
   return { page: "home", params: {} };
 }
 
 export default function App() {
+  // PrefsProvider avvolge tutto: applica il tema salvato all'elemento <html>,
+  // quindi deve valere anche per la schermata di configurazione del server —
+  // che sta dietro un return anticipato di AppInterno.
+  return (
+    <PrefsProvider>
+      <AppInterno />
+    </PrefsProvider>
+  );
+}
+
+function AppInterno() {
   const [page, setPage] = useState(() => urlToPage().page);
   const [pageParams, setPageParams] = useState(() => urlToPage().params);
   // Come YouTube vero: di default la sidebar è la barra stretta (icona sopra
@@ -205,9 +220,10 @@ export default function App() {
             {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
             {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}
             {page === "video"         && <VideoPage videoId={pageParams.videoId} navigate={navigate} authStatus={authStatus} onSubsChange={loadAuthStatus} />}
-            {page === "subscriptions" && <SubscriptionsPage navigate={navigate} onSubsChange={loadAuthStatus} />}
+            {page === "subscriptions" && <SubscriptionsPage navigate={navigate} onSubsChange={loadAuthStatus} authStatus={authStatus} />}
             {page === "channel"       && <ChannelPage channelId={pageParams.channelId} channelName={pageParams.channelName} navigate={navigate} onSubsChange={loadAuthStatus} />}
             {page === "settings"      && <SettingsPage navigate={navigate} />}
+            {page === "history"       && <HistoryPage navigate={navigate} />}
           </main>
         </div>
       </div>

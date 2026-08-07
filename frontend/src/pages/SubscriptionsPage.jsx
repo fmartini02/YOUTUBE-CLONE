@@ -8,15 +8,15 @@ import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 30;
 
-export default function SubscriptionsPage({ navigate, onSubsChange }) {
+export default function SubscriptionsPage({ navigate, onSubsChange, authStatus }) {
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [feed, setFeed] = useState([]);
-  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedLoading, setFeedLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [view, setView] = useState("feed"); // feed | channels
-  const avatars = useChannelAvatars(feed);
+  const avatars = useChannelAvatars(feed, authStatus?.authenticated);
   const { addToast, ToastContainer } = useToast();
 
   useEffect(() => {
@@ -47,20 +47,33 @@ export default function SubscriptionsPage({ navigate, onSubsChange }) {
     }).catch(() => setLoadingMore(false));
   }, [feed.length, hasMore, loadingMore]);
 
+  // Disiscrivendosi dall'ultimo canale la scheda "Canali" sparisce: senza
+  // questo la pagina resterebbe su una vista che non si può più scegliere e
+  // quindi vuota.
+  const vista = subs.length ? view : "feed";
+
   const sentinelRef = useInfiniteScroll({
     // Solo nella vista feed: la lista canali non è paginata.
-    hasMore: hasMore && view === "feed",
+    hasMore: hasMore && vista === "feed",
     loading: feedLoading || loadingMore,
     onLoadMore: loadMore,
   });
 
-  if (loading) return <div style={{ color: "var(--text2)" }}>Caricamento iscrizioni...</div>;
+  if (loading || feedLoading) return <div style={{ color: "var(--text2)" }}>Caricamento iscrizioni...</div>;
 
-  if (subs.length === 0) return (
+  // L'elenco dei canali arriva dall'OAuth, il feed dai cookie: sono due
+  // autenticazioni indipendenti e ognuna funziona da sola. La pagina va
+  // dichiarata vuota solo se mancano ENTRAMBE — con i soli cookie il server
+  // serve il feed iscrizioni vero, e mostrare "Nessuna iscrizione: collega il
+  // tuo account Google" lo nascondeva del tutto.
+  if (subs.length === 0 && feed.length === 0) return (
     <div style={{ textAlign: "center", padding: 60, color: "var(--text2)" }}>
       <div style={{ fontSize: 48, marginBottom: 16 }}>📺</div>
       <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Nessuna iscrizione</div>
-      <div style={{ fontSize: 14, marginBottom: 20 }}>Collega il tuo account Google per vedere i tuoi canali</div>
+      <div style={{ fontSize: 14, marginBottom: 20 }}>
+        Carica i cookie di YouTube per il feed delle iscrizioni, oppure collega
+        l'account Google per l'elenco dei canali.
+      </div>
       <button className="action-btn primary" onClick={() => navigate("settings")}>
         ⚙️ Vai alle impostazioni
       </button>
@@ -73,11 +86,16 @@ export default function SubscriptionsPage({ navigate, onSubsChange }) {
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>Iscrizioni</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <button className={`chip${view === "feed" ? " active" : ""}`} onClick={() => setView("feed")}>Feed</button>
-          <button className={`chip${view === "channels" ? " active" : ""}`} onClick={() => setView("channels")}>Canali ({subs.length})</button>
+          {/* La scheda canali esiste solo con l'account collegato: senza OAuth
+              l'elenco non c'è, e un "Canali (0)" cliccabile porterebbe a una
+              griglia vuota senza spiegazione. */}
+          {subs.length > 0 && (
+            <button className={`chip${view === "channels" ? " active" : ""}`} onClick={() => setView("channels")}>Canali ({subs.length})</button>
+          )}
         </div>
       </div>
 
-      {view === "feed" && (
+      {vista === "feed" && (
         feedLoading ? (
           <div style={{ color: "var(--text2)" }}>Caricamento feed...</div>
         ) : feed.length === 0 ? (
@@ -110,7 +128,7 @@ export default function SubscriptionsPage({ navigate, onSubsChange }) {
         )
       )}
 
-      {view === "channels" && (
+      {vista === "channels" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
           {subs.map(ch => (
             <div

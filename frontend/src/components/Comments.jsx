@@ -248,7 +248,12 @@ export default function Comments({ videoId, channelId, authStatus, navigate, onT
     if (token) setLoadingMore(true); else setLoading(true);
     try {
       const d = await api.comments(videoId, { limit: PAGE_SIZE, sort, pageToken: token || "", channelId });
-      setComments(prev => token ? [...prev, ...(d.comments || [])] : (d.comments || []));
+      // `reset`: il server è passato dalla Data API al ripiego yt-dlp a metà
+      // scorrimento (di solito quota finita) e ha ricominciato da capo, quindi
+      // questa pagina è di nuovo la prima — accodarla ripeterebbe i commenti
+      // già a schermo.
+      const accoda = token && !d.reset;
+      setComments(prev => accoda ? [...prev, ...(d.comments || [])] : (d.comments || []));
       if (d.comment_count != null) setCount(d.comment_count);
       setNextToken(d.next_page_token || "");
       setSupportsReplies(!!d.supports_replies);

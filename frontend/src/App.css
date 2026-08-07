@@ -27,6 +27,43 @@
   --transition: 0.2s ease;
 }
 
+/* ── TEMA CHIARO ─────────────────────────────────
+   Tutta l'interfaccia è costruita su queste variabili, quindi il tema chiaro
+   è una ridefinizione della sola palette. Fa eccezione il player, che resta
+   scuro in entrambi i temi — come su YouTube: i comandi stanno sopra il video,
+   e sopra un video chiaro o scuro l'unico contrasto che regge sempre è bianco
+   su una velatura nera. Per questo i colori dentro `.player-*` sono scritti a
+   mano e non passano da qui.
+
+   La preferenza (Impostazioni → Aspetto) diventa l'attributo data-theme su
+   <html>, vedi usePrefs.jsx. Con "Come il sistema" l'attributo non c'è e
+   decide la media query qui sotto. */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg2: #f2f2f2;
+  --bg3: #e5e5e5;
+  --surface: #ffffff;
+  --border: #d4d4d4;
+  --text: #0f0f0f;
+  --text2: #606060;
+  --text3: #8b8b8b;
+  --green: #067d3f;   /* il verde acceso del tema scuro su bianco non si legge */
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #ffffff;
+    --bg2: #f2f2f2;
+    --bg3: #e5e5e5;
+    --surface: #ffffff;
+    --border: #d4d4d4;
+    --text: #0f0f0f;
+    --text2: #606060;
+    --text3: #8b8b8b;
+    --green: #067d3f;
+  }
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -178,6 +215,10 @@ body {
 }
 .sidebar-item:hover { background: var(--bg3); }
 .sidebar-item.active { background: var(--bg3); font-weight: 500; }
+/* Voci di facciata (Download, Video piaciuti, Esplora): la pagina non esiste,
+   quindi non devono nemmeno sembrare cliccabili. */
+.sidebar-item.disabled { color: var(--text3); cursor: default; }
+.sidebar-item.disabled:hover { background: none; }
 .sidebar-item .icon { font-size: 20px; flex-shrink: 0; width: 24px; text-align: center; }
 
 /* Barra stretta (default, come YouTube): icona sopra etichetta invece che
@@ -878,4 +919,52 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
   .video-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .header-right .icon-btn:not(:last-child) { display: none; }
   .video-title-big { font-size: 16px; }
+}
+
+/* ── CRONOLOGIA ──────────────────────────────────
+   Lista e non griglia: quello che conta è quando si è visto un video, quindi
+   le voci si leggono una sotto l'altra. */
+.history-list { display: flex; flex-direction: column; gap: 8px; }
+
+.history-row {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 8px; border-radius: var(--radius); cursor: pointer;
+  transition: background var(--transition);
+}
+.history-row:hover { background: var(--bg2); }
+
+.history-thumb {
+  position: relative; flex-shrink: 0;
+  width: 200px; aspect-ratio: 16/9;
+  border-radius: 10px; overflow: hidden; background: var(--bg3);
+}
+.history-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.history-thumb .duration {
+  position: absolute; right: 4px; bottom: 4px;
+  background: rgba(0,0,0,0.85); color: #fff;
+  font-size: 12px; padding: 1px 4px; border-radius: 4px;
+}
+
+.history-meta { flex: 1; min-width: 0; padding-top: 2px; }
+.history-title {
+  font-size: 15px; font-weight: 500; line-height: 1.35; margin-bottom: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.history-sub { font-size: 12px; color: var(--text2); }
+
+.history-remove {
+  flex-shrink: 0; background: none; border: none; color: var(--text3);
+  font-size: 15px; line-height: 1; cursor: pointer;
+  padding: 6px 8px; border-radius: 50%;
+}
+.history-remove:hover { color: var(--text); background: var(--bg3); }
+
+@media (max-width: 900px) {
+  .history-thumb { width: 160px; }
+  .history-title { font-size: 14px; }
+}
+@media (max-width: 600px) {
+  .history-thumb { width: 120px; border-radius: 8px; }
+  .history-title { font-size: 13px; -webkit-line-clamp: 2; }
 }

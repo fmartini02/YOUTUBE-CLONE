@@ -8,6 +8,7 @@ import VideoPlayer from "../components/VideoPlayer";
 import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
 import SubscribeButton from "../components/SubscribeButton";
 import { useChannelAvatars } from "../hooks/useChannelAvatars";
+import { usePrefs } from "../hooks/usePrefs";
 import { useInfiniteScroll } from "../hooks/useInfiniteScroll";
 
 // Quanti correlati per richiesta: il mix di YouTube arriva a blocchi di ~25,
@@ -17,8 +18,14 @@ const RELATED_PAGE_SIZE = 20;
 const THEATER_KEY = "ytproxy_theater";
 
 export default function VideoPage({ videoId, navigate, authStatus, onSubsChange }) {
+  const { prefs, pronte: prefsPronte } = usePrefs();
   const [info, setInfo] = useState(null);
+  // La qualità predefinita è una preferenza salvata sul server, ma arriva un
+  // istante dopo il primo render: si parte da "best" e si applica appena
+  // disponibile (vedi l'effect qui sotto). `qualitaScelta` distingue una
+  // scelta fatta a mano dall'utente, che la preferenza non deve sovrascrivere.
   const [quality, setQuality] = useState("best");
+  const qualitaScelta = useRef(false);
   const [related, setRelated] = useState([]);
   const [relatedHasMore, setRelatedHasMore] = useState(false);
   const [relatedLoading, setRelatedLoading] = useState(false);
@@ -41,8 +48,22 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
   // Logo del canale: /api/watch non lo include (yt-dlp dà solo la copertina del
   // video), quindi lo risolviamo con lo stesso hook delle card, passandogli il
   // singolo video come lista di uno.
+  // Preferenza "Qualità video predefinita". Si applica appena arriva dal
+  // server e ad ogni sua modifica dalle impostazioni, ma mai sopra una scelta
+  // fatta a mano dal menu del player: quella vale fino a fine sessione, come
+  // su YouTube.
+  useEffect(() => {
+    if (!prefsPronte || qualitaScelta.current) return;
+    if (prefs.quality) setQuality(prefs.quality);
+  }, [prefsPronte, prefs.quality]);
+
+  const cambiaQualita = useCallback((q) => {
+    qualitaScelta.current = true;
+    setQuality(q);
+  }, []);
+
   const channelAsList = useMemo(() => (info?.channel_id ? [info] : []), [info]);
-  const channelAvatar = useChannelAvatars(channelAsList)[info?.channel_id];
+  const channelAvatar = useChannelAvatars(channelAsList, authStatus?.authenticated)[info?.channel_id];
 
 
   // I metadati (titolo/descrizione/durata/correlati) arrivano con /api/watch,
@@ -61,7 +82,16 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
     api.watch(videoId).then(data => {
       setInfo(data);
       // Salva in cronologia
-      api.addHistory({ id: videoId, title: data.title, channel: data.channel, thumbnail: data.thumbnail }).catch(() => {});
+      // channel_id e durata servono alla pagina Cronologia: il nome del canale
+      // lì è un link, e la durata sta sulla copertina come nelle altre card.
+      api.addHistory({
+        id: videoId,
+        title: data.title,
+        channel: data.channel,
+        channel_id: data.channel_id,
+        duration: data.duration,
+        thumbnail: data.thumbnail,
+      }).catch(() => {});
     }).catch(() => {
       addToast("Errore nel caricamento dei dettagli del video");
     });
@@ -193,7 +223,7 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
               <VideoPlayer
                 videoId={videoId}
                 quality={quality}
-                onQualityChange={setQuality}
+                onQualityChange={cambiaQualita}
                 duration={info?.duration}
                 subtitleLangs={subtitleLangs}
                 subtitleLang={subtitleLang}
@@ -204,6 +234,7 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
                 onToggleTheater={toggleTheater}
                 onError={() => addToast("Errore stream — ricarica la pagina")}
                 onNotice={addToast}
+                autoplay={prefs.autoplay !== false}
               />
             )}
 

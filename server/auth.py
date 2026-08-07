@@ -76,6 +76,68 @@ DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 YT_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 
+# Per quanto ricordare che un canale non ha dato un logo (cache negativa in
+# get_channel_avatars). Un giorno: abbastanza da non ripetere la richiesta ad
+# ogni pagina, poco abbastanza da riprovare se il canale torna disponibile.
+AVATAR_MISS_TTL = 86400
+
+# Quanti video tenere nella cronologia. È il taglio applicato sia in memoria
+# sia sul file, sulla lista ordinata dal più recente al più vecchio.
+HISTORY_MAX = 500
+
+
+def _scrivi_json(path: Path, data):
+    """
+    Salva un JSON senza poter lasciare il file a metà.
+
+    Tutto lo stato del server sta in questi file e vengono riscritti interi ad
+    ogni modifica: con una `write_text` diretta basta un kill (o un riavvio del
+    Raspberry) durante la scrittura per lasciare un JSON troncato, che al
+    riavvio successivo faceva esplodere `_load_all` — e siccome AuthManager è
+    un singleton costruito all'import, il server non partiva più.
+
+    Si scrive quindi su un temporaneo nella stessa cartella e lo si sposta con
+    os.replace, che è atomico: il file finale o è quello vecchio o è quello
+    nuovo, mai una via di mezzo.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"[auth] Impossibile salvare {path.name}: {e}")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _leggi_json(path: Path, default):
+    """
+    Carica un JSON, tornando al valore predefinito se manca o è illeggibile.
+
+    Un file corrotto (vedi _scrivi_json) non deve impedire l'avvio: perdere la
+    cronologia o la cache dei loghi è molto meno grave di un server che non
+    parte. Il file rotto viene messo da parte con estensione .corrotto, così
+    resta recuperabile a mano e non viene riletto ad ogni riavvio.
+    """
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text())
+    except Exception as e:
+        print(f"[auth] {path.name} illeggibile ({e}): lo metto da parte come "
+              f"{path.name}.corrotto e riparto da zero.")
+        try:
+            os.replace(path, path.with_name(path.name + ".corrotto"))
+        except OSError:
+            pass
+        return default
+
+
 class YouTubeAPIError(Exception):
     """
     Errore restituito dalla Data API, con il 'reason' di Google conservato:
@@ -250,16 +312,25 @@ class LazyFeed:
     Con `refill=True` il feed non finisce quando finisce il generatore: viene
     riaperto daccapo (vedi _rigenera). Serve alla home, dove YouTube chiude le
     continuazioni molto prima di aver finito le raccomandazioni.
+
+    `escludi` è un id da non far entrare nella lista: serve ai correlati, dove
+    il primo elemento del Mix è il video che si sta guardando.
     """
 
-    def __init__(self, url: str, opts: dict, refill: bool = False):
+    def __init__(self, url: str, opts: dict, refill: bool = False,
+                 escludi: Optional[str] = None):
         self.url = url
         self._opts = opts
         self._refill = refill
         self._riaperture = 0
         # Gli id già serviti: senza, una riapertura ripeterebbe la maggior
-        # parte del feed precedente (vedi _rigenera).
+        # parte del feed precedente (vedi _rigenera). Ci si mette dentro anche
+        # l'id da escludere, così viene scartato come un doppione e — questo è
+        # il punto — non conta verso la pagina richiesta: filtrarlo dopo
+        # l'impaginazione faceva tornare una pagina di 24 elementi su 25.
         self._visti: set = set()
+        if escludi:
+            self._visti.add(escludi)
         self._visti_all_ultima_riapertura = 0
         self.items: list = []
         self.exhausted = False
@@ -276,11 +347,25 @@ class LazyFeed:
         istanza chiude il proprio jar e riscriverebbe `cookies.txt`, quindi una
         sessione invalidata da YouTube durante lo scroll diventerebbe un logout
         permanente sul file.
+
+        Se l'estrazione fallisce l'istanza va chiusa qui: l'eccezione esce dal
+        costruttore, quindi nessuno riceve mai l'oggetto su cui chiamare
+        close() e la sua sessione HTTP resterebbe aperta per sempre. Con un
+        canale inesistente aperto qualche volta è una perdita silenziosa di
+        socket e memoria.
         """
-        self._ydl = crea_ydl(self._opts)
-        # process=False evita che yt-dlp materializzi l'intera lista: è ciò che
-        # mantiene pigro il generatore.
-        info = self._ydl.extract_info(self.url, download=False, process=False)
+        ydl = crea_ydl(self._opts)
+        try:
+            # process=False evita che yt-dlp materializzi l'intera lista: è ciò
+            # che mantiene pigro il generatore.
+            info = ydl.extract_info(self.url, download=False, process=False)
+        except Exception:
+            try:
+                ydl.close()
+            except Exception:
+                pass
+            raise
+        self._ydl = ydl
         self._iter = iter((info or {}).get("entries") or [])
         # Metadati della lista (nome canale, iscritti, loghi...): arrivano già
         # con questa estrazione, quindi conservarli evita una seconda richiesta
@@ -397,36 +482,34 @@ class AuthManager:
         self._sync_task = None
 
     def _load_all(self):
-        if TOKEN_FILE.exists():
-            self._token = json.loads(TOKEN_FILE.read_text())
-        if SUBS_FILE.exists():
-            self._subs = json.loads(SUBS_FILE.read_text())
-        if PREFS_FILE.exists():
-            self._prefs = json.loads(PREFS_FILE.read_text())
-        if HISTORY_FILE.exists():
-            self._history = json.loads(HISTORY_FILE.read_text())
-        if AVATAR_CACHE_FILE.exists():
-            self._avatar_cache = json.loads(AVATAR_CACHE_FILE.read_text())
-        if SUBS_FEED_CACHE_FILE.exists():
-            self._subs_feed_cache = json.loads(SUBS_FEED_CACHE_FILE.read_text())
+        self._token = _leggi_json(TOKEN_FILE, {})
+        self._subs = _leggi_json(SUBS_FILE, [])
+        self._prefs = _leggi_json(PREFS_FILE, {})
+        self._history = _leggi_json(HISTORY_FILE, [])
+        self._avatar_cache = _leggi_json(AVATAR_CACHE_FILE, {})
+        self._subs_feed_cache = _leggi_json(SUBS_FEED_CACHE_FILE, [])
 
     def _save_token(self):
-        TOKEN_FILE.write_text(json.dumps(self._token, indent=2))
+        _scrivi_json(TOKEN_FILE, self._token)
 
     def _save_subs(self):
-        SUBS_FILE.write_text(json.dumps(self._subs, indent=2))
+        _scrivi_json(SUBS_FILE, self._subs)
 
     def _save_prefs(self):
-        PREFS_FILE.write_text(json.dumps(self._prefs, indent=2))
+        _scrivi_json(PREFS_FILE, self._prefs)
 
     def _save_history(self):
-        HISTORY_FILE.write_text(json.dumps(self._history[-500:], indent=2))  # keep last 500
+        # La cronologia è ordinata dal più recente al più vecchio (add_to_history
+        # inserisce in testa), quindi si tengono i PRIMI 500: con [-500:] oltre
+        # quota si buttava via il video appena guardato e si conservavano i più
+        # vecchi.
+        _scrivi_json(HISTORY_FILE, self._history[:HISTORY_MAX])
 
     def _save_avatar_cache(self):
-        AVATAR_CACHE_FILE.write_text(json.dumps(self._avatar_cache, indent=2))
+        _scrivi_json(AVATAR_CACHE_FILE, self._avatar_cache)
 
     def _save_subs_feed_cache(self):
-        SUBS_FEED_CACHE_FILE.write_text(json.dumps(self._subs_feed_cache, indent=2))
+        _scrivi_json(SUBS_FEED_CACHE_FILE, self._subs_feed_cache)
 
     # ── OAuth flow ────────────────────────────────────────────────────────────
 
@@ -472,6 +555,9 @@ class AuthManager:
         }
         self._me = None  # identità dell'account: da rileggere
         self._save_token()
+        # Senza account collegato i loghi non si possono chiedere affatto: i
+        # "questo canale non ha logo" accumulati prima non valgono più niente.
+        self.dimentica_avatar_mancanti()
         return self._token
 
     async def start_device_flow(self, client_id: str) -> dict:
@@ -732,13 +818,24 @@ class AuthManager:
     # ── Subscriptions sync ────────────────────────────────────────────────────
 
     async def sync_subscriptions(self) -> list:
-        """Scarica tutte le iscrizioni dal canale Google dell'utente."""
+        """
+        Scarica tutte le iscrizioni dal canale Google dell'utente.
+
+        La copia locale viene sostituita solo se la scansione arriva in fondo:
+        una lista parziale non è "meglio di niente", è una perdita di dati.
+        Le iscrizioni si leggono 50 per pagina, quindi con 120 canali un errore
+        alla terza pagina (quota finita, token appena revocato, rete che cade)
+        cancellava dal file i canali delle pagine mancanti — e quei canali
+        sparivano dalla sidebar e dal feed iscrizioni fino alla sync successiva
+        andata a buon fine.
+        """
         token = await self.get_valid_token()
         if not token:
             return self._subs  # fallback cache
 
         subs = []
         next_page = None
+        completa = False
 
         async with httpx.AsyncClient() as client:
             while True:
@@ -751,13 +848,17 @@ class AuthManager:
                 if next_page:
                     params["pageToken"] = next_page
 
-                r = await client.get(
-                    f"{YT_API_BASE}/subscriptions",
-                    params=params,
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=15,
-                )
-                data = r.json()
+                try:
+                    r = await client.get(
+                        f"{YT_API_BASE}/subscriptions",
+                        params=params,
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=15,
+                    )
+                    data = r.json()
+                except Exception as e:
+                    print(f"[auth] Sync iscrizioni interrotta: {e}")
+                    break
 
                 if "error" in data:
                     # Token scaduto o revocato
@@ -775,12 +876,19 @@ class AuthManager:
 
                 next_page = data.get("nextPageToken")
                 if not next_page:
+                    # Ultima pagina: solo qui la lista è completa.
+                    completa = True
                     break
 
-        if subs:
-            self._subs = subs
-            self._save_subs()
+        if not completa:
+            print(f"[auth] Iscrizioni incomplete ({len(subs)} lette): "
+                  f"tengo la copia locale ({len(self._subs)} canali).")
+            return self._subs
 
+        # Una lista completa e vuota è legittima (account senza iscrizioni):
+        # a quel punto svuotare la copia locale è la cosa giusta.
+        self._subs = subs
+        self._save_subs()
         return self._subs
 
     def get_subscriptions(self) -> list:
@@ -1053,20 +1161,36 @@ class AuthManager:
     # ── Watch history ─────────────────────────────────────────────────────────
 
     def add_to_history(self, video: dict):
-        """Aggiunge un video alla cronologia locale."""
+        """Aggiunge un video in testa alla cronologia locale (più recente per primo)."""
         # Rimuovi duplicati
         self._history = [h for h in self._history if h.get("id") != video.get("id")]
         self._history.insert(0, {
             "id": video.get("id"),
             "title": video.get("title"),
             "channel": video.get("channel"),
-            "thumbnail": video.get("thumbnail"),
+            "channel_id": video.get("channel_id"),
+            "duration": video.get("duration"),
+            "thumbnail": video.get("thumbnail")
+                         or f"https://i.ytimg.com/vi/{video.get('id')}/hqdefault.jpg",
             "watched_at": time.time(),
         })
+        # Il taglio va fatto anche in memoria, altrimenti la lista cresce senza
+        # limite per tutta la vita del processo e il file salvato non
+        # corrisponde più a quello che il server ha in RAM.
+        del self._history[HISTORY_MAX:]
         self._save_history()
 
     def get_history(self, limit: int = 50) -> list:
         return self._history[:limit]
+
+    def remove_from_history(self, video_id: str) -> bool:
+        """Toglie un singolo video dalla cronologia. False se non c'era."""
+        prima = len(self._history)
+        self._history = [h for h in self._history if h.get("id") != video_id]
+        if len(self._history) == prima:
+            return False
+        self._save_history()
+        return True
 
     def clear_history(self):
         self._history = []
@@ -1091,7 +1215,8 @@ class AuthManager:
 
     async def _lazy_page(self, key: str, url: str, offset: int, limit: int,
                          opts: dict, chunk: int, cap: int,
-                         with_info: bool = False, refill: bool = False) -> dict:
+                         with_info: bool = False, refill: bool = False,
+                         escludi: Optional[str] = None) -> dict:
         """
         Una pagina di un feed estratto pigramente, tenendo vivo il generatore
         di yt-dlp fra una richiesta e l'altra (vedi LazyFeed).
@@ -1113,68 +1238,104 @@ class AuthManager:
         lock = self._feed_locks.setdefault(key, asyncio.Lock())
         # Un solo estrattore alla volta per feed: il generatore di yt-dlp non è
         # thread-safe e due scroll paralleli lo corromperebbero.
-        async with lock:
-            feed = self._feeds.get(key)
-            # Il TTL vale solo a inizio scorrimento. Ricreare il feed a metà
-            # paginazione (offset alto) vorrebbe dire ri-scaricare centinaia di
-            # video per servire una pagina, e con un ordine diverso: l'utente
-            # vedrebbe lo scroll fermarsi o ripetere gli stessi video. Un feed
-            # già iniziato prosegue quindi finché non si esaurisce davvero.
-            scaduto = feed is not None and offset == 0 and time.time() - feed.created_at > FEED_CACHE_TTL
-            if feed is None or scaduto:
-                if feed is not None:
-                    feed.close()
-                    self._feeds.pop(key, None)
-                feed = await self._open_lazy_feed(url, opts, refill)
-                if feed is None:
-                    vuoto = {"results": [], "total": 0, "has_more": False}
-                    return {**vuoto, "info": {}} if with_info else vuoto
-            self._remember_feed(key, feed)
+        try:
+            async with lock:
+                return await self._lazy_page_locked(
+                    key, url, offset, limit, opts, chunk, cap, with_info,
+                    refill, escludi)
+        finally:
+            # Il lock va tolto quando non serve più: `key` contiene un id di
+            # video (related:<id>) o di canale, quindi senza potatura la mappa
+            # cresce di una voce per ogni video di cui si sono chiesti i
+            # correlati e non si svuota mai. Va fatto FUORI dal `with`, quando
+            # il lock è di nuovo libero.
+            self._pota_lock(key)
 
-            # Estende quanto basta a coprire la pagina richiesta: scorrere poco
-            # costa poche richieste a YouTube.
-            needed = offset + limit
-            loop = asyncio.get_event_loop()
-            while len(feed.items) < needed and not feed.exhausted and len(feed.items) < cap:
-                before = len(feed.items)
-                try:
-                    await loop.run_in_executor(None, feed.extend, chunk)
-                except Exception as e:
-                    print(f"[auth] Errore estensione feed '{key}': {e}")
-                    feed.exhausted = True
-                    break
-                if len(feed.items) == before:
-                    # Nessun progresso pur non essendo esaurito: evita di
-                    # ciclare all'infinito su un feed che non avanza più.
-                    feed.exhausted = True
-                    break
+    async def _lazy_page_locked(self, key: str, url: str, offset: int, limit: int,
+                                opts: dict, chunk: int, cap: int,
+                                with_info: bool, refill: bool,
+                                escludi: Optional[str]) -> dict:
+        """Corpo di _lazy_page, eseguito con il lock del feed già preso."""
+        feed = self._feeds.get(key)
+        # Il TTL vale solo a inizio scorrimento. Ricreare il feed a metà
+        # paginazione (offset alto) vorrebbe dire ri-scaricare centinaia di
+        # video per servire una pagina, e con un ordine diverso: l'utente
+        # vedrebbe lo scroll fermarsi o ripetere gli stessi video. Un feed
+        # già iniziato prosegue quindi finché non si esaurisce davvero.
+        scaduto = feed is not None and offset == 0 and time.time() - feed.created_at > FEED_CACHE_TTL
+        if feed is None or scaduto:
+            if feed is not None:
+                feed.close()
+                self._feeds.pop(key, None)
+            feed = await self._open_lazy_feed(url, opts, refill, escludi)
+            if feed is None:
+                vuoto = {"results": [], "total": 0, "has_more": False}
+                return {**vuoto, "info": {}} if with_info else vuoto
+        self._remember_feed(key, feed)
 
-            items = feed.items
-            # Un feed che non ha prodotto NIENTE non va tenuto in cache: è uno
-            # stato di errore (sessione rifiutata, estrazione fallita, blocco
-            # temporaneo di YouTube), non un risultato. Tenendolo, ogni
-            # richiesta successiva rispondeva "vuoto" senza nemmeno riprovare
-            # fino alla scadenza del TTL — mezz'ora in cui reimportare i cookie
-            # non cambiava niente, perché il feed guasto restava lì.
-            if not items:
-                self._drop_feed(key)
+        # Estende quanto basta a coprire la pagina richiesta: scorrere poco
+        # costa poche richieste a YouTube.
+        needed = offset + limit
+        loop = asyncio.get_event_loop()
+        while len(feed.items) < needed and not feed.exhausted and len(feed.items) < cap:
+            before = len(feed.items)
+            try:
+                await loop.run_in_executor(None, feed.extend, chunk)
+            except Exception as e:
+                print(f"[auth] Errore estensione feed '{key}': {e}")
+                feed.exhausted = True
+                break
+            if len(feed.items) == before:
+                # Nessun progresso pur non essendo esaurito: evita di
+                # ciclare all'infinito su un feed che non avanza più.
+                feed.exhausted = True
+                break
 
-            page = {
-                "results": items[offset:offset + limit],
-                "total": len(items),
-                # C'è altro se il feed può ancora crescere, o se abbiamo già in
-                # memoria voci oltre la pagina appena servita.
-                "has_more": ((not feed.exhausted) and len(items) < cap) or offset + limit < len(items),
-            }
-            if with_info:
-                page["info"] = feed.info
-            return page
+        items = feed.items
+        # Un feed che non ha prodotto NIENTE non va tenuto in cache: è uno
+        # stato di errore (sessione rifiutata, estrazione fallita, blocco
+        # temporaneo di YouTube), non un risultato. Tenendolo, ogni
+        # richiesta successiva rispondeva "vuoto" senza nemmeno riprovare
+        # fino alla scadenza del TTL — mezz'ora in cui reimportare i cookie
+        # non cambiava niente, perché il feed guasto restava lì.
+        if not items:
+            self._drop_feed(key)
+
+        page = {
+            "results": items[offset:offset + limit],
+            "total": len(items),
+            # C'è altro se il feed può ancora crescere, o se abbiamo già in
+            # memoria voci oltre la pagina appena servita.
+            "has_more": ((not feed.exhausted) and len(items) < cap) or offset + limit < len(items),
+        }
+        if with_info:
+            page["info"] = feed.info
+        return page
 
     def _drop_feed(self, key: str):
         """Chiude e dimentica un feed aperto, se c'è."""
         feed = self._feeds.pop(key, None)
         if feed is not None:
             feed.close()
+
+    def _pota_lock(self, key: str):
+        """
+        Toglie il lock di un feed che non è più aperto.
+
+        Un lock per feed serve finché il feed esiste; le chiavi però contengono
+        id di video e di canale, quindi tenerli tutti significa una voce in più
+        ad ogni video di cui si aprono i correlati — un dizionario che in una
+        sessione lunga arriva a migliaia di lock inutili.
+
+        Si toglie solo se è libero: `locked()` è vero anche quando qualcuno è
+        in attesa, quindi un lock che serve ancora a una richiesta in corso non
+        viene mai rimosso da sotto i piedi.
+        """
+        if key in self._feeds:
+            return
+        lock = self._feed_locks.get(key)
+        if lock is not None and not lock.locked():
+            self._feed_locks.pop(key, None)
 
     def invalidate_feeds(self):
         """
@@ -1183,8 +1344,9 @@ class AuthManager:
         Serve quando cambiano i cookie: ogni LazyFeed tiene viva un'istanza di
         yt-dlp con la sessione di PRIMA: senza questa chiamata, reimportare i
         cookie non aveva effetto sulla home finché il feed non scadeva da solo.
-        I lock restano dove sono — appartengono alle richieste in corso, non ai
-        feed.
+        I lock dei feed chiusi si possono togliere solo se liberi: quelli presi
+        appartengono a richieste in corso, che li rilasceranno da sé (e la
+        potatura tocca poi a `_pota_lock`, nel `finally` di `_lazy_page`).
 
         Chi reimporta i cookie deve chiamarla PRIMA di scrivere il file nuovo:
         chiudere un feed fa salvare a yt-dlp la sua copia dei cookie, che
@@ -1193,6 +1355,7 @@ class AuthManager:
         """
         for key in list(self._feeds):
             self._drop_feed(key)
+            self._pota_lock(key)
 
     def _remember_feed(self, key: str, feed: "LazyFeed"):
         """
@@ -1216,14 +1379,16 @@ class AuthManager:
             self._feed_locks.pop(old_key, None)
             old.close()
 
-    async def _open_lazy_feed(self, url: str, opts: dict, refill: bool = False):
+    async def _open_lazy_feed(self, url: str, opts: dict, refill: bool = False,
+                              escludi: Optional[str] = None):
         """Apre il feed (prima richiesta a YouTube). None se fallisce."""
         try:
             # extract_info è bloccante: in un thread separato, altrimenti
             # fermerebbe l'intero event loop di FastAPI (niente riproduzione,
             # niente ricerche) per tutta la durata dell'estrazione.
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, lambda: LazyFeed(url, opts, refill))
+            return await loop.run_in_executor(
+                None, lambda: LazyFeed(url, opts, refill, escludi))
         except Exception as e:
             print(f"[auth] Errore apertura feed {url}: {e}")
             return None
@@ -1277,12 +1442,14 @@ class AuthManager:
         if cookie_path:
             opts["cookiefile"] = cookie_path
         url = f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}"
+        # `escludi`: il primo elemento del Mix è il video di partenza, fuori
+        # posto in una lista di "correlati". Va scartato dentro il feed e non
+        # sulla pagina già impaginata, altrimenti la prima pagina torna con un
+        # elemento in meno di quelli chiesti.
         page = await self._lazy_page(
             f"related:{video_id}", url, offset, limit, opts, RELATED_CHUNK, RELATED_MAX,
+            escludi=video_id,
         )
-        # Il primo elemento del mix è il video di partenza: fuori posto in una
-        # lista di "correlati".
-        page["results"] = [v for v in page["results"] if v.get("id") != video_id]
 
         # Non tutti i video hanno un Mix: YouTube non lo genera per i video
         # poco visti o dei canali piccoli, e lì yt-dlp avvisa "Unable to
@@ -1313,12 +1480,13 @@ class AuthManager:
         if not title:
             return {"results": [], "total": 0, "has_more": False, "source": "nessuna"}
 
+        # La ricerca per titolo restituisce quasi sempre il video stesso in
+        # cima: come per il Mix, si esclude dentro il feed.
         page = await self._lazy_page(
             f"related:{video_id}", f"ytsearch{RELATED_SEARCH_MAX}:{title}",
             offset, limit, opts, RELATED_CHUNK, RELATED_SEARCH_MAX,
+            escludi=video_id,
         )
-        # La ricerca per titolo restituisce quasi sempre il video stesso in cima.
-        page["results"] = [v for v in page["results"] if v.get("id") != video_id]
         page["source"] = "ricerca"
         return page
 
@@ -1514,10 +1682,27 @@ class AuthManager:
         parte. Usa la YouTube Data API (fino a 50 id per richiesta, serve un
         account collegato) con cache persistente su disco: i loghi non cambiano
         quasi mai, quindi una volta risolti non li richiediamo più.
+
+        Anche i canali *senza* risposta vanno ricordati (cache negativa): sono
+        i canali cancellati o gli id che la API non riconosce, e senza segnarli
+        finivano nella lista dei mancanti ad ogni pagina aperta — una richiesta
+        e un po' di quota buttate via ogni volta, per sempre. Il segnaposto
+        scade dopo AVATAR_MISS_TTL, così un canale tornato disponibile viene
+        comunque ritentato, e viene ignorato del tutto se nel frattempo
+        l'account è cambiato (vedi forza: i "buchi" di prima del login sono
+        spiegati dal fatto che non c'era un token).
         """
         ids = list(dict.fromkeys(c for c in channel_ids if c))  # dedup, ordine preservato
-        result = {cid: self._avatar_cache[cid] for cid in ids if cid in self._avatar_cache}
-        missing = [cid for cid in ids if cid not in self._avatar_cache]
+        result = {}
+        missing = []
+        for cid in ids:
+            cached = self._avatar_cache.get(cid)
+            if isinstance(cached, str):
+                result[cid] = cached
+            elif self._miss_ancora_valido(cached):
+                continue  # sappiamo già che questo canale non ha un logo
+            else:
+                missing.append(cid)
         if not missing:
             return result
 
@@ -1536,16 +1721,48 @@ class AuthManager:
                         timeout=15,
                     )
                     data = r.json()
+                    if "error" in data:
+                        # Quota finita o token rifiutato: è un guasto
+                        # temporaneo, non un canale senza logo. Segnarlo come
+                        # "niente logo" lo renderebbe definitivo.
+                        print(f"[auth] Channel avatars: {data['error'].get('message')}")
+                        break
                     for item in data.get("items", []):
                         url = item.get("snippet", {}).get("thumbnails", {}).get("default", {}).get("url")
                         if url:
                             self._avatar_cache[item["id"]] = url
                             result[item["id"]] = url
+                    # Chi non è tornato dalla API non esiste (canale cancellato
+                    # o id sbagliato): ricordiamolo, con scadenza.
+                    for cid in batch:
+                        if cid not in result:
+                            self._avatar_cache[cid] = {"miss_at": time.time()}
             self._save_avatar_cache()
         except Exception as e:
             print(f"[auth] Channel avatars error: {e}")
 
         return result
+
+    @staticmethod
+    def _miss_ancora_valido(cached) -> bool:
+        """True se `cached` è un segnaposto 'nessun logo' non ancora scaduto."""
+        if not isinstance(cached, dict):
+            return False
+        return time.time() - (cached.get("miss_at") or 0) < AVATAR_MISS_TTL
+
+    def dimentica_avatar_mancanti(self):
+        """
+        Cancella i segnaposti "nessun logo".
+
+        Da chiamare quando cambia l'account collegato: senza token la API non
+        risponde affatto, quindi i buchi accumulati prima del login non dicono
+        niente sul canale e vanno ritentati subito invece di aspettare la
+        scadenza.
+        """
+        self._avatar_cache = {
+            cid: v for cid, v in self._avatar_cache.items() if isinstance(v, str)
+        }
+        self._save_avatar_cache()
 
 
 # Singleton

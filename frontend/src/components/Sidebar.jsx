@@ -3,8 +3,11 @@ export default function Sidebar({ open, navigate, currentPage, authStatus }) {
     { icon: "home", label: "Home", page: "home" },
     { icon: "subscriptions", label: "Iscrizioni", page: "subscriptions" },
   ];
+  // Le voci senza `page` non portano da nessuna parte: sono lì per somigliare
+  // a YouTube, ma la pagina corrispondente non esiste (vedi sotto — restano
+  // spente invece di sembrare cliccabili e non fare niente).
   const extraItems = [
-    { icon: "history", label: "Cronologia" },
+    { icon: "history", label: "Cronologia", page: "history" },
     { icon: "download", label: "Download" },
     { icon: "thumb_up", label: "Video piaciuti" },
   ];
@@ -44,7 +47,12 @@ export default function Sidebar({ open, navigate, currentPage, authStatus }) {
           <div className="sidebar-section">Tu</div>
 
           {extraItems.map(item => (
-            <div key={item.label} className="sidebar-item">
+            <div
+              key={item.label}
+              className={`sidebar-item${item.page ? "" : " disabled"}${currentPage === item.page ? " active" : ""}`}
+              onClick={item.page ? () => navigate(item.page) : undefined}
+              title={item.page ? undefined : "Non ancora disponibile"}
+            >
               <span className="icon material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
               <span className="sidebar-label">{item.label}</span>
             </div>
@@ -53,7 +61,7 @@ export default function Sidebar({ open, navigate, currentPage, authStatus }) {
           <div className="sidebar-divider" />
           <div className="sidebar-section">Esplora</div>
           {exploreItems.map(item => (
-            <div key={item.label} className="sidebar-item">
+            <div key={item.label} className="sidebar-item disabled" title="Non ancora disponibile">
               <span className="icon material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
               <span className="sidebar-label">{item.label}</span>
             </div>

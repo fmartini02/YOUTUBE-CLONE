@@ -39,7 +39,7 @@ export default function HomePage({ navigate, authStatus }) {
   const [feedSource, setFeedSource] = useState(null); // null | "youtube-home"
   const [emptyReason, setEmptyReason] = useState(null); // perché la home è vuota
   const { ToastContainer } = useToast();
-  const avatars = useChannelAvatars(videos);
+  const avatars = useChannelAvatars(videos, authStatus?.authenticated);
 
   // Da quale elenco stiamo paginando, per proseguire sullo STESSO elenco
   // invece di ricominciare da capo.

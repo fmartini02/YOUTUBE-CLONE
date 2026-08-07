@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { api, timeAgo, isCapacitor, getServerBase, clearServerBase, resolveCastBase } from "../api";
 import { useToast } from "../hooks/useToast";
+import { usePrefs } from "../hooks/usePrefs";
 import { useCastContext } from "../App";
 import { CAST_UNAVAILABLE_MESSAGE } from "../hooks/useCast.jsx";
 
 export default function SettingsPage({ navigate }) {
+  const { prefs, salvaPrefs } = usePrefs();
   const [status, setStatus] = useState(null);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -17,12 +19,34 @@ export default function SettingsPage({ navigate }) {
   const fileRef = useRef();
   const { addToast, ToastContainer } = useToast();
 
+  // `oauthStep` letto dall'aggiornatore di stato e non dalla closure: quando
+  // il timer partiva al montaggio, la funzione che eseguiva ogni 3 secondi era
+  // quella del primo render, dove oauthStep vale sempre "idle" — quindi il
+  // passaggio a "done" non scattava mai da qui.
+  const loadStatus = useCallback(async () => {
+    try {
+      const s = await api.authStatus();
+      setStatus(s);
+      if (s.authenticated) setOauthStep(step => (step === "waiting" ? "done" : step));
+    } catch {}
+  }, []);
+
+  // Lo stato si rilegge una volta all'apertura, e poi ogni 3 secondi SOLO
+  // mentre si aspetta che l'utente autorizzi su google.com/device. Prima il
+  // timer girava sempre: una richiesta ogni 3 secondi per tutto il tempo in
+  // cui la pagina restava aperta, e ogni giro rileggeva anche lo stato dei
+  // cookie dal disco. Il polling del device flow ce l'ha già per conto suo
+  // (pollDevice), quindi qui serve solo a far comparire "collegato" quando
+  // l'autorizzazione arriva da un'altra scheda o da un altro dispositivo.
   useEffect(() => {
     loadStatus();
-    // Ricarica status ogni 3s mentre aspetta OAuth
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (oauthStep !== "waiting") return;
     const interval = setInterval(loadStatus, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [oauthStep, loadStatus]);
 
   useEffect(() => {
     api.cookieBrowsers().then(d => setDetectedBrowsers(d.browsers || [])).catch(() => setDetectedBrowsers([]));
@@ -41,14 +65,6 @@ export default function SettingsPage({ navigate }) {
     } finally {
       setImportingBrowser(null);
     }
-  }
-
-  async function loadStatus() {
-    try {
-      const s = await api.authStatus();
-      setStatus(s);
-      if (s.authenticated && oauthStep === "waiting") setOauthStep("done");
-    } catch {}
   }
 
   // Device flow: il server chiede un codice a Google, l'utente lo digita su
@@ -361,23 +377,38 @@ export default function SettingsPage({ navigate }) {
           onChange={e => handleCookieFile(e.target.files[0])} />
       </Section>
 
-      {/* ── Preferenze ───────────────────────────────────────────────── */}
+      {/* ── Preferenze ───────────────────────────────────────────────────
+          Le preferenze vivono nel context (usePrefs), non in `status`: da lì
+          le leggono anche il player (qualità, autoplay) e il tema. Prima
+          venivano scritte sul server e non le rileggeva nessuno. */}
       <Section title="Preferenze" icon="🎛️">
         <PrefRow
           label="Qualità video predefinita"
-          value={status?.prefs?.quality || "best"}
+          value={prefs.quality || "best"}
           options={[
             { value: "best", label: "Migliore disponibile" },
             { value: "1080", label: "1080p" },
             { value: "720", label: "720p" },
             { value: "480", label: "480p" },
+            { value: "360", label: "360p" },
           ]}
-          onChange={v => api.updatePrefs({ quality: v }).then(loadStatus)}
+          onChange={v => salvaPrefs({ quality: v })}
+        />
+        <PrefRow
+          label="Tema"
+          value={prefs.theme || "dark"}
+          options={[
+            { value: "dark", label: "Scuro" },
+            { value: "light", label: "Chiaro" },
+            { value: "auto", label: "Come il sistema" },
+          ]}
+          onChange={v => salvaPrefs({ theme: v })}
         />
         <PrefToggle
           label="Autoplay video"
-          value={status?.prefs?.autoplay !== false}
-          onChange={v => api.updatePrefs({ autoplay: v }).then(loadStatus)}
+          sublabel="Fa partire da solo un video appena aperto"
+          value={prefs.autoplay !== false}
+          onChange={v => salvaPrefs({ autoplay: v })}
         />
       </Section>
 
@@ -386,10 +417,19 @@ export default function SettingsPage({ navigate }) {
         <p style={{ fontSize: 14, color: "var(--text2)", marginBottom: 12 }}>
           La cronologia è salvata localmente sul server.
         </p>
-        <button className="action-btn" onClick={async () => {
-          await api.clearHistory();
-          addToast("Cronologia cancellata");
-        }}>🗑️ Cancella cronologia</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="action-btn" onClick={() => navigate("history")}>
+            🕐 Apri la cronologia
+          </button>
+          <button className="action-btn" onClick={async () => {
+            try {
+              await api.clearHistory();
+              addToast("Cronologia cancellata");
+            } catch {
+              addToast("❌ Non sono riuscito a cancellare la cronologia");
+            }
+          }}>🗑️ Cancella cronologia</button>
+        </div>
       </Section>
 
       <ToastContainer />
@@ -499,10 +539,13 @@ function PrefRow({ label, value, options, onChange }) {
   );
 }
 
-function PrefToggle({ label, value, onChange }) {
+function PrefToggle({ label, sublabel, value, onChange }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0" }}>
-      <span style={{ fontSize: 14 }}>{label}</span>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", gap: 12 }}>
+      <span style={{ fontSize: 14 }}>
+        {label}
+        {sublabel && <div style={{ fontSize: 12, color: "var(--text3)" }}>{sublabel}</div>}
+      </span>
       <div
         onClick={() => onChange(!value)}
         style={{
