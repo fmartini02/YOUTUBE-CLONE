@@ -89,9 +89,6 @@ export default function Header({ navigate, currentQuery, sidebarOpen, setSidebar
       </div>
 
       <div className="header-right">
-        <button className="icon-btn" title="Notifiche">
-          <span className="material-symbols-outlined" style={{ fontSize: 20 }}>notifications</span>
-        </button>
         <button
           className="icon-btn"
           title={authenticated ? "Account collegato" : "Impostazioni account"}

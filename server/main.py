@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import tempfile
 import time
 import urllib.parse
@@ -10,14 +11,14 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
 
 # crea_ydl al posto di yt_dlp.YoutubeDL: stessa istanza, ma incapace di
 # cancellare la sessione da cookies.txt quando chiude (vedi il suo docstring).
-from auth import auth_manager, crea_ydl, is_video_entry, YouTubeAPIError
+from auth import auth_manager, crea_ydl, is_video_entry, map_video_entry, YouTubeAPIError
 from sync import scheduler
 from ytdlp_patch import applica_patch_collaborazioni
 
@@ -40,18 +41,10 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 # Porta del server: deve combaciare con vite.config.js (proxy /api), start_server.sh/.bat
 # ed electron/main.js.
 SERVER_PORT = int(os.environ.get("YTPROXY_PORT", 8090))
-# Vecchio flow web, tenuto solo per chi ha già collegato un client "Applicazione
-# web": vale unicamente col server sulla stessa macchina del browser, perché
-# Google come redirect http accetta solo localhost e non gli IP privati. Il
-# login nuovo passa dal device flow (/api/auth/device/*), che di redirect non ne
-# ha e quindi funziona anche col server su un altro computer della rete.
-OAUTH_REDIRECT_URI = f"http://localhost:{SERVER_PORT}/api/auth/callback-page"
 
 # ─── YouTube Data API (no key needed: scraping via yt-dlp) ───────────────────
 
-import shutil as _shutil
-import time as _time
-_NODE_PATH = _shutil.which("node") or "/usr/bin/node"
+_NODE_PATH = shutil.which("node") or "/usr/bin/node"
 
 def ydl_opts_base():
     return {
@@ -66,14 +59,6 @@ def ydl_opts_base():
         # e farlo con una extract_info completa per ogni card sarebbe troppo lento.
         "extractor_args": {"youtubetab": {"approximate_date": ["true"]}},
     }
-
-
-def _timestamp_to_upload_date(ts) -> Optional[str]:
-    """Converte un unix timestamp (anche approssimato) nel formato YYYYMMDD usato da 'published'."""
-    if not ts:
-        return None
-    from datetime import datetime, timezone
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
 
 
 _QUALITY_HEIGHTS = {"1080": 1080, "720": 720, "480": 480, "360": 360}
@@ -93,27 +78,12 @@ _LANGUAGE_NAMES = {
 }
 
 
-def _progressive_format_selector(quality: str) -> str:
-    """
-    Un solo file con video+audio uniti: obbligatorio per il player <video> del
-    browser, che non può riprodurre due URL separati (video-only + audio-only)
-    come fa VLC. Senza il filtro acodec/vcodec!=none yt-dlp a volte sceglie il
-    formato adattivo migliore (solo video) e il player parte muto.
-    """
-    h = _QUALITY_HEIGHTS.get(quality)
-    height_filter = f"[height<={h}]" if h else ""
-    return (
-        f"best{height_filter}[acodec!=none][vcodec!=none]"
-        f"/best[acodec!=none][vcodec!=none]/best"
-    )
-
-
 def _adaptive_format_selector(quality: str) -> str:
     """
-    Coppia video+audio separati alla qualità più alta disponibile (YouTube
-    quasi mai offre un unico file combinato oltre i 360p — vedi
-    _progressive_format_selector). Usata da /api/mux, che li ricompone al
-    volo con ffmpeg.
+    Coppia video+audio separati alla qualità più alta disponibile: oltre i
+    360p YouTube quasi mai offre un unico file già combinato, e il player
+    <video> del browser non sa riprodurre due URL separati come fa VLC. Usata
+    da /api/mux, che li ricompone al volo con ffmpeg.
     """
     h = _QUALITY_HEIGHTS.get(quality, 1080)
     return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
@@ -155,102 +125,8 @@ async def search(q: str = Query(...), page: int = 1):
         with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"ytsearch{want}:{q}", download=False)
             entries = info.get("entries", [])
-            results = []
-            for e in entries:
-                if not is_video_entry(e):
-                    continue
-                results.append({
-                    "id": e.get("id"),
-                    "title": e.get("title"),
-                    "channel": e.get("uploader") or e.get("channel"),
-                    "channel_id": e.get("channel_id"),
-                    "duration": e.get("duration"),
-                    "views": e.get("view_count"),
-                    "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                    "published": _timestamp_to_upload_date(e.get("timestamp")),
-                })
+            results = [map_video_entry(e) for e in entries if is_video_entry(e)]
             return {"results": results, "query": q, "has_more": len(results) >= per_page}
-    except Exception as ex:
-        raise HTTPException(500, str(ex))
-
-
-_trending_cache: list = []
-_trending_cache_at: float = 0
-_TRENDING_CACHE_TTL = 600  # 10 minuti
-
-
-@app.get("/api/trending")
-async def trending(limit: int = 24, offset: int = 0):
-    """
-    Trending — fallback della home quando non ci sono i cookie.
-    Paginato per lo scroll infinito, con cache in memoria: le pagine
-    successive vengono servite dallo stesso elenco già estratto.
-    """
-    global _trending_cache, _trending_cache_at
-    import time as _time
-
-    def _page(results):
-        return {
-            "results": results[offset:offset + limit],
-            "total": len(results),
-            "has_more": offset + limit < len(results),
-        }
-
-    if _trending_cache and _time.time() - _trending_cache_at < _TRENDING_CACHE_TTL:
-        return _page(_trending_cache)
-
-    try:
-        opts = {
-            **ydl_opts_base(),
-            "playlistend": 120,
-        }
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info("https://www.youtube.com/results?search_query=trending+italia&sp=CAISAhAB", download=False)
-            entries = (info or {}).get("entries", [])
-            results = []
-            for e in entries:
-                if not is_video_entry(e):
-                    continue
-                results.append({
-                    "id": e.get("id"),
-                    "title": e.get("title"),
-                    "channel": e.get("uploader") or e.get("channel"),
-                    "channel_id": e.get("channel_id"),
-                    "duration": e.get("duration"),
-                    "views": e.get("view_count"),
-                    "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                    "published": _timestamp_to_upload_date(e.get("timestamp")),
-                })
-            if results:
-                _trending_cache = results
-                _trending_cache_at = _time.time()
-            return _page(results)
-    except Exception as ex:
-        if _trending_cache:
-            return _page(_trending_cache)
-        raise HTTPException(500, str(ex))
-
-
-@app.get("/api/video/{video_id}")
-async def video_info(video_id: str):
-    """Get video metadata."""
-    try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            return {
-                "id": info.get("id"),
-                "title": info.get("title"),
-                "description": info.get("description", "")[:500],
-                "channel": info.get("uploader"),
-                "channel_id": info.get("channel_id"),
-                "duration": info.get("duration"),
-                "views": info.get("view_count"),
-                "likes": info.get("like_count"),
-                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
-                "published": info.get("upload_date"),
-                "tags": info.get("tags", [])[:10],
-            }
     except Exception as ex:
         raise HTTPException(500, str(ex))
 
@@ -526,48 +402,17 @@ async def get_subtitle_vtt(video_id: str, lang: str):
         raise HTTPException(500, str(ex))
 
 
-@app.get("/api/stream/{video_id}")
-async def stream_video(video_id: str, quality: str = "best"):
-    """
-    Stream video directly (no full download needed).
-    Returns a redirect to the direct video URL from YouTube CDN.
-    """
-    try:
-        opts = {
-            **ydl_opts_base(),
-            "extract_flat": False,
-            "format": _progressive_format_selector(quality),
-        }
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            url = info.get("url")
-            if not url:
-                raise HTTPException(404, "No stream URL found")
-            return JSONResponse({"stream_url": url, "title": info.get("title"), "ext": info.get("ext", "mp4")})
-    except HTTPException:
-        raise
-    except Exception as ex:
-        raise HTTPException(500, str(ex))
-
-
 @app.get("/api/watch/{video_id}")
-async def watch(video_id: str, quality: str = "best"):
+async def watch(video_id: str):
     """
-    Metadata + stream URL in un'unica estrazione yt-dlp, invece delle due
-    richieste separate di /api/video + /api/stream: dimezza il tempo prima
-    che il video parta dopo il click sulla copertina.
+    Metadati del video (titolo, canale, descrizione, durata...) per la pagina
+    video. Nessun URL di stream: la riproduzione passa da /api/mux, che i
+    formati se li risolve da sé e li tiene in cache per il seek.
     """
     try:
-        opts = {
-            **ydl_opts_base(),
-            "extract_flat": False,
-            "format": _progressive_format_selector(quality),
-        }
+        opts = {**ydl_opts_base(), "extract_flat": False}
         with crea_ydl(opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            url = info.get("url")
-            if not url:
-                raise HTTPException(404, "No stream URL found")
             return {
                 "id": info.get("id"),
                 "title": info.get("title"),
@@ -580,8 +425,6 @@ async def watch(video_id: str, quality: str = "best"):
                 "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
                 "published": info.get("upload_date"),
                 "tags": info.get("tags", [])[:10],
-                "stream_url": url,
-                "ext": info.get("ext", "mp4"),
             }
     except HTTPException:
         raise
@@ -589,7 +432,7 @@ async def watch(video_id: str, quality: str = "best"):
         raise HTTPException(500, str(ex))
 
 
-_FFMPEG_BIN = _shutil.which("ffmpeg") or "ffmpeg"
+_FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 
 # Cache degli URL di formato usati da /api/mux. Serve al seek: saltare in un
 # altro punto del video significa riavviare ffmpeg, e senza cache ogni salto
@@ -604,7 +447,7 @@ def _mux_formats(video_id: str, quality: str, compat: bool):
     """URL video+audio (o singolo URL progressivo) per /api/mux, con cache."""
     key = (video_id, quality, compat)
     hit = _mux_fmt_cache.get(key)
-    if hit and _time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
+    if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
         return hit[1]
 
     # compat=1 (usato dal Chromecast): forza H.264+AAC invece del meglio
@@ -625,11 +468,11 @@ def _mux_formats(video_id: str, quality: str, compat: bool):
             return None
         urls = (url, None)
 
-    _mux_fmt_cache[key] = (_time.time(), urls)
+    _mux_fmt_cache[key] = (time.time(), urls)
     # Potatura opportunistica: senza, la cache cresce per tutta la vita del
     # processo su un server che resta acceso per giorni.
     if len(_mux_fmt_cache) > 64:
-        now = _time.time()
+        now = time.time()
         for k in [k for k, v in _mux_fmt_cache.items() if now - v[0] >= _MUX_FMT_CACHE_TTL]:
             _mux_fmt_cache.pop(k, None)
     return urls
@@ -640,9 +483,9 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     """
     Streaming ad alta qualità: unisce al volo con ffmpeg i flussi video e
     audio separati che YouTube offre oltre i 360p (vedi _adaptive_format_selector),
-    invece del singolo formato "combinato" a bassa qualità usato da /api/watch.
-    Solo remux (-c copy, nessuna transcodifica) — leggero anche su hardware
-    modesto come un Raspberry Pi.
+    invece di accontentarsi del singolo formato già "combinato", che oltre i
+    360p quasi non esiste. Solo remux (-c copy, nessuna transcodifica) —
+    leggero anche su hardware modesto come un Raspberry Pi.
 
     Il flusso è generato in tempo reale, quindi non ha né Content-Length né
     supporto Range: il browser da solo non può saltare avanti nella barra oltre
@@ -888,30 +731,6 @@ async def auth_status():
 
 # ─── OAuth flow ───────────────────────────────────────────────────────────────
 
-class OAuthSetup(BaseModel):
-    client_id: str
-    client_secret: str
-
-
-class OAuthCallback(BaseModel):
-    code: str
-    client_id: str
-    client_secret: str
-    redirect_uri: str
-
-
-@app.post("/api/auth/url")
-async def get_auth_url(body: OAuthSetup):
-    """Genera URL per il login Google."""
-    redirect_uri = OAUTH_REDIRECT_URI
-    url = auth_manager.get_auth_url(body.client_id, redirect_uri)
-    # Salva temporaneamente client_id/secret per il callback
-    (Path(__file__).parent.parent / "data").mkdir(exist_ok=True)
-    tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
-    tmp.write_text(json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
-    return {"auth_url": url}
-
-
 class DeviceStart(BaseModel):
     client_id: str
     client_secret: str
@@ -951,37 +770,6 @@ async def auth_device_poll(body: DevicePoll):
     if res["status"] == "ok":
         asyncio.create_task(scheduler.force_sync(auth_manager, ydl_opts_base))
     return res
-
-
-@app.get("/api/auth/callback-page")
-async def oauth_callback_page(code: str = None, error: str = None):
-    """Pagina di callback OAuth — riceve il code e completa il flow."""
-    if error:
-        html = f"<html><body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'><div>Errore: {error}</div></body></html>"
-        return StreamingResponse(iter([html]), media_type="text/html")
-
-    if not code:
-        html = "<html><body style='background:#0f0f0f;color:#fff'>Nessun codice ricevuto.</body></html>"
-        return StreamingResponse(iter([html]), media_type="text/html")
-
-    try:
-        tmp = Path(__file__).parent.parent / "data" / "oauth_setup.json"
-        setup = json.loads(tmp.read_text())
-        redirect_uri = OAUTH_REDIRECT_URI
-        await auth_manager.exchange_code(code, setup["client_id"], setup["client_secret"], redirect_uri)
-        # Sync immediato
-        asyncio.create_task(scheduler.force_sync(auth_manager, ydl_opts_base))
-        html = """<html><head><meta charset='utf-8'></head>
-<body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px'>
-  <div style='font-size:48px'>✅</div>
-  <div style='font-size:20px;font-weight:700'>Account collegato!</div>
-  <div style='color:#aaa'>Le tue iscrizioni si stanno sincronizzando...</div>
-  <script>setTimeout(() => window.close(), 2000)</script>
-</body></html>"""
-    except Exception as e:
-        html = f"<html><body style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'>Errore: {e}</body></html>"
-
-    return StreamingResponse(iter([html]), media_type="text/html")
 
 
 @app.post("/api/auth/logout")
@@ -1108,8 +896,8 @@ async def home_feed(limit: int = 24, offset: int = 0):
     """
     Feed 'Home': la vera homepage di YouTube (raccomandazioni, non solo
     iscrizioni) se hai caricato i cookie in Impostazioni. Senza cookie non
-    c'è modo di replicare l'algoritmo di raccomandazione di YouTube, quindi
-    il frontend fa fallback su /api/trending.
+    c'è modo di replicare l'algoritmo di raccomandazione di YouTube: non
+    esiste un ripiego, l'endpoint risponde vuoto e ne dichiara il motivo.
 
     Paginato (limit/offset) per lo scroll infinito della home. L'estrazione è
     pigra: ogni pagina scarica da YouTube solo i blocchi che servono, quindi
@@ -1230,11 +1018,6 @@ async def add_history(entry: HistoryEntry):
     return {"ok": True}
 
 
-@app.get("/api/history")
-async def get_history():
-    return {"history": auth_manager.get_history()}
-
-
 @app.delete("/api/history")
 async def clear_history():
     auth_manager.clear_history()
@@ -1246,12 +1029,6 @@ async def clear_history():
 class PrefsUpdate(BaseModel):
     quality: Optional[str] = None
     autoplay: Optional[bool] = None
-    theme: Optional[str] = None
-
-
-@app.get("/api/prefs")
-async def get_prefs():
-    return auth_manager.get_prefs()
 
 
 @app.patch("/api/prefs")

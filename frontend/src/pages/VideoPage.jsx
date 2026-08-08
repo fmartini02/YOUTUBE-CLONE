@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { api, formatDuration, formatViews, formatDate } from "../api";
+import { api, formatDuration, formatViews, formatCompact, formatDate } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useCastContext } from "../App";
 import CastButton from "../components/CastButton";
@@ -233,11 +233,8 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
                         ? <img src={channelAvatar} alt={info.channel} referrerPolicy="no-referrer" />
                         : (info.channel || "?")[0]}
                     </ChannelLink>
-                    <div>
-                      <div className="channel-name">
-                        <ChannelLink channelId={info.channel_id} name={info.channel} navigate={navigate} />
-                      </div>
-                      <div className="channel-subs">{formatViews(info.views)}</div>
+                    <div className="channel-name">
+                      <ChannelLink channelId={info.channel_id} name={info.channel} navigate={navigate} />
                     </div>
 
                     {/* Accanto al nome del canale, come su YouTube: da qui ci si
@@ -254,7 +251,7 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
                   <div className="video-actions">
                     {info.likes && (
                       <span className="action-btn" style={{ cursor: "default" }}>
-                        👍 {formatViews(info.likes).replace(" views", "")}
+                        👍 {formatCompact(info.likes)}
                       </span>
                     )}
 
