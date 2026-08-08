@@ -27,10 +27,10 @@ cookie sono **facoltativi** e servono solo per i feed personalizzati.
 
 ## Cosa c'è dentro
 
-- Ricerca, autocomplete, trending, video correlati
+- Ricerca, autocomplete, video correlati
 - Player integrato con **scelta della qualità** (fino a 1080p), commenti e sottotitoli
 - **Home personalizzata** e **feed iscrizioni** reali (con i cookie del tuo account)
-- Cronologia locale, preferenze (qualità predefinita, autoplay, tema)
+- Cronologia locale, preferenze (qualità predefinita, autoplay)
 - **Chromecast** con receiver dedicato
 - Download MP4
 - App **desktop** (Electron) e **Android** (Capacitor)
@@ -137,7 +137,7 @@ del PC cambia, l'app se ne accorge e richiede l'indirizzo nuovo.
 ## Feed personalizzati (facoltativi)
 
 Tutto funziona anche senza: senza cookie né account hai comunque ricerca,
-trending e riproduzione. Si configurano da **⚙️ Impostazioni**.
+video correlati e riproduzione. Si configurano da **⚙️ Impostazioni**.
 
 ### 🍪 Cookie YouTube → home e iscrizioni reali
 
@@ -218,10 +218,9 @@ Da lì in poi le iscrizioni si risincronizzano da sole ogni ora.
 > browser al `localhost` di *chi sta guardando*, dove non c'è nessun server: la
 > schermata di consenso passa e subito dopo la pagina non carica, un sintomo che
 > sembra una caduta di rete. Il device flow non ha redirect, quindi funziona
-> identico su localhost, su IP di LAN e in headless. Il vecchio flusso resta nel
-> codice (`/api/auth/url` + `/api/auth/callback-page`) per chi ha già un client
-> di tipo *Applicazione web* collegato e funzionante, ma l'interfaccia non lo usa
-> più.
+> identico su localhost, su IP di LAN e in headless — ed è l'unico che l'app
+> usa: crea il Client ID come *TV e dispositivi con input limitato*, non come
+> *Applicazione web*.
 
 > Se avevi già collegato l'account prima di poter commentare, **rifai il login**
 > dalle Impostazioni: il permesso di scrittura (`youtube.force-ssl`) va concesso
@@ -294,13 +293,10 @@ ytproxy/
 | Endpoint | Descrizione |
 |---|---|
 | `GET /api/search?q=query&page=1` | Ricerca video |
-| `GET /api/trending` | Trending (fallback della home) |
 | `GET /api/feed/home` | Home personalizzata (serve il cookie) |
 | `GET /api/feed/subscriptions` | Feed iscrizioni |
-| `GET /api/video/{id}` | Metadati video |
-| `GET /api/watch/{id}?quality=720` | Metadati + stream in una sola chiamata |
+| `GET /api/watch/{id}` | Metadati del video |
 | `GET /api/mux/{id}?quality=1080` | **Stream del player**: audio+video uniti al volo |
-| `GET /api/stream/{id}?quality=720` | URL diretto del CDN YouTube |
 | `GET /api/download/{id}?quality=720` | Scarica MP4 |
 | `GET /api/comments/{id}?sort=top&page_token=` | Commenti principali, una pagina alla volta |
 | `GET /api/comments/{id}/replies?parent_id=` | Risposte a un commento (serve l'account) |
@@ -311,8 +307,8 @@ ytproxy/
 | `GET /api/suggestions?q=query` | Autocomplete |
 | `GET /api/auth/status` | Stato cookie, account e sync |
 | `GET /api/auth/me` | Canale dell'account collegato (per "commenta come") |
-| `GET /api/history` · `POST` · `DELETE` | Cronologia locale |
-| `GET /api/prefs` · `PATCH` | Preferenze |
+| `POST /api/history` · `DELETE` | Cronologia locale |
+| `PATCH /api/prefs` | Preferenze |
 | `GET /api/health` | Controllo che il server sia vivo |
 
 > `/api/mux` genera il flusso in tempo reale con ffmpeg (nessuna

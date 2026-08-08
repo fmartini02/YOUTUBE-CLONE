@@ -62,7 +62,6 @@ MAX_OPEN_FEEDS = 6
 # il login (vedi can_write / WRITE_SCOPE).
 WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 OAUTH_SCOPES = f"https://www.googleapis.com/auth/youtube.readonly {WRITE_SCOPE}"
-OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 # Device flow ("TV e dispositivi con input limitato"): il server chiede un
 # codice, l'utente lo digita su google.com/device da un qualsiasi telefono o
@@ -335,7 +334,6 @@ class LazyFeed:
         self.items: list = []
         self.exhausted = False
         self.created_at = time.time()
-        self._logout_segnalato = False
         self._ydl = None
         self._apri()
 
@@ -479,7 +477,6 @@ class AuthManager:
         # scroll paralleli (due schede, o un refresh) lo corromperebbero.
         self._feed_locks: dict = {}
         self._load_all()
-        self._sync_task = None
 
     def _load_all(self):
         self._token = _leggi_json(TOKEN_FILE, {})
@@ -512,34 +509,6 @@ class AuthManager:
         _scrivi_json(SUBS_FEED_CACHE_FILE, self._subs_feed_cache)
 
     # ── OAuth flow ────────────────────────────────────────────────────────────
-
-    def get_auth_url(self, client_id: str, redirect_uri: str) -> str:
-        """Step 1: genera URL per il login Google."""
-        import urllib.parse
-        params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": OAUTH_SCOPES,
-            "access_type": "offline",
-            "prompt": "consent",  # forza refresh_token
-        }
-        return f"{OAUTH_AUTH_URL}?{urllib.parse.urlencode(params)}"
-
-    async def exchange_code(self, code: str, client_id: str, client_secret: str, redirect_uri: str) -> dict:
-        """Step 2: scambia il code con access_token + refresh_token."""
-        async with httpx.AsyncClient() as client:
-            r = await client.post(OAUTH_TOKEN_URL, data={
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            })
-            data = r.json()
-            if "error" in data:
-                raise ValueError(data.get("error_description", data["error"]))
-            return self._store_token(data, client_id, client_secret)
 
     def _store_token(self, data: dict, client_id: str, client_secret: str) -> dict:
         """Salva su disco il token appena ottenuto (da code o da device flow)."""
@@ -1025,7 +994,7 @@ class AuthManager:
         return {
             "valid": valid,
             "cookie_count": len(pairs),
-            "logged_in": bool(self._youtube_auth_cookies(pairs)),
+            "logged_in": bool(youtube_auth_cookies(pairs)),
         }
 
     # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
@@ -1040,33 +1009,7 @@ class AuthManager:
         "chromium": "~/snap/chromium/current/.config/chromium",
         "firefox": "~/snap/firefox/common/.mozilla/firefox",
     }
-    # Cookie che provano una sessione YouTube di PRIMA PARTE. Devono stare sul
-    # dominio youtube.com: i cookie omonimi su google.com non vengono mai
-    # inviati a youtube.com, quindi non autenticano nulla. Il caso insidioso è
-    # essere loggati su Google ma non aver mai aperto YouTube in quel browser:
-    # il profilo contiene i cookie google.com e i soli "3P" di youtube.com
-    # (__Secure-3PSID e simili, impostati cross-site), che YouTube considera
-    # comunque anonimi. Un file così sembra pieno ma dà feed vuoti.
-    _AUTH_COOKIE_NAMES = AUTH_COOKIE_NAMES
     _CANDIDATE_BROWSERS = ("brave", "chrome", "chromium", "edge", "firefox", "vivaldi", "opera")
-
-    # ── Import automatico cookie dal browser (niente estensioni/export manuale) ─
-    #
-    # yt-dlp sa leggere i cookie direttamente dal database del browser, ma su
-    # Linux cerca solo il percorso standard (~/.config/...). Se il browser è
-    # installato via snap (comune su Ubuntu: Brave, Chromium, Firefox), snap
-    # confina i suoi dati reali in ~/snap/<pkg>/... e quel percorso standard è
-    # vuoto o non aggiornato — va indicato esplicitamente.
-    _SNAP_PROFILE_HINTS = {
-        "brave": "~/snap/brave/current/.config/BraveSoftware/Brave-Browser",
-        "chromium": "~/snap/chromium/current/.config/chromium",
-        "firefox": "~/snap/firefox/common/.mozilla/firefox",
-    }
-
-    @staticmethod
-    def _youtube_auth_cookies(names_by_domain) -> set:
-        """Quali cookie di autenticazione YouTube (prima parte) sono presenti."""
-        return youtube_auth_cookies(names_by_domain)
 
     def _browser_profile_path(self, browser: str) -> Optional[str]:
         hint = self._SNAP_PROFILE_HINTS.get(browser)
@@ -1093,7 +1036,7 @@ class AuthManager:
                 jar = self._extract_browser_jar(browser)
             except Exception:
                 continue
-            if self._youtube_auth_cookies((ck.domain, ck.name) for ck in jar):
+            if youtube_auth_cookies((ck.domain, ck.name) for ck in jar):
                 found.append(browser)
         return found
 
@@ -1114,7 +1057,7 @@ class AuthManager:
             if ck.domain.endswith(("youtube.com", "google.com")):
                 out_jar.set_cookie(ck)
                 count += 1
-        auth = self._youtube_auth_cookies((ck.domain, ck.name) for ck in jar)
+        auth = youtube_auth_cookies((ck.domain, ck.name) for ck in jar)
         if not auth:
             return {"valid": False, "cookie_count": count, "logged_in": False}
         self.invalidate_feeds()  # prima di scrivere: vedi invalidate_feeds()
@@ -1138,7 +1081,7 @@ class AuthManager:
             pairs = []
         # Senza cookie di sessione youtube.com il file c'è ma non autentica:
         # va segnalato come un problema quanto un file scaduto.
-        logged_in = bool(self._youtube_auth_cookies(pairs))
+        logged_in = bool(youtube_auth_cookies(pairs))
         # `reason` distingue due problemi che chiedono rimedi diversi: un file
         # vecchio si risolve riesportandolo, un file senza sessione YouTube no
         # — lì bisogna prima aprire youtube.com nel browser. Senza questa
@@ -1202,7 +1145,8 @@ class AuthManager:
         return {
             "quality": self._prefs.get("quality", "best"),
             "autoplay": self._prefs.get("autoplay", True),
-            "notifications_cookie_warning": self._prefs.get("notifications_cookie_warning", True),
+            # "dark" | "light" | "auto": la legge usePrefs e diventa
+            # l'attributo data-theme su <html>.
             "theme": self._prefs.get("theme", "dark"),
         }
 
@@ -1583,20 +1527,7 @@ class AuthManager:
                 with crea_ydl(opts) as ydl:
                     info = ydl.extract_info("https://www.youtube.com/feed/subscriptions", download=False)
                     entries = (info or {}).get("entries", [])
-                    results = []
-                    for e in (entries or []):
-                        if not is_video_entry(e):
-                            continue
-                        results.append({
-                            "id": e.get("id"),
-                            "title": e.get("title"),
-                            "channel": e.get("uploader") or e.get("channel"),
-                            "channel_id": e.get("channel_id"),
-                            "duration": e.get("duration"),
-                            "views": e.get("view_count"),
-                            "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                            "published": _timestamp_to_upload_date(e.get("timestamp")),
-                        })
+                    results = [map_video_entry(e) for e in (entries or []) if is_video_entry(e)]
                     if results:
                         self._cookie_feed_cache = results
                         self._cookie_feed_cache_at = time.time()
@@ -1631,22 +1562,14 @@ class AuthManager:
                         return ydl.extract_info(f"https://www.youtube.com/channel/{ch['id']}/videos", download=False)
 
                 info = await loop.run_in_executor(None, _extract)
-                out = []
-                for e in (info or {}).get("entries", []) or []:
-                    if not is_video_entry(e):
-                        continue
-                    out.append({
-                        "id": e.get("id"),
-                        "title": e.get("title"),
-                        "channel": ch["name"],
-                        "channel_id": ch["id"],
-                        "avatar": ch.get("thumbnail"),
-                        "duration": e.get("duration"),
-                        "views": e.get("view_count"),
-                        "thumbnail": f"https://i.ytimg.com/vi/{e.get('id')}/hqdefault.jpg",
-                        "published": _timestamp_to_upload_date(e.get("timestamp")),
-                    })
-                return out
+                # Le voci di una scheda "Video" non ripetono l'autore: nome,
+                # id e logo del canale li conosciamo già da sync_subscriptions.
+                return [
+                    {**map_video_entry(e), "channel": ch["name"],
+                     "channel_id": ch["id"], "avatar": ch.get("thumbnail")}
+                    for e in (info or {}).get("entries", []) or []
+                    if is_video_entry(e)
+                ]
             except Exception:
                 return []
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, timeAgo, formatViews, errorMessage } from "../api";
+import { api, timeAgo, formatCompact, errorMessage } from "../api";
 import ChannelLink from "./ChannelLink";
 
 /**
@@ -303,7 +303,7 @@ export default function Comments({ videoId, channelId, authStatus, navigate, onT
     <div style={{ marginTop: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600 }}>
-          Commenti {count != null && <span style={{ color: "var(--text3)", fontWeight: 400 }}>({formatViews(count).replace(" views", "")})</span>}
+          Commenti {count != null && <span style={{ color: "var(--text3)", fontWeight: 400 }}>({formatCompact(count)})</span>}
         </h3>
         {(comments.length > 1 || nextToken) && (
           <select className="quality-select" value={sort} onChange={e => setSort(e.target.value)}>

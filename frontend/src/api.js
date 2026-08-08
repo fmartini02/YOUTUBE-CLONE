@@ -95,13 +95,11 @@ export function errorMessage(e, fallback = "") {
 
 export const api = {
   search: (q, page = 1) => apiFetch(`/api/search?q=${encodeURIComponent(q)}&page=${page}`),
-  trending: (limit = 24, offset = 0) => apiFetch(`/api/trending?limit=${limit}&offset=${offset}`),
   homeFeed: (limit = 24, offset = 0) => apiFetch(`/api/feed/home?limit=${limit}&offset=${offset}`),
   related: (id, limit = 20, offset = 0) => apiFetch(`/api/related/${id}?limit=${limit}&offset=${offset}`),
   channelAvatars: (ids) => apiFetch(`/api/channel-avatars?ids=${ids.join(",")}`),
-  videoInfo: (id) => apiFetch(`/api/video/${id}`),
-  streamUrl: (id, quality = "best") => apiFetch(`/api/stream/${id}?quality=${quality}`),
-  watch: (id, quality = "best") => apiFetch(`/api/watch/${id}?quality=${quality}`),
+  // Solo metadati: il flusso da riprodurre è muxUrl (vedi /api/mux).
+  watch: (id) => apiFetch(`/api/watch/${id}`),
   // Commenti paginati: pageToken vuoto = prima pagina; la risposta ne
   // restituisce uno nuovo finché ci sono altri commenti da caricare.
   comments: (id, { limit = 40, sort = "top", pageToken = "", channelId = "" } = {}) =>
@@ -132,10 +130,6 @@ export const api = {
   channelVideos: (id, limit = 30, offset = 0) =>
     apiFetch(`/api/channel/${id}/videos?limit=${limit}&offset=${offset}`),
   authStatus: () => apiFetch("/api/auth/status"),
-  getAuthUrl: (client_id, client_secret) => apiFetch("/api/auth/url", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id, client_secret }),
-  }),
   // Device flow: niente redirect, quindi funziona anche col server su un'altra
   // macchina della rete (vedi /api/auth/device/start).
   deviceStart: (client_id, client_secret) => apiFetch("/api/auth/device/start", {
@@ -171,16 +165,7 @@ export const api = {
   updatePrefs: (u) => apiFetch("/api/prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(u) }),
 };
 
-export function isMobile() { return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent); }
-export function isTV() { return /SmartTV|Tizen|WebOS|SMART-TV|HbbTV/i.test(navigator.userAgent); }
-export function isElectron() { return typeof window !== "undefined" && !!window.__YTPROXY_ELECTRON__; }
 export function isCapacitor() { return typeof window !== "undefined" && !!window.Capacitor?.isNativePlatform?.(); }
-export function getDeviceType() {
-  if (isElectron()) return "desktop";
-  if (isTV()) return "tv";
-  if (isMobile()) return "mobile";
-  return "browser";
-}
 
 export function formatDuration(secs) {
   if (!secs) return "";
@@ -188,12 +173,23 @@ export function formatDuration(secs) {
   if (h) return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
   return `${m}:${String(s).padStart(2,"0")}`;
 }
+/**
+ * Numero abbreviato all'italiana: "1,2 Mln", "45,3 Mila", "912".
+ * Serve dove il numero sta da solo (mi piace, conteggio commenti); per le
+ * visualizzazioni c'è formatViews, che gli aggiunge l'etichetta.
+ */
+export function formatCompact(n) {
+  if (!n) return "";
+  const abbrevia = (v, u) => `${v.toFixed(1).replace(".", ",")} ${u}`;
+  if (n >= 1e9) return abbrevia(n / 1e9, "Mld");
+  if (n >= 1e6) return abbrevia(n / 1e6, "Mln");
+  if (n >= 1e3) return abbrevia(n / 1e3, "Mila");
+  return String(n);
+}
+
 export function formatViews(n) {
   if (!n) return "";
-  if (n >= 1e9) return `${(n/1e9).toFixed(1)}B views`;
-  if (n >= 1e6) return `${(n/1e6).toFixed(1)}M views`;
-  if (n >= 1e3) return `${(n/1e3).toFixed(1)}K views`;
-  return `${n} views`;
+  return `${formatCompact(n)} visualizzazioni`;
 }
 export function formatDate(s) {
   if (!s) return "";

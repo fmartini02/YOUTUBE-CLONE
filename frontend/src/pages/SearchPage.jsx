@@ -6,13 +6,11 @@ import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
 export default function SearchPage({ query, navigate }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const { addToast, ToastContainer } = useToast();
 
   useEffect(() => {
     if (!query) return;
     setLoading(true);
-    setPage(1);
     api.search(query, 1)
       .then(d => setResults(d.results || []))
       .catch(() => addToast("Errore nella ricerca"))

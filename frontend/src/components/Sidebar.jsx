@@ -1,23 +1,13 @@
 export default function Sidebar({ open, navigate, currentPage, authStatus }) {
+  // Solo voci che portano da qualche parte: le decorative (Download, Video
+  // piaciuti, Esplora) sono state tolte perché non facevano niente. Cronologia
+  // sta qui e non in una sezione "Tu" a parte proprio per la stessa ragione —
+  // è una pagina vera, quindi merita la barra stretta come le altre due.
   const mainItems = [
     { icon: "home", label: "Home", page: "home" },
     { icon: "subscriptions", label: "Iscrizioni", page: "subscriptions" },
-  ];
-  // Le voci senza `page` non portano da nessuna parte: sono lì per somigliare
-  // a YouTube, ma la pagina corrispondente non esiste (vedi sotto — restano
-  // spente invece di sembrare cliccabili e non fare niente).
-  const extraItems = [
     { icon: "history", label: "Cronologia", page: "history" },
-    { icon: "download", label: "Download" },
-    { icon: "thumb_up", label: "Video piaciuti" },
   ];
-  const exploreItems = [
-    { icon: "music_note", label: "Musica" },
-    { icon: "sports_esports", label: "Gaming" },
-    { icon: "newspaper", label: "Notizie" },
-    { icon: "sports_soccer", label: "Sport" },
-  ];
-
   const subCount = authStatus?.subscription_count || 0;
 
   return (
@@ -37,37 +27,6 @@ export default function Sidebar({ open, navigate, currentPage, authStatus }) {
           </span>
         </div>
       ))}
-
-      {/* Il resto (Cronologia/Download/Video piaciuti, Esplora) solo nella
-          barra espansa — nella barra stretta YouTube mostra solo le voci
-          principali, il resto sta dietro il menu "Tu". */}
-      {open && (
-        <>
-          <div className="sidebar-divider" />
-          <div className="sidebar-section">Tu</div>
-
-          {extraItems.map(item => (
-            <div
-              key={item.label}
-              className={`sidebar-item${item.page ? "" : " disabled"}${currentPage === item.page ? " active" : ""}`}
-              onClick={item.page ? () => navigate(item.page) : undefined}
-              title={item.page ? undefined : "Non ancora disponibile"}
-            >
-              <span className="icon material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
-              <span className="sidebar-label">{item.label}</span>
-            </div>
-          ))}
-
-          <div className="sidebar-divider" />
-          <div className="sidebar-section">Esplora</div>
-          {exploreItems.map(item => (
-            <div key={item.label} className="sidebar-item disabled" title="Non ancora disponibile">
-              <span className="icon material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
-              <span className="sidebar-label">{item.label}</span>
-            </div>
-          ))}
-        </>
-      )}
 
       {/* Settings at the bottom */}
       <div className="sidebar-divider" style={{ marginTop: "auto" }} />
