@@ -1518,20 +1518,30 @@ class AuthManager:
         if cookie_path:
             if self._cookie_feed_cache and time.time() - self._cookie_feed_cache_at < COOKIE_FEED_CACHE_TTL:
                 return self._cookie_feed_cache
-            try:
+            # extract_info è bloccante: in un thread separato, altrimenti
+            # ferma l'intero event loop di FastAPI (compreso il flusso video
+            # già in corso) per tutta la durata dell'estrazione.
+            def _estrai():
                 opts = {
                     **ydl_opts_base_fn(),
                     "cookiefile": cookie_path,
                     "playlistend": 100,
                 }
                 with crea_ydl(opts) as ydl:
-                    info = ydl.extract_info("https://www.youtube.com/feed/subscriptions", download=False)
-                    entries = (info or {}).get("entries", [])
-                    results = [map_video_entry(e) for e in (entries or []) if is_video_entry(e)]
-                    if results:
-                        self._cookie_feed_cache = results
-                        self._cookie_feed_cache_at = time.time()
-                        return results
+                    return ydl.extract_info("https://www.youtube.com/feed/subscriptions", download=False)
+
+            try:
+                loop = asyncio.get_event_loop()
+                info = await loop.run_in_executor(None, _estrai)
+                results = [
+                    map_video_entry(e)
+                    for e in ((info or {}).get("entries") or [])
+                    if is_video_entry(e)
+                ]
+                if results:
+                    self._cookie_feed_cache = results
+                    self._cookie_feed_cache_at = time.time()
+                    return results
             except Exception as e:
                 print(f"[auth] Cookie feed error: {e}")
                 if self._cookie_feed_cache:

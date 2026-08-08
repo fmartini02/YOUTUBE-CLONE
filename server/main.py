@@ -64,6 +64,38 @@ def ydl_opts_base():
     }
 
 
+async def in_executor(fn, *args):
+    """
+    Esegue codice bloccante fuori dall'event loop.
+
+    yt-dlp e la lettura dei cookie dal browser sono sincroni e lenti (1-3
+    secondi un'estrazione, minuti un download). Chiamarli dentro un `async def`
+    ferma l'INTERO server per tutto quel tempo, perché FastAPI serve ogni
+    richiesta sullo stesso event loop: il sintomo è il video di /api/mux che si
+    inchioda appena si apre una ricerca o un altro video, dato che anche il
+    generatore che legge da ffmpeg smette di essere schedulato.
+
+    Il resto del server lo faceva già (vedi `_mux_formats`, `LazyFeed.extend`,
+    `_extract_comments_ytdlp`): questo helper è solo il posto unico dove dirlo.
+    """
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
+
+
+def _estrai_video(video_id: str, format_selector: Optional[str] = None) -> dict:
+    """
+    Estrazione completa di un singolo video. **Bloccante**: va sempre passata a
+    `in_executor`, mai chiamata direttamente da un `async def`.
+
+    `format_selector` serve solo a chi vuole anche un URL di riproduzione
+    (/api/stream, /api/watch); i soli metadati non ne hanno bisogno.
+    """
+    opts = {**ydl_opts_base(), "extract_flat": False}
+    if format_selector:
+        opts["format"] = format_selector
+    with crea_ydl(opts) as ydl:
+        return ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+
+
 _QUALITY_HEIGHTS = {"1080": 1080, "720": 720, "480": 480, "360": 360}
 
 # Nomi leggibili per i codici lingua più comuni dei sottotitoli — YouTube ne
@@ -121,15 +153,23 @@ async def search(q: str = Query(...), page: int = 1):
         # lista, quindi la pagina 2 tornava sempre vuota.
         per_page = 20
         want = page * per_page
-        opts = {
-            **ydl_opts_base(),
-            "playlist_items": f"{(page - 1) * per_page + 1}-{want}",
-        }
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"ytsearch{want}:{q}", download=False)
-            entries = info.get("entries", [])
-            results = [map_video_entry(e) for e in entries if is_video_entry(e)]
-            return {"results": results, "query": q, "has_more": len(results) >= per_page}
+
+        def _estrai():
+            opts = {
+                **ydl_opts_base(),
+                "playlist_items": f"{(page - 1) * per_page + 1}-{want}",
+            }
+            with crea_ydl(opts) as ydl:
+                return ydl.extract_info(f"ytsearch{want}:{q}", download=False)
+
+        # in_executor: l'estrazione è bloccante e dentro un `async def`
+        # fermerebbe tutto il server, video in riproduzione compreso.
+        # La conversione delle voci resta quella di auth.map_video_entry, che
+        # è la stessa usata da feed, correlati e canali.
+        info = await in_executor(_estrai)
+        entries = (info or {}).get("entries") or []
+        results = [map_video_entry(e) for e in entries if is_video_entry(e)]
+        return {"results": results, "query": q, "has_more": len(results) >= per_page}
     except Exception as ex:
         raise HTTPException(500, str(ex))
 
@@ -384,9 +424,7 @@ def _subtitle_tracks(info: dict) -> dict:
 async def list_subtitles(video_id: str):
     """Lingue sottotitoli disponibili per il video (quasi sempre solo automatici — i sottotitoli caricati a mano sono rari)."""
     try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        info = await in_executor(_estrai_video, video_id) or {}
         merged = _subtitle_tracks(info)
         # YouTube traduce automaticamente in ~150 lingue: senza filtro il menu
         # sarebbe illeggibile. Teniamo solo le lingue comuni + quelle caricate
@@ -408,9 +446,7 @@ async def list_subtitles(video_id: str):
 async def get_subtitle_vtt(video_id: str, lang: str):
     """Proxy del sottotitolo WebVTT — scaricato qui invece che puntare il <track> direttamente a YouTube per evitare problemi di CORS."""
     try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        info = await in_executor(_estrai_video, video_id) or {}
         merged = _subtitle_tracks(info)
         entry = merged.get(lang)
         if not entry:
@@ -434,22 +470,23 @@ async def watch(video_id: str):
     formati se li risolve da sé e li tiene in cache per il seek.
     """
     try:
-        opts = {**ydl_opts_base(), "extract_flat": False}
-        with crea_ydl(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            return {
-                "id": info.get("id"),
-                "title": info.get("title"),
-                "description": info.get("description", "")[:500],
-                "channel": info.get("uploader"),
-                "channel_id": info.get("channel_id"),
-                "duration": info.get("duration"),
-                "views": info.get("view_count"),
-                "likes": info.get("like_count"),
-                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
-                "published": info.get("upload_date"),
-                "tags": info.get("tags", [])[:10],
-            }
+        # Solo metadati, quindi nessun selettore di formato: risolverli
+        # costerebbe tempo per un URL che questa risposta non contiene più.
+        # in_executor perché l'estrazione è bloccante.
+        info = await in_executor(_estrai_video, video_id) or {}
+        return {
+            "id": info.get("id"),
+            "title": info.get("title"),
+            "description": (info.get("description") or "")[:500],
+            "channel": info.get("uploader"),
+            "channel_id": info.get("channel_id"),
+            "duration": info.get("duration"),
+            "views": info.get("view_count"),
+            "likes": info.get("like_count"),
+            "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
+            "published": info.get("upload_date"),
+            "tags": info.get("tags", [])[:10],
+        }
     except HTTPException:
         raise
     except Exception as ex:
@@ -1076,7 +1113,9 @@ async def cookies_browsers():
     YouTube attiva — per proporre l'importazione automatica dei cookie senza
     passare da estensioni/export manuale.
     """
-    browsers = auth_manager.detect_browsers_with_youtube_login()
+    # Legge i database dei cookie di 7 browser: lento e sincrono, quindi in
+    # executor come ogni altra chiamata bloccante.
+    browsers = await in_executor(auth_manager.detect_browsers_with_youtube_login)
     return {"browsers": browsers}
 
 
@@ -1084,7 +1123,7 @@ async def cookies_browsers():
 async def import_cookies(browser: str = Query(...)):
     """Importa i cookie YouTube/Google direttamente dal database del browser indicato."""
     try:
-        result = auth_manager.import_cookies_from_browser(browser)
+        result = await in_executor(auth_manager.import_cookies_from_browser, browser)
     except Exception as ex:
         raise HTTPException(500, str(ex))
     if not result["valid"]:
