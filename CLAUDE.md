@@ -75,6 +75,18 @@ Senza nessuna delle due, ricerca, correlati e riproduzione funzionano lo stesso.
 
 Le due azioni che *scrivono* su YouTube — pubblicare un commento e iscriversi/disiscriversi da un canale — richiedono lo scope `youtube.force-ssl` (`WRITE_SCOPE` in `auth.py`, esposto come `can_write()` e come `can_comment`/`can_subscribe` in `/api/auth/status`). Chi si era collegato quando l'app leggeva soltanto ha un refresh token senza quello scope: continua a leggere le iscrizioni ma riceve 403 `insufficientPermissions` finché non rifà il login. Lo stato "sono iscritto a questo canale?" (`/api/subscriptions/status/<id>`) si legge invece dalla copia locale `data/subscriptions.json`, non da YouTube: iscriversi e disiscriversi costano 50 unità di quota ciascuna, aprire una pagina canale non deve costarne nessuna.
 
+### Chi può scrivere: nessun login, ma l'origine conta
+
+Il server ascolta su `0.0.0.0` e non ha autenticazione — è voluto, così lo si apre da telefono e TV senza credenziali. La conseguenza da non sottovalutare è che le API sono raggiungibili anche dal browser di casa mentre sta su un sito qualunque: con `allow_origins=["*"]` quella pagina poteva chiamare `DELETE /api/cookies`, disiscriverti da un canale o pubblicare un commento a nome tuo, e tu non ne vedevi niente.
+
+Da qui la guardia `blocca_scritture_esterne` in `main.py`: **`POST`/`PUT`/`PATCH`/`DELETE` passano solo se l'`Origin` è locale** (same-origin rispetto all'header `Host`, oppure localhost / `10.x` / `192.168.x` / `172.16-31.x` / `*.local`), altrimenti 403. Tre cose che ne discendono:
+
+- Le **GET non sono filtrate**, di proposito: il Chromecast scarica il video da sé e non manda `Origin`, quindi `/api/mux` deve restargli aperto. Una GET da un sito ostile parte ma non riceve header CORS, quindi la risposta non è leggibile.
+- **Origin assente = permesso.** Non è una svista: senza browser (curl, l'app nativa) non c'è nessuna sessione da abusare, e la pagina ostile da cui ci si difende è per forza dentro un browser, che l'`Origin` sulle scritture lo manda sempre.
+- Un endpoint di scrittura nuovo è protetto **senza fare niente**: la guardia è un middleware, non un decoratore da ricordarsi. Chi invece raggiunge il server da un indirizzo non privato (Tailscale `100.64.x`, un dominio dietro reverse proxy) e *non* in same-origin deve elencarlo in `YTPROXY_ALLOWED_ORIGINS` (separati da virgola), altrimenti le scritture gli tornano 403 mentre la lettura funziona — sintomo che sembra un bug del frontend.
+
+I file con dentro credenziali (`data/oauth_token.json`, `oauth_setup.json`, `cookies.txt`) si scrivono con `scrivi_privato()` di `auth.py`, che li lascia a `0600`: `write_text()` su un file già esistente non ne cambia i permessi, quindi il chmod va rifatto ad ogni scrittura, e `proteggi_file_riservati()` all'avvio sistema quelli creati dalle versioni precedenti. Per `cookies.txt` il punto di passaggio è dentro `crea_ydl()`, perché a riscriverlo è yt-dlp ad ogni estrazione, non solo l'upload.
+
 ### Fallback dei feed (catena voluta, non accidentale)
 
 - Home: **solo** `/api/feed/home` (cookie, `LazyFeed`). Nessun fallback: se il feed è vuoto l'endpoint restituisce `reason` (`no-cookies` / `not-logged-in` / `feed-vuoto`) e la home lo spiega, invece di mostrare dei trending fingendo che sia la tua home. YouTube però chiude le continuazioni della home presto (misurato: ~200-350 video, non il tetto `FEED_MAX`), quindi quando il generatore finisce il feed viene **riaperto** daccapo: una nuova estrazione dà una lista in buona parte diversa (~100 video mai visti su ~280) e gli id già serviti vengono saltati. Vedi `LazyFeed._rigenera`, `FEED_REFILL_MAX`; vale solo per la home, perché riaprire un canale o un Mix ridarebbe la stessa lista.
