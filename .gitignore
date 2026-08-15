@@ -35,7 +35,11 @@ frontend/android/*.apk
 # ── Claude Code — configurazione locale e worktree ─────────────────────────
 # I worktree sotto .claude/worktrees/ sono checkout completi del repo stesso:
 # versionarli significherebbe infilare il repo dentro sé stesso.
-.claude/
+# Eccezione: .claude/agents/ sono i subagent del progetto — conoscenza condivisa
+# come CLAUDE.md, quindi versionata. La negazione richiede `.claude/*` al posto
+# di `.claude/`: git non può re-includere un file se la cartella padre è esclusa.
+.claude/*
+!.claude/agents/
 
 # ── Varie ────────────────────────────────────────────────────────────────────
 .ytdlp_last_update

@@ -38,7 +38,19 @@ docker compose logs -f                 # output del server (al posto del termina
 docker compose down                    # ferma; ./data resta sul disco
 ```
 
-Non ci sono test né linter configurati. Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s localhost:8090/api/watch/<id>`.
+Non ci sono test né linter configurati. Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s localhost:8090/api/watch/<id>`. Al posto della suite di test c'è **`COLLAUDO.md`**: l'elenco di tutte le feature con, per ognuna, la condizione osservabile che deve valere perché si possa dire che funziona. Il progetto non si dichiara collaudato finché quelle voci non hanno tutte un esito (OK / KO / non verificabile), e chi aggiunge o cambia una feature aggiorna il file nello stesso passaggio.
+
+## Subagent
+
+`.claude/agents/` è versionato (unica eccezione dentro `.claude/`, vedi `.gitignore`): sono i subagent del progetto, conoscenza condivisa come questo file.
+
+| Agente | Quando |
+|---|---|
+| `architetto` | pianificare una modifica che tocca più livelli o rischia una delle trappole qui sotto; restituisce un piano, non codice |
+| `backend-python` | implementare sul server (`server/*.py`) |
+| `frontend-react` | implementare sulla UI (`frontend/src`, Electron, Capacitor) |
+| `revisore` | rilettura prima del commit, sola lettura |
+| `collaudo-api` | provare che funzioni: prima il problema segnalato, poi tutto `COLLAUDO.md` |
 
 `frontend/dist/` **è versionato** (il server lo serve così com'è): dopo aver toccato il frontend serve `npm run build` e i file buildati vanno committati. `frontend/node_modules/` e i file personali in `data/` sono invece ignorati.
 
