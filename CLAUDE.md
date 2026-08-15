@@ -31,6 +31,11 @@ npm run build                          # electron-builder → dist-electron/
 ./build_apk.sh --install               # e lo installa via adb sul telefono collegato
 # a mano:
 cd frontend && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug
+
+# Docker (alternativa a start_server.sh — vedi sezione "Docker" più sotto)
+docker compose up -d --build           # build immagine + avvio, dati persistiti in ./data
+docker compose logs -f                 # output del server (al posto del terminale aperto)
+docker compose down                    # ferma; ./data resta sul disco
 ```
 
 Non ci sono test né linter configurati. Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s localhost:8090/api/watch/<id>`.
@@ -111,6 +116,16 @@ Seconda trappola dell'APK, sullo schermo intero: `BridgeWebChromeClient` di Capa
 
 Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non in Electron, non in Chromium open-source — e l'hook espone il motivo dell'indisponibilità per poterlo spiegare all'utente. L'unico comando è `CastButton` nella pagina video: sempre visibile, spiega il motivo invece di sparire quando il cast non è disponibile.
 
+## Docker
+
+`Dockerfile` impacchetta server Python + `frontend/dist` (già buildato e versionato: l'immagine non installa Node e non lo builda). Nessuna modifica al codice applicativo — `DATA_DIR` (`auth.py`) e `SERVER_PORT` (`main.py`) leggono già `YTPROXY_DATA`/`YTPROXY_PORT` dall'ambiente, il Dockerfile si limita a impostarle.
+
+- `docker-entrypoint.sh` fa all'avvio del container quello che `start_server.sh` faceva una volta al giorno sull'host: `pip install --upgrade yt-dlp`, non bloccante (continua con la versione dell'immagine se manca la rete). Disattivabile con `YTPROXY_SKIP_YTDLP_UPDATE=1`.
+- `docker-compose.yml` monta `./data:/data` — bind mount, non volume nominato, così cookie/token OAuth/iscrizioni sono file veri sul disco dell'host, ispezionabili e sopravvivono a `docker compose down` e ai rebuild.
+- Rete: bridge + `-p 8090:8090` (non serve `network_mode: host`). L'unico effetto collaterale è che `/api/lan-address` — usato dal Cast solo come fallback quando il browser è aperto su `localhost` — risponde con l'IP interno del container (`172.17.x.x`) invece di quello LAN. Non un problema quando il server gira su una macchina headless tipo il Raspberry Pi ([[server-su-raspberry-pi]]): lì non si apre mai `localhost:8090` in un browser, telefono e TV colpiscono l'IP LAN direttamente e `isCastableOrigin()` prende quella strada senza mai chiamare `/api/lan-address`. Se invece si apre il Cast da un browser sulla stessa macchina del server (desktop), serve `network_mode: host` in compose.
+- Chi tocca il frontend continua a fare `npm run build` + commit di `dist/` come da regola sopra; in più, con Docker, va rifatto anche `docker compose up -d --build` per far entrare il nuovo `dist/` nell'immagine (prima bastava che uvicorn --reload rivedesse i file su disco).
+- `.dockerignore` esclude sempre `data/`: anche se il `Dockerfile` non fa mai `COPY . .`, un futuro cambiamento che lo introducesse non finirebbe comunque per infornare cookie/token OAuth in un layer dell'immagine.
+
 ## Nota sulla porta 8090
 
-È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`. Su Google Cloud Console invece non va registrata: col device flow non c'è nessun redirect URI.
+È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`, `Dockerfile` (`EXPOSE`) e `docker-compose.yml` (`ports`). Su Google Cloud Console invece non va registrata: col device flow non c'è nessun redirect URI.

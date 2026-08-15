@@ -79,6 +79,22 @@ cd server
 python -m uvicorn main:app --host 0.0.0.0 --port 8090
 ```
 
+### Docker
+Alternativa a `start_server.sh`: non serve installare Python/Node/ffmpeg
+sull'host, solo Docker. yt-dlp si aggiorna da solo ad ogni riavvio del
+container.
+```bash
+git clone <repo> ytproxy && cd ytproxy
+docker compose up -d --build
+```
+I dati (cookie, login, iscrizioni, cronologia) restano in `./data` sul disco
+dell'host, non dentro il container: sopravvivono a `docker compose down` e ai
+rebuild dell'immagine. Per aggiornare dopo un `git pull`: `docker compose up -d --build`.
+
+Per saltare l'aggiornamento di yt-dlp ad ogni riavvio del container (es. rete
+lenta o assente all'avvio): `YTPROXY_SKIP_YTDLP_UPDATE=1` come `environment:`
+nel `docker-compose.yml`.
+
 ---
 
 ## Accesso da telefono / Smart TV
@@ -283,6 +299,9 @@ ytproxy/
 ├── data/                 # cookie, token, cache, cronologia (non versionati)
 ├── start_server.sh       # Avvio Linux/Mac
 ├── start_server.bat      # Avvio Windows
+├── Dockerfile            # Immagine del server (frontend copiato, non buildato)
+├── docker-compose.yml    # Avvio con `docker compose up -d --build`
+├── docker-entrypoint.sh  # Aggiorna yt-dlp poi avvia uvicorn
 └── README.md
 ```
 

@@ -1,0 +1,21 @@
+# Dati personali — mai in un layer dell'immagine (vedi Dockerfile: il volume
+# li monta a runtime, il Dockerfile non li copia mai, ma escluderli anche qui
+# blinda un futuro `COPY . .` fatto senza pensarci).
+data/
+
+.git/
+.claude/
+
+frontend/node_modules/
+frontend/android/
+frontend/dist/.vite/
+
+server/__pycache__/
+**/__pycache__/
+*.pyc
+
+*.apk
+
+# Cartella residua da un vecchio comando con le graffe non espanse — non
+# c'entra nulla col progetto, ma non deve finire nel contesto della build.
+{server,frontend*

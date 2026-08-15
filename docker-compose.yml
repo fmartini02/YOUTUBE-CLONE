@@ -1,0 +1,20 @@
+services:
+  ytproxy:
+    build: .
+    container_name: ytproxy
+    ports:
+      - "8090:8090"
+    volumes:
+      # Cookie, token OAuth, iscrizioni, cronologia: tutto lo stato del
+      # server sta qui (nessun database, vedi CLAUDE.md). Bind mount così i
+      # dati sopravvivono a `docker compose down` / rebuild dell'immagine.
+      - ./data:/data
+    restart: unless-stopped
+    # Se il server è raggiungibile solo da un indirizzo che non rientra in
+    # localhost / 10.x / 192.168.x / 172.16-31.x (es. Tailscale 100.64.x, un
+    # dominio dietro reverse proxy), elenca qui gli host aggiuntivi separati
+    # da virgola — altrimenti solo le richieste che scrivono (commenti,
+    # iscrizioni, upload cookie) tornano 403 mentre la lettura funziona lo
+    # stesso, sintomo che sembra un bug del frontend (vedi CLAUDE.md).
+    # environment:
+    #   - YTPROXY_ALLOWED_ORIGINS=https://ytproxy.tuodominio.it
