@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse, Response
+from fastapi.responses import FileResponse, StreamingResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
@@ -536,8 +536,13 @@ async def watch(video_id: str):
     try:
         # Solo metadati, quindi nessun selettore di formato: risolverli
         # costerebbe tempo per un URL che questa risposta non contiene più.
-        # in_executor perché l'estrazione è bloccante.
-        info = await in_executor(_estrai_video, video_id) or {}
+        # in_executor perché l'estrazione è bloccante. yt-dlp è configurato con
+        # ignoreerrors, quindi un video non estraibile (rimosso, privato...)
+        # dà `None` invece di sollevare: senza questo controllo la risposta
+        # sarebbe 200 con tutti i campi null invece di un errore.
+        info = await in_executor(_estrai_video, video_id)
+        if not info:
+            raise HTTPException(404, "Video non trovato o non disponibile")
         return {
             "id": info.get("id"),
             "title": info.get("title"),
@@ -823,11 +828,16 @@ async def suggestions(q: str = Query(...)):
                 timeout=5,
             )
             text = r.text
-            # parse JSONP: window.google.ac.h(["q",[...]])
-            match = re.search(r'\["[^"]*",(\[.*?\])\]', text)
-            if match:
-                items = json.loads(match.group(1))
-                return {"suggestions": [i[0] if isinstance(i, list) else i for i in items[:8]]}
+            # JSONP: window.google.ac.h(["q",[[...],[...],...]]) — il payload è
+            # un unico array, basta togliere il wrapper della callback e
+            # parsare tutto insieme (un regex sull'array interno si ferma alla
+            # prima "]" che trova, che è quella di un array innestato tipo
+            # [512,433] dentro ogni suggerimento, non quella di chiusura).
+            inizio = text.index("(")
+            fine = text.rindex(")")
+            data = json.loads(text[inizio + 1:fine])
+            items = data[1]
+            return {"suggestions": [i[0] if isinstance(i, list) else i for i in items[:8]]}
     except Exception:
         pass
     return {"suggestions": []}
