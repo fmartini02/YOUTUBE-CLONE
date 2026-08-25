@@ -13,21 +13,24 @@ norm_check.py — verifica che il codice Python del server rispetti le regole
   - non più di 5 argomenti per funzione (self escluso)
 
 Uso:
-    python3 scripts/norm_check.py [percorsi...]   # default: server/
+    python3 scripts/norm_check.py [percorsi...]   # default: server/ frontend/src/
 Esce con codice 1 se trova violazioni, elencandole; 0 se tutto conforme.
 
-Non copre il frontend (JS/JSX): lì la conformità va controllata a mano, la
-sintassi con `npm run build`.
+Il lato Python usa l'AST vero (preciso). Il lato JS/JSX (norm_check_js.py)
+usa un tokenizer euristico — niente parser JS a disposizione: buono come
+rete, non sostituisce la lettura. Vedi il docstring di quel modulo.
 """
 import ast
 import sys
 from pathlib import Path
 
+from norm_check_js import controlla_file_js
+
 MAX_FUNZIONI_PER_FILE = 5
 MAX_RIGHE_PER_FUNZIONE = 25
 MAX_ARGOMENTI = 5
 
-ESCLUSI = {"frontend", "node_modules", "android", "dist", "__pycache__"}
+ESCLUSI = {"node_modules", "android", "dist", "__pycache__"}
 
 
 def _righe_di_codice(source_lines: list, node) -> int:
@@ -104,23 +107,33 @@ def _da_saltare(path: Path) -> bool:
 
 
 def main():
-    target_args = sys.argv[1:] or ["server"]
+    target_args = sys.argv[1:] or ["server", "frontend/src"]
     root = Path(__file__).parent.parent
-    file_python = []
+    file_python, file_js = [], []
     for arg in target_args:
         p = root / arg
-        file_python.extend(f for f in (p.rglob("*.py") if p.is_dir() else [p]) if not _da_saltare(f))
+        candidati = p.rglob("*") if p.is_dir() else [p]
+        for f in candidati:
+            if _da_saltare(f):
+                continue
+            if f.suffix == ".py":
+                file_python.append(f)
+            elif f.suffix in (".js", ".jsx"):
+                file_js.append(f)
 
     tutti_i_problemi = []
     for f in sorted(file_python):
         tutti_i_problemi.extend(controlla_file(f))
+    for f in sorted(file_js):
+        tutti_i_problemi.extend(controlla_file_js(f))
 
     if tutti_i_problemi:
         print(f"{len(tutti_i_problemi)} violazioni:\n")
         for p in tutti_i_problemi:
             print(f"  {p}")
         sys.exit(1)
-    print(f"OK — {len(file_python)} file Python conformi.")
+    print(f"OK — {len(file_python)} file Python + {len(file_js)} file JS/JSX conformi "
+          f"(JS: controllo euristico, vedi norm_check_js.py).")
 
 
 if __name__ == "__main__":

@@ -1,48 +1,48 @@
-export default function Sidebar({ open, navigate, currentPage, authStatus }) {
-  // Solo voci che portano da qualche parte: le decorative (Download, Video
-  // piaciuti, Esplora) sono state tolte perché non facevano niente. Cronologia
-  // sta qui e non in una sezione "Tu" a parte proprio per la stessa ragione —
-  // è una pagina vera, quindi merita la barra stretta come le altre due.
-  const mainItems = [
+function SidebarItem({ icon, label, active, onClick, iconExtra, labelExtra }) {
+  return (
+    <div className={`sidebar-item${active ? " active" : ""}`} onClick={onClick}>
+      <span className="icon material-symbols-outlined" style={iconExtra ? { fontSize: 20, position: "relative" } : { fontSize: 20 }}>
+        {icon}
+        {iconExtra}
+      </span>
+      <span className="sidebar-label">
+        {label}
+        {labelExtra}
+      </span>
+    </div>
+  );
+}
+
+// Solo voci che portano da qualche parte: le decorative (Download, Video
+// piaciuti, Esplora) sono state tolte perché non facevano niente. Cronologia
+// sta qui e non in una sezione "Tu" a parte proprio per la stessa ragione —
+// è una pagina vera, quindi merita la barra stretta come le altre due.
+function mainSidebarItems(subCount, open) {
+  return [
     { icon: "home", label: "Home", page: "home" },
-    { icon: "subscriptions", label: "Iscrizioni", page: "subscriptions" },
+    { icon: "subscriptions", label: "Iscrizioni", page: "subscriptions",
+      labelExtra: subCount > 0 && open && <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text3)" }}>{subCount}</span> },
     { icon: "history", label: "Cronologia", page: "history" },
   ];
-  const subCount = authStatus?.subscription_count || 0;
+}
+
+export default function Sidebar({ open, navigate, currentPage, authStatus }) {
+  const warning = authStatus?.cookie?.warning;
+  const items = mainSidebarItems(authStatus?.subscription_count || 0, open);
 
   return (
     <nav className={`sidebar${open ? "" : " collapsed"}`}>
-      {mainItems.map(item => (
-        <div
-          key={item.page}
-          className={`sidebar-item${currentPage === item.page ? " active" : ""}`}
-          onClick={() => navigate(item.page)}
-        >
-          <span className="icon material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
-          <span className="sidebar-label">
-            {item.label}
-            {item.page === "subscriptions" && subCount > 0 && open && (
-              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text3)" }}>{subCount}</span>
-            )}
-          </span>
-        </div>
+      {items.map(item => (
+        <SidebarItem key={item.page} icon={item.icon} label={item.label} labelExtra={item.labelExtra}
+          active={currentPage === item.page} onClick={() => navigate(item.page)} />
       ))}
-
-      {/* Settings at the bottom */}
       <div className="sidebar-divider" style={{ marginTop: "auto" }} />
-      <div
-        className={`sidebar-item${currentPage === "settings" ? " active" : ""}`}
+      <SidebarItem
+        icon="settings" label="Impostazioni" active={currentPage === "settings"}
         onClick={() => navigate("settings")}
-      >
-        <span className="icon material-symbols-outlined" style={{ fontSize: 20, position: "relative" }}>
-          settings
-          {authStatus?.cookie?.warning && <span style={{ fontSize: 8, color: "#ffc800", marginLeft: 2 }}>●</span>}
-        </span>
-        <span className="sidebar-label">
-          Impostazioni
-          {authStatus?.cookie?.warning && <span style={{ marginLeft: 6, fontSize: 10, color: "#ffc800" }}>!</span>}
-        </span>
-      </div>
+        iconExtra={warning && <span style={{ fontSize: 8, color: "#ffc800", marginLeft: 2 }}>●</span>}
+        labelExtra={warning && <span style={{ marginLeft: 6, fontSize: 10, color: "#ffc800" }}>!</span>}
+      />
     </nav>
   );
 }
