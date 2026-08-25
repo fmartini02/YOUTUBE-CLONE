@@ -1,0 +1,48 @@
+import VideoPlayer from "../../components/VideoPlayer";
+import CastingScreen from "./CastingScreen";
+
+function PlayerControlsBar({ isCasting, cast }) {
+  return (
+    <div className="player-controls">
+      <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: "auto" }}>
+        {isCasting ? `📺 ${cast.deviceName}` : "🟢 Streaming diretto"}
+      </span>
+    </div>
+  );
+}
+
+/** Il player vero, o la schermata di stato quando il video sta girando sulla TV. */
+function PlayerOrCasting({ isCasting, cast, info, player }) {
+  if (isCasting) return <CastingScreen cast={cast} thumbnail={info?.thumbnail} />;
+  return (
+    <VideoPlayer
+      videoId={player.videoId} quality={player.quality} onQualityChange={player.cambiaQualita} duration={info?.duration}
+      subtitleLangs={player.subtitleLangs} subtitleLang={player.subtitleLang} onSubtitleLangChange={player.setSubtitleLang}
+      subtitleSize={player.subtitleSize} onSubtitleSizeChange={player.setSubtitleSize}
+      theater={player.theater} onToggleTheater={player.toggleTheater}
+      onError={() => player.addToast("Errore stream — ricarica la pagina")} onNotice={player.addToast} autoplay={player.autoplay}
+    />
+  );
+}
+
+/**
+ * Player / stato del cast + la riga sotto che dice come sta girando il video.
+ * Il player non aspetta i metadati: l'URL del flusso si costruisce subito da
+ * videoId+quality. La durata arriva dopo, con /api/watch, e serve solo alla
+ * barra di avanzamento.
+ */
+export default function VideoMainPlayer({
+  isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang,
+  subtitleLangs, subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay,
+}) {
+  const player = {
+    videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs,
+    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay,
+  };
+  return (
+    <>
+      <PlayerOrCasting isCasting={isCasting} cast={cast} info={info} player={player} />
+      <PlayerControlsBar isCasting={isCasting} cast={cast} />
+    </>
+  );
+}
