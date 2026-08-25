@@ -11,7 +11,7 @@ YTProxy: server locale (FastAPI + yt-dlp) che serve un clone dell'UI di YouTube 
 ```bash
 # Avvio completo (installa dipendenze di sistema/Python, aggiorna yt-dlp una volta al giorno,
 # builda il frontend se manca dist/, poi uvicorn su 0.0.0.0:8090 --reload)
-./start_server.sh                      # start_server.bat su Windows
+./scripts/start_server.sh              # scripts/start_server.bat su Windows
 
 # Solo server (dipendenze già presenti)
 cd server && python3 -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
@@ -27,15 +27,17 @@ npm install && npm run build:frontend && npm start
 npm run build                          # electron-builder → dist-electron/
 
 # APK Android (Capacitor)
-./build_apk.sh                         # tutta la catena, APK copiato in ./YTProxy.apk
-./build_apk.sh --install               # e lo installa via adb sul telefono collegato
+./scripts/build_apk.sh                 # tutta la catena, APK copiato in ./dist-android/YTProxy.apk
+./scripts/build_apk.sh --install       # e lo installa via adb sul telefono collegato
 # a mano:
 cd frontend && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug
 
-# Docker (alternativa a start_server.sh — vedi sezione "Docker" più sotto)
-docker compose up -d --build           # build immagine + avvio, dati persistiti in ./data
-docker compose logs -f                 # output del server (al posto del terminale aperto)
-docker compose down                    # ferma; ./data resta sul disco
+# Docker (alternativa a scripts/start_server.sh — vedi sezione "Docker" più sotto; usa `make` o -f)
+make up                                # build immagine + avvio, dati persistiti in ./data
+make logs                              # output del server (al posto del terminale aperto)
+make down                              # ferma; ./data resta sul disco
+# equivalenti senza make:
+docker compose -f docker/docker-compose.yml up -d --build
 ```
 
 Non ci sono test né linter configurati. Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s localhost:8090/api/watch/<id>`. Al posto della suite di test c'è **`COLLAUDO.md`**: l'elenco di tutte le feature con, per ognuna, la condizione osservabile che deve valere perché si possa dire che funziona. Il progetto non si dichiara collaudato finché quelle voci non hanno tutte un esito (OK / KO / non verificabile), e chi aggiunge o cambia una feature aggiorna il file nello stesso passaggio.
@@ -130,14 +132,16 @@ Il Cast (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non
 
 ## Docker
 
+I file Docker stanno in `docker/` (`Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh`); si lanciano dalla radice del repo con `make` (target in `Makefile`, wrapper su `docker compose -f docker/docker-compose.yml`) oppure passando `-f docker/docker-compose.yml` a mano. Il contesto di build resta comunque la radice del repo (`context: ..` in `docker-compose.yml`), non `docker/`: `Dockerfile` fa `COPY server/` e `COPY frontend/dist/` relativi a quella radice. Il nome di progetto è fissato a `ytproxy` (`name:` in `docker-compose.yml`) apposta, perché altrimenti Compose lo deriverebbe dalla cartella del file (`docker`, non più il nome del repo) e romperebbe un container già avviato con il vecchio layout.
+
 `Dockerfile` impacchetta server Python + `frontend/dist` (già buildato e versionato: l'immagine non installa Node e non lo builda). Nessuna modifica al codice applicativo — `DATA_DIR` (`auth.py`) e `SERVER_PORT` (`main.py`) leggono già `YTPROXY_DATA`/`YTPROXY_PORT` dall'ambiente, il Dockerfile si limita a impostarle.
 
-- `docker-entrypoint.sh` fa all'avvio del container quello che `start_server.sh` faceva una volta al giorno sull'host: `pip install --upgrade yt-dlp`, non bloccante (continua con la versione dell'immagine se manca la rete). Disattivabile con `YTPROXY_SKIP_YTDLP_UPDATE=1`.
-- `docker-compose.yml` monta `./data:/data` — bind mount, non volume nominato, così cookie/token OAuth/iscrizioni sono file veri sul disco dell'host, ispezionabili e sopravvivono a `docker compose down` e ai rebuild.
+- `docker-entrypoint.sh` fa all'avvio del container quello che `scripts/start_server.sh` faceva una volta al giorno sull'host: `pip install --upgrade yt-dlp`, non bloccante (continua con la versione dell'immagine se manca la rete). Disattivabile con `YTPROXY_SKIP_YTDLP_UPDATE=1`.
+- `docker-compose.yml` monta `../data:/data` (percorso relativo alla radice del repo, non al file stesso — vedi sopra) — bind mount, non volume nominato, così cookie/token OAuth/iscrizioni sono file veri sul disco dell'host, ispezionabili e sopravvivono a `docker compose down` e ai rebuild.
 - Rete: bridge + `-p 8090:8090` (non serve `network_mode: host`). L'unico effetto collaterale è che `/api/lan-address` — usato dal Cast solo come fallback quando il browser è aperto su `localhost` — risponde con l'IP interno del container (`172.17.x.x`) invece di quello LAN. Non un problema quando il server gira su una macchina headless tipo il Raspberry Pi ([[server-su-raspberry-pi]]): lì non si apre mai `localhost:8090` in un browser, telefono e TV colpiscono l'IP LAN direttamente e `isCastableOrigin()` prende quella strada senza mai chiamare `/api/lan-address`. Se invece si apre il Cast da un browser sulla stessa macchina del server (desktop), serve `network_mode: host` in compose.
-- Chi tocca il frontend continua a fare `npm run build` + commit di `dist/` come da regola sopra; in più, con Docker, va rifatto anche `docker compose up -d --build` per far entrare il nuovo `dist/` nell'immagine (prima bastava che uvicorn --reload rivedesse i file su disco).
-- `.dockerignore` esclude sempre `data/`: anche se il `Dockerfile` non fa mai `COPY . .`, un futuro cambiamento che lo introducesse non finirebbe comunque per infornare cookie/token OAuth in un layer dell'immagine.
+- Chi tocca il frontend continua a fare `npm run build` + commit di `dist/` come da regola sopra; in più, con Docker, va rifatto anche `make build` (o `make up`) per far entrare il nuovo `dist/` nell'immagine (prima bastava che uvicorn --reload rivedesse i file su disco).
+- `.dockerignore` esclude sempre `data/`: anche se il `Dockerfile` non fa mai `COPY . .`, un futuro cambiamento che lo introducesse non finirebbe comunque per infornare cookie/token OAuth in un layer dell'immagine. Resta nella radice del repo (non in `docker/`) perché Docker lo cerca sempre nella cartella di contesto, non accanto al Dockerfile.
 
 ## Nota sulla porta 8090
 
-È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`, `Dockerfile` (`EXPOSE`) e `docker-compose.yml` (`ports`). Su Google Cloud Console invece non va registrata: col device flow non c'è nessun redirect URI.
+È ripetuta in più punti che devono restare allineati: `SERVER_PORT` in `main.py` (override con `YTPROXY_PORT`), il proxy in `frontend/vite.config.js`, `electron/main.js`, `scripts/start_server.sh`/`.bat`, `docker/Dockerfile` (`EXPOSE`) e `docker/docker-compose.yml` (`ports`). Su Google Cloud Console invece non va registrata: col device flow non c'è nessun redirect URI.

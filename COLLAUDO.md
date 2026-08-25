@@ -376,7 +376,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `npm run build`: "✓ built in 962ms", stessi nomi di file già in `frontend/dist/`
       (`index-BfF9oCZf.css`, `index-CYJ7KgjC.js`). `git status --porcelain -- frontend/dist` vuoto
       dopo la build: l'output è identico byte per byte a quanto committato, `dist/` è allineato.
-- [ ] **`./start_server.sh`** — installa le dipendenze, aggiorna yt-dlp e arriva a servire su :8090.
+- [ ] **`./scripts/start_server.sh`** — installa le dipendenze, aggiorna yt-dlp e arriva a servire su :8090.
       **non verificabile** — non eseguito: lo script libera forzatamente la porta 8090 uccidendo
       chi la occupa (`fuser`/`lsof`/`ss` + kill, righe 215-227), e su questa rete il server reale
       gira sul Raspberry Pi (192.168.1.253:8090) — eseguirlo da qui non lo toccherebbe direttamente,
@@ -387,7 +387,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 - [ ] **Electron** — `npm start` apre la finestra, avvia da sé il server Python e l'app funziona.
       **non verificabile** — serve un ambiente desktop con display, assente in questo ambiente
       headless.
-- [ ] **APK Android** — `./build_apk.sh` produce `YTProxy.apk`; installato, l'onboarding accetta
+- [ ] **APK Android** — `./scripts/build_apk.sh` produce `dist-android/YTProxy.apk`; installato, l'onboarding accetta
       l'IP del server e l'app carica i contenuti. Funzionante quando `capacitor.config.json` tiene
       `server.androidScheme: "http"`: con `https` le chiamate al server sono contenuto misto e la
       WebView le blocca in silenzio (sintomo: dal browser del telefono il server si apre, dall'app no).
@@ -395,22 +395,25 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `"server": {"androidScheme": "http"}`, corretto. **non verificabile** (build e installazione
       vere) — manca la toolchain Android (`which java` non trova nulla) e un dispositivo/emulatore
       su cui installare l'APK.
-- [x] **Docker** — `docker compose up -d --build` avvia il server, `./data` sull'host resta popolato
-      e sopravvive a `docker compose down`.
-      **OK** — `docker compose build` (immagine costruita, pip installa le dipendenze da
-      `server/requirements.txt`, nessun errore) poi `docker compose up -d` (nel worktree, porta 8090
-      libera qui perché il server reale è sul Raspberry Pi): `curl http://127.0.0.1:8090/api/health`
-      → `{"status":"ok"}`; `PATCH /api/prefs` di prova ha creato `data/prefs.json` sull'host (bind
-      mount, non volume nominato); dopo `docker compose down` il file è rimasto su disco. Ripulito
-      subito dopo: rimosso `data/prefs.json` di test e l'immagine `collaudo-primo-item-ytproxy` con
-      `docker rmi` — questa era la `data/` del worktree (vuota salvo `.gitkeep`), non quella del
-      checkout principale.
+- [x] **Docker** — `make up` (`docker compose -f docker/docker-compose.yml up -d --build`) avvia il
+      server, `./data` sull'host resta popolato e sopravvive a `docker compose down`.
+      **OK** — riverificato dopo lo spostamento dei file Docker in `docker/`. `docker compose -f
+      docker/docker-compose.yml config` conferma che `build.context` e il volume dati risolvono alla
+      radice del repo (`source: .../data`, non `docker/data`) nonostante compose file e Dockerfile
+      vivano ora in `docker/`. `docker compose -f docker/docker-compose.yml build` (immagine
+      `ytproxy-ytproxy`, `COPY docker/docker-entrypoint.sh` incluso, nessun errore) poi `up -d` (nel
+      worktree, porta 8090 libera qui perché il server reale è sul Raspberry Pi):
+      `curl http://127.0.0.1:8090/api/health` → `{"status":"ok"}`. `down` rimuove container e rete
+      senza toccare `./data` (rimasta con solo `.gitkeep`, cioè la `data/` vuota del worktree — non
+      quella del checkout principale). Ripulita anche l'immagine con `docker rmi` dopo il test.
 - [x] **Porta 8090 allineata** — `main.py`, `frontend/vite.config.js`, `electron/main.js`,
-      `start_server.sh`/`.bat`, `Dockerfile`, `docker-compose.yml` dicono tutti la stessa cosa.
-      **OK** — `grep -n 8090` su tutti e sei i file: `main.py:110` (`SERVER_PORT` default 8090),
-      `vite.config.js:8` (proxy `/api` → `localhost:8090`), `electron/main.js:14` (`PORT` default
-      8090), `start_server.sh`/`.bat` (avvio su 8090 + liberazione porta), `Dockerfile` (`ENV
-      YTPROXY_PORT=8090`, `EXPOSE 8090`), `docker-compose.yml` (`"8090:8090"`) — tutti coerenti.
+      `scripts/start_server.sh`/`.bat`, `docker/Dockerfile`, `docker/docker-compose.yml` dicono tutti
+      la stessa cosa.
+      **OK** — riverificato dopo lo spostamento: `grep -n 8090` su tutti e sei i file ai nuovi percorsi:
+      `server/main.py:110` (`SERVER_PORT` default 8090), `frontend/vite.config.js:8` (proxy `/api` →
+      `localhost:8090`), `electron/main.js:14` (`PORT` default 8090), `scripts/start_server.sh`/`.bat`
+      (avvio su 8090 + liberazione porta), `docker/Dockerfile` (`ENV YTPROXY_PORT=8090`, `EXPOSE 8090`),
+      `docker/docker-compose.yml` (`"8090:8090"`) — tutti coerenti.
 
 ---
 
@@ -451,7 +454,7 @@ _Da aggiornare a ogni passaggio completo: data, commit, esiti (OK / KO / non ver
     (tutte e sette le voci verificabili, Permessi credenziali parziale), §12 (Build frontend, APK
     config statico, Docker, Porta 8090).
   - **non verificabile**: tutte le voci UI/hardware (Pagina Ricerca, l'intero player nella UI, Tema,
-    Pagina Iscrizioni, Cast, Electron, `start_server.sh`, build/installazione APK vera) — serve un
+    Pagina Iscrizioni, Cast, Electron, `scripts/start_server.sh`, build/installazione APK vera) — serve un
     browser reale, un telefono/APK, un Chromecast o l'ambiente desktop, assenti in questo ambiente
     headless; le voci con cookie assente (Home con cookie, Home scroll lungo, Stato cookie completo,
     Caricamento cookie, Cancellazione cookie, permessi di `cookies.txt`); le voci OAuth dove il

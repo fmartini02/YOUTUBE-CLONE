@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0.."
 title YTProxy Server
 echo.
 echo   ^> YTProxy Server

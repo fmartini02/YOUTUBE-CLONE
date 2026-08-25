@@ -1,6 +1,16 @@
+# Nome di progetto fisso: di default Compose lo deriva dal nome della
+# cartella che contiene questo file (qui sarebbe "docker", non "ytproxy").
+# Fissarlo evita che uno spostamento di questo file rompa il container già
+# in esecuzione con quello vecchio ("container name ytproxy is already in use").
+name: ytproxy
+
 services:
   ytproxy:
-    build: .
+    build:
+      # Il contesto resta la radice del repo (questo file vive in docker/,
+      # ma Dockerfile fa COPY di server/ e frontend/dist/ relativi alla radice).
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: ytproxy
     ports:
       - "8090:8090"
@@ -8,7 +18,10 @@ services:
       # Cookie, token OAuth, iscrizioni, cronologia: tutto lo stato del
       # server sta qui (nessun database, vedi CLAUDE.md). Bind mount così i
       # dati sopravvivono a `docker compose down` / rebuild dell'immagine.
-      - ./data:/data
+      # Percorso relativo alla radice del repo, non a questo file (vedi
+      # "../data" più sotto) — la project directory di default di Compose è
+      # la cartella di *questo* file, quindi serve risalire di un livello.
+      - ../data:/data
     restart: unless-stopped
     # Se il server è raggiungibile solo da un indirizzo che non rientra in
     # localhost / 10.x / 192.168.x / 172.16-31.x (es. Tailscale 100.64.x, un

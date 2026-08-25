@@ -32,7 +32,7 @@ export default function ServerSetup({ onDone }) {
     setChecking(false);
 
     if (!ok) {
-      setError("Impossibile raggiungere il server a questo indirizzo. Verifica che il PC sia acceso, il server avviato (start_server.sh), e che il telefono sia sulla stessa rete WiFi.");
+      setError("Impossibile raggiungere il server a questo indirizzo. Verifica che il PC sia acceso, il server avviato (scripts/start_server.sh), e che il telefono sia sulla stessa rete WiFi.");
       return;
     }
     setServerBase(url);
@@ -50,7 +50,7 @@ export default function ServerSetup({ onDone }) {
       <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>YTProxy</h1>
       <p style={{ fontSize: 14, color: "var(--text2, #aaa)", maxWidth: 340, lineHeight: 1.6, margin: 0 }}>
         Questa app si collega al server YTProxy che gira sul tuo PC. Inserisci il suo indirizzo
-        — lo trovi stampato quando avvii <code>start_server.sh</code>, o con <code>hostname -I</code> sul PC.
+        — lo trovi stampato quando avvii <code>scripts/start_server.sh</code>, o con <code>hostname -I</code> sul PC.
       </p>
 
       <input

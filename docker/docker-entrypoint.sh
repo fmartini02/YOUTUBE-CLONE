@@ -1,7 +1,7 @@
 #!/bin/sh
 # Punto d'ingresso del container.
 #
-# start_server.sh aggiornava yt-dlp una volta al giorno prima di avviare —
+# scripts/start_server.sh aggiornava yt-dlp una volta al giorno prima di avviare —
 # qui, non essendoci un processo che resta vivo tra un avvio e l'altro come
 # sull'host, lo si fa ad ogni avvio del container. yt-dlp si rompe spesso
 # dietro ai cambi di YouTube, quindi restare fermi alla versione dell'immagine

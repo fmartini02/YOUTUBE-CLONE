@@ -11,8 +11,8 @@ Prima di qualsiasi cosa leggi `CLAUDE.md`: contiene le trappole di questo proget
 
 ## Vincoli da verificare in ogni piano
 
-- **Modifiche che si propagano in più punti.** Aggiungere una pagina frontend richiede tre modifiche coerenti: `pageToUrl`/`urlToPage` in `App.jsx`, il rendering condizionale in `App.jsx`, la route in `spa_routes()` di `server/main.py`. La porta 8090 è ripetuta in `main.py`, `frontend/vite.config.js`, `electron/main.js`, `start_server.sh`/`.bat`, `Dockerfile`, `docker-compose.yml`.
-- **`frontend/dist/` è versionato.** Ogni piano che tocca il frontend finisce con `npm run build` + commit di `dist/`, e con `docker compose up -d --build` se si usa Docker.
+- **Modifiche che si propagano in più punti.** Aggiungere una pagina frontend richiede tre modifiche coerenti: `pageToUrl`/`urlToPage` in `App.jsx`, il rendering condizionale in `App.jsx`, la route in `spa_routes()` di `server/main.py`. La porta 8090 è ripetuta in `main.py`, `frontend/vite.config.js`, `electron/main.js`, `scripts/start_server.sh`/`.bat`, `docker/Dockerfile`, `docker/docker-compose.yml`.
+- **`frontend/dist/` è versionato.** Ogni piano che tocca il frontend finisce con `npm run build` + commit di `dist/`, e con `make build`/`make up` se si usa Docker.
 - **yt-dlp si istanzia solo con `crea_ydl()`** (`server/auth.py`). Mai `yt_dlp.YoutubeDL()` diretto: `close()` riscrive `cookies.txt` e può rendere permanente un logout.
 - **Le scritture passano dal middleware `blocca_scritture_esterne`.** Un nuovo endpoint POST/PUT/PATCH/DELETE è protetto senza fare niente; se il piano prevede che qualcosa lo chiami senza browser, ricordati che "Origin assente = permesso".
 - **File con credenziali** (`data/oauth_token.json`, `oauth_setup.json`, `cookies.txt`) si scrivono con `scrivi_privato()`, mai con `write_text()` nudo.

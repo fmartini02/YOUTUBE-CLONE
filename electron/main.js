@@ -7,7 +7,7 @@ let mainWindow;
 let serverProcess;
 
 // Deve combaciare con SERVER_PORT in server/main.py, il proxy di
-// frontend/vite.config.js e start_server.sh/.bat. Si legge da YTPROXY_PORT
+// frontend/vite.config.js e scripts/start_server.sh/.bat. Si legge da YTPROXY_PORT
 // come fa il server: con il valore scritto a mano qui, avviare l'app con una
 // porta diversa faceva partire il server su quella porta e la finestra andava
 // a cercarlo sulla 8090, dove non c'era nessuno.
