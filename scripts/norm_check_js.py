@@ -33,16 +33,31 @@ def _spoglia(source: str) -> str:
     i, n = 0, len(source)
     while i < n:
         c = source[i]
-        if c == "/" and i + 1 < n and source[i + 1] == "/":
+        # Uno slash preceduto da un backslash non apre mai un commento: è la
+        # fine di un letterale regex tipo /^https?:\/\//, dove lo slash
+        # "escaped" seguito dallo slash di chiusura sembra un "//" ma non lo
+        # è. Senza questo controllo il resto della riga (e la graffa di
+        # chiusura JSX che spesso la segue) sparisce, sballando il conteggio
+        # righe di ogni funzione a valle.
+        precedente_backslash = i > 0 and source[i - 1] == "\\"
+        if c == "/" and i + 1 < n and source[i + 1] == "/" and not precedente_backslash:
             j = source.find("\n", i)
             j = n if j == -1 else j
             out.append(" " * (j - i))
             i = j
-        elif c == "/" and i + 1 < n and source[i + 1] == "*":
+        elif c == "/" and i + 1 < n and source[i + 1] == "*" and not precedente_backslash:
             j = source.find("*/", i + 2)
             j = n if j == -1 else j + 2
             out.append("".join(" " if ch != "\n" else "\n" for ch in source[i:j]))
             i = j
+        elif c == "'" and i > 0 and (source[i - 1].isalnum() or source[i - 1] == "_"):
+            # Apostrofo di contrazione dentro testo JSX ("un'altra", "l'utente",
+            # "it's"), non apertura di stringa: preceduto da lettera/cifra senza
+            # spazio, cosa che una vera stringa JS in pratica non fa mai. Senza
+            # questo il tokenizer partiva a cercare la ' di chiusura e ingoiava
+            # il resto del file, sballando ogni conteggio a valle.
+            out.append(c)
+            i += 1
         elif c in "\"'`":
             j = i + 1
             while j < n and source[j] != c:
