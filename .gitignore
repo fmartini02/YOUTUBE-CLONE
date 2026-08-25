@@ -6,6 +6,7 @@ data/subscriptions.json
 data/subscriptions_feed_cache.json
 data/channel_avatars.json
 data/history.json
+data/prefs.json
 .env
 .env.local
 .env.*.local
