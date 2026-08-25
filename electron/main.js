@@ -56,28 +56,22 @@ function waitForServer(retries = 30) {
 }
 
 // ── Create window ─────────────────────────────────────────────────────────────
-async function createWindow() {
-  startServer();
+const WINDOW_OPTIONS = {
+  width: 1400,
+  height: 900,
+  minWidth: 800,
+  minHeight: 600,
+  backgroundColor: "#0f0f0f",
+  webPreferences: { nodeIntegration: false, contextIsolation: true },
+  titleBarStyle: "hiddenInset",
+  title: "YTProxy",
+};
+const LOADING_HTML = "data:text/html,<html style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px'><div style='font-size:48px'>▶</div><div style='font-size:18px;font-weight:700'>YTProxy</div><div style='color:#aaa;font-size:14px'>Avvio del server...</div></html>";
+const ERROR_HTML = "data:text/html,<html style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'><div>Errore: server non avviato. Controlla che Python e yt-dlp siano installati.</div></html>";
 
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 800,
-    minHeight: 600,
-    backgroundColor: "#0f0f0f",
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
-    titleBarStyle: "hiddenInset",
-    title: "YTProxy",
-  });
-
-  mainWindow.on("closed", () => { mainWindow = null; });
-
-  // Loading screen
-  mainWindow.loadURL("data:text/html,<html style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px'><div style='font-size:48px'>▶</div><div style='font-size:18px;font-weight:700'>YTProxy</div><div style='color:#aaa;font-size:14px'>Avvio del server...</div></html>");
-
+// Aspetta il server e ci naviga sopra; isolata da createWindow solo per
+// restare sotto le 25 righe.
+async function loadApp() {
   try {
     await waitForServer();
     // La finestra può essere già stata chiusa mentre si aspettava il server.
@@ -89,8 +83,16 @@ async function createWindow() {
     });
   } catch (e) {
     if (!mainWindow) return;
-    mainWindow.loadURL("data:text/html,<html style='background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh'><div>Errore: server non avviato. Controlla che Python e yt-dlp siano installati.</div></html>");
+    mainWindow.loadURL(ERROR_HTML);
   }
+}
+
+async function createWindow() {
+  startServer();
+  mainWindow = new BrowserWindow(WINDOW_OPTIONS);
+  mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.loadURL(LOADING_HTML);   // schermata di attesa
+  await loadApp();
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────

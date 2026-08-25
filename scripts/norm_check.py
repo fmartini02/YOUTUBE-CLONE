@@ -13,7 +13,7 @@ norm_check.py — verifica che il codice Python del server rispetti le regole
   - non più di 5 argomenti per funzione (self escluso)
 
 Uso:
-    python3 scripts/norm_check.py [percorsi...]   # default: server/ frontend/src/
+    python3 scripts/norm_check.py [percorsi...]   # default: server/ frontend/src/ electron/ scripts/
 Esce con codice 1 se trova violazioni, elencandole; 0 se tutto conforme.
 
 Il lato Python usa l'AST vero (preciso). Il lato JS/JSX (norm_check_js.py)
@@ -25,12 +25,11 @@ import sys
 from pathlib import Path
 
 from norm_check_js import controlla_file_js
+from norm_check_files import raccogli_file
 
 MAX_FUNZIONI_PER_FILE = 5
 MAX_RIGHE_PER_FUNZIONE = 25
 MAX_ARGOMENTI = 5
-
-ESCLUSI = {"node_modules", "android", "dist", "__pycache__"}
 
 
 def _righe_di_codice(source_lines: list, node) -> int:
@@ -102,24 +101,10 @@ def controlla_file(path: Path) -> list:
     return problemi
 
 
-def _da_saltare(path: Path) -> bool:
-    return any(parte in ESCLUSI for parte in path.parts)
-
-
 def main():
-    target_args = sys.argv[1:] or ["server", "frontend/src"]
+    target_args = sys.argv[1:] or ["server", "frontend/src", "electron", "scripts"]
     root = Path(__file__).parent.parent
-    file_python, file_js = [], []
-    for arg in target_args:
-        p = root / arg
-        candidati = p.rglob("*") if p.is_dir() else [p]
-        for f in candidati:
-            if _da_saltare(f):
-                continue
-            if f.suffix == ".py":
-                file_python.append(f)
-            elif f.suffix in (".js", ".jsx"):
-                file_js.append(f)
+    file_python, file_js = raccogli_file(target_args, root)
 
     tutti_i_problemi = []
     for f in sorted(file_python):
