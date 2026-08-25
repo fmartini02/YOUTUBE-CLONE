@@ -95,6 +95,12 @@ Per saltare l'aggiornamento di yt-dlp ad ogni riavvio del container (es. rete
 lenta o assente all'avvio): `YTPROXY_SKIP_YTDLP_UPDATE=1` come `environment:`
 nel `docker-compose.yml`.
 
+Per accedere da un altro PC/telefono/TV della rete non cambia niente rispetto
+a un'installazione senza Docker: `docker-compose.yml` pubblica la porta con
+`-p 8090:8090`, quindi si usa comunque `http://IP-DELLA-MACCHINA:8090` (vedi
+sotto "Accesso da telefono / Smart TV") — l'IP è quello della macchina che fa
+girare il container, es. il Raspberry Pi, non quello del client.
+
 ---
 
 ## Accesso da telefono / Smart TV
