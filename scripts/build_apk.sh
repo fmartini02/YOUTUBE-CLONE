@@ -3,17 +3,17 @@
 #  YTProxy — Build APK Android
 #
 #  Fa tutta la catena: build del frontend → cap sync → gradlew,
-#  e copia l'APK finito nella cartella del progetto.
+#  e copia l'APK finito in dist-android/ alla radice del progetto.
 #
-#  Uso:
-#    ./build_apk.sh              build debug
-#    ./build_apk.sh --clean      pulisce prima di ricompilare
-#    ./build_apk.sh --install    installa sul telefono collegato via adb
+#  Uso (dalla radice del progetto):
+#    ./scripts/build_apk.sh              build debug
+#    ./scripts/build_apk.sh --clean      pulisce prima di ricompilare
+#    ./scripts/build_apk.sh --install    installa sul telefono collegato via adb
 # ─────────────────────────────────────────────────────────────
 
 set -e
 
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ANDROID_DIR="$DIR/frontend/android"
 
 CLEAN=0
@@ -23,7 +23,7 @@ for arg in "$@"; do
     --clean)   CLEAN=1 ;;
     --install) INSTALL=1 ;;
     -h|--help)
-      echo "Uso: ./build_apk.sh [--clean] [--install]"
+      echo "Uso: ./scripts/build_apk.sh [--clean] [--install]"
       exit 0 ;;
     *)
       echo "  ❌ Opzione sconosciuta: $arg (usa --help)"
@@ -229,7 +229,8 @@ if [ ! -f "$APK" ]; then
   exit 1
 fi
 
-OUT="$DIR/YTProxy.apk"
+mkdir -p "$DIR/dist-android"
+OUT="$DIR/dist-android/YTProxy.apk"
 cp "$APK" "$OUT"
 
 # ── Verifica della firma ──────────────────────────────────────
@@ -271,7 +272,7 @@ echo "  📦 $OUT  ($SIZE)"
 echo ""
 echo "  Per installarlo: copialo sul telefono e aprilo"
 echo "  (serve consentire le app da origini sconosciute),"
-echo "  oppure rilancia con ./build_apk.sh --install"
+echo "  oppure rilancia con ./scripts/build_apk.sh --install"
 echo ""
 echo "  Al primo avvio l'app chiede l'indirizzo del server."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

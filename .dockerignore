@@ -15,7 +15,5 @@ server/__pycache__/
 *.pyc
 
 *.apk
-
-# Cartella residua da un vecchio comando con le graffe non espanse — non
-# c'entra nulla col progetto, ma non deve finire nel contesto della build.
-{server,frontend*
+dist-electron/
+dist-android/

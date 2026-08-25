@@ -6,7 +6,7 @@
 
 set -e
 
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ""
 echo "  ▶  YTProxy Server"

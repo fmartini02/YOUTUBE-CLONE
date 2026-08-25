@@ -54,13 +54,13 @@ dietro a YouTube.
 git clone <repo> ytproxy && cd ytproxy
 
 # 2. Avvia
-chmod +x start_server.sh
-./start_server.sh
+chmod +x scripts/start_server.sh
+./scripts/start_server.sh
 ```
 
 ### Windows
 ```
-Doppio click su start_server.bat
+Doppio click su scripts\start_server.bat
 ```
 
 ### Installazione manuale
@@ -80,26 +80,27 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8090
 ```
 
 ### Docker
-Alternativa a `start_server.sh`: non serve installare Python/Node/ffmpeg
+Alternativa a `scripts/start_server.sh`: non serve installare Python/Node/ffmpeg
 sull'host, solo Docker. yt-dlp si aggiorna da solo ad ogni riavvio del
-container.
+container. I file Docker stanno in `docker/`; si lanciano dalla radice del
+repo con `make` (vedi `Makefile`) o passando `-f docker/docker-compose.yml`.
 ```bash
 git clone <repo> ytproxy && cd ytproxy
-docker compose up -d --build
+make up                     # equivalente: docker compose -f docker/docker-compose.yml up -d --build
 ```
 I dati (cookie, login, iscrizioni, cronologia) restano in `./data` sul disco
 dell'host, non dentro il container: sopravvivono a `docker compose down` e ai
-rebuild dell'immagine. Per aggiornare dopo un `git pull`: `docker compose up -d --build`.
+rebuild dell'immagine. Per aggiornare dopo un `git pull`: `make up`.
 
 Per saltare l'aggiornamento di yt-dlp ad ogni riavvio del container (es. rete
 lenta o assente all'avvio): `YTPROXY_SKIP_YTDLP_UPDATE=1` come `environment:`
-nel `docker-compose.yml`.
+nel `docker/docker-compose.yml`.
 
 ---
 
 ## Accesso da telefono / Smart TV
 
-1. Avvia il server sul PC con `start_server.sh`
+1. Avvia il server sul PC con `scripts/start_server.sh`
 2. Connetti telefono/TV alla **stessa WiFi** del PC
 3. Apri il browser sul telefono/TV
 4. Vai su `http://IP-DEL-PC:8090`
@@ -297,11 +298,15 @@ ytproxy/
 │   └── android/          # progetto Capacitor
 ├── electron/             # app desktop (avvia il server Python)
 ├── data/                 # cookie, token, cache, cronologia (non versionati)
-├── start_server.sh       # Avvio Linux/Mac
-├── start_server.bat      # Avvio Windows
-├── Dockerfile            # Immagine del server (frontend copiato, non buildato)
-├── docker-compose.yml    # Avvio con `docker compose up -d --build`
-├── docker-entrypoint.sh  # Aggiorna yt-dlp poi avvia uvicorn
+├── scripts/
+│   ├── start_server.sh   # Avvio Linux/Mac
+│   ├── start_server.bat  # Avvio Windows
+│   └── build_apk.sh      # Catena completa APK Android → dist-android/
+├── docker/
+│   ├── Dockerfile           # Immagine del server (frontend copiato, non buildato)
+│   ├── docker-compose.yml   # Avvio con `make up` (vedi Makefile)
+│   └── docker-entrypoint.sh # Aggiorna yt-dlp poi avvia uvicorn
+├── Makefile              # scorciatoie `make up/down/logs/...` per Docker
 └── README.md
 ```
 

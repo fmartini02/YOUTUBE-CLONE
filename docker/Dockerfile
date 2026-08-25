@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r server/requirements.txt
 COPY server/ server/
 COPY frontend/dist/ frontend/dist/
 
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # DATA_DIR (auth.py) fa mkdir(exist_ok=True) senza parents=True: la cartella

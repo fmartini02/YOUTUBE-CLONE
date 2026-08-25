@@ -32,6 +32,10 @@ frontend/android/local.properties
 frontend/android/app/src/main/assets/public/
 frontend/android/*.apk
 *.apk
+dist-android/
+
+# ── Build Electron — rigenerabile con npm run build ─────────────────────────
+dist-electron/
 
 # ── Claude Code — configurazione locale e worktree ─────────────────────────
 # I worktree sotto .claude/worktrees/ sono checkout completi del repo stesso:

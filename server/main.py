@@ -105,7 +105,7 @@ app.add_middleware(
 # _pulisci_cache_download().
 VECCHIA_DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "ytproxy_cache"
 
-# Porta del server: deve combaciare con vite.config.js (proxy /api), start_server.sh/.bat
+# Porta del server: deve combaciare con vite.config.js (proxy /api), scripts/start_server.sh/.bat
 # ed electron/main.js.
 SERVER_PORT = int(os.environ.get("YTPROXY_PORT", 8090))
 
