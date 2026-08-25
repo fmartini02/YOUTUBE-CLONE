@@ -23,40 +23,40 @@ export function usePrefs() {
   return useContext(PrefsContext);
 }
 
+// Ottimistico: la UI si aggiorna subito, poi il server conferma con lo stato
+// completo. Aspettare la risposta faceva "rimbalzare" gli interruttori delle
+// impostazioni. Se il salvataggio fallisce si rilegge lo stato vero, invece
+// di lasciare a video una preferenza che sul server non esiste.
+async function salvaPrefsImpl(updates, setPrefs) {
+  setPrefs(p => ({ ...p, ...updates }));
+  try {
+    const p = await api.updatePrefs(updates);
+    setPrefs({ ...DEFAULT, ...p });
+  } catch {
+    api.prefs().then(p => setPrefs({ ...DEFAULT, ...p })).catch(() => {});
+  }
+}
+
+// Il tema si applica sull'elemento <html> come attributo: il CSS ha una
+// palette per ognuno (vedi App.css). "auto" non scrive niente e lascia
+// decidere alla media query prefers-color-scheme.
+function applyThemeAttribute(theme) {
+  const root = document.documentElement;
+  if (theme === "auto") root.removeAttribute("data-theme");
+  else root.setAttribute("data-theme", theme === "light" ? "light" : "dark");
+}
+
 export function PrefsProvider({ children }) {
   const [prefs, setPrefs] = useState(DEFAULT);
   const [pronte, setPronte] = useState(false);
 
   useEffect(() => {
-    api.prefs()
-      .then(p => setPrefs({ ...DEFAULT, ...p }))
-      .catch(() => {})
-      .finally(() => setPronte(true));
+    api.prefs().then(p => setPrefs({ ...DEFAULT, ...p })).catch(() => {}).finally(() => setPronte(true));
   }, []);
 
-  const salvaPrefs = useCallback(async (updates) => {
-    // Ottimistico: la UI si aggiorna subito, poi il server conferma con lo
-    // stato completo. Aspettare la risposta faceva "rimbalzare" gli
-    // interruttori delle impostazioni.
-    setPrefs(p => ({ ...p, ...updates }));
-    try {
-      const p = await api.updatePrefs(updates);
-      setPrefs({ ...DEFAULT, ...p });
-    } catch {
-      // Il server non ha salvato: si rilegge lo stato vero invece di lasciare
-      // a video una preferenza che non esiste.
-      api.prefs().then(p => setPrefs({ ...DEFAULT, ...p })).catch(() => {});
-    }
-  }, []);
+  const salvaPrefs = useCallback(updates => salvaPrefsImpl(updates, setPrefs), []);
 
-  // Il tema si applica sull'elemento <html> come attributo: il CSS ha una
-  // palette per ognuno (vedi App.css). "auto" non scrive niente e lascia
-  // decidere alla media query prefers-color-scheme.
-  useEffect(() => {
-    const root = document.documentElement;
-    if (prefs.theme === "auto") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", prefs.theme === "light" ? "light" : "dark");
-  }, [prefs.theme]);
+  useEffect(() => applyThemeAttribute(prefs.theme), [prefs.theme]);
 
   const value = useMemo(() => ({ prefs, pronte, salvaPrefs }), [prefs, pronte, salvaPrefs]);
   return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
