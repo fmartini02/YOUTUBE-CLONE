@@ -239,7 +239,7 @@ Da lì in poi le iscrizioni si risincronizzano da sole ogni ora.
 > *Applicazione web*.
 
 > Se avevi già collegato l'account prima di poter commentare, **rifai il login**
-> dalle Impostazioni: il permesso di scrittura (`youtube.force-ssl`) va concesso
+> dalle Impostazioni: il permesso di scrittura (`youtube`) va concesso
 > di nuovo, altrimenti YouTube rifiuta la pubblicazione dei commenti.
 
 ---

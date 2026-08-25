@@ -89,13 +89,19 @@ CHANNEL_MAX = 600              # 600 video sono già anni di caricamenti per un 
 MAX_OPEN_FEEDS = 6
 
 # youtube.readonly basta per leggere iscrizioni e loghi, ma NON per scrivere:
-# per pubblicare un commento o iscriversi a un canale Google pretende
-# youtube.force-ssl (che include anche tutta la lettura). Chi si era collegato
-# con il vecchio scope ha un refresh token che non lo comprende: il token
-# continua a funzionare per leggere le iscrizioni, ma commentThreads.insert e
-# subscriptions.insert rispondono 403 insufficientPermissions finché non rifà
-# il login (vedi can_write / WRITE_SCOPE).
-WRITE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
+# per pubblicare un commento o iscriversi a un canale Google pretende un
+# accesso completo. Sarebbe youtube.force-ssl (che include anche tutta la
+# lettura), ma il device flow ("TV e dispositivi con input limitato") accetta
+# solo un elenco ristretto di scope e da lì force-ssl è assente — Google lo
+# rifiuta con "Invalid device flow scope" al primo passo, prima ancora che
+# l'utente veda la schermata di consenso. Il device flow consente invece lo
+# scope pieno "youtube" (senza force-ssl), che dà lo stesso accesso in
+# scrittura. Chi si era collegato con un vecchio scope insufficiente ha un
+# refresh token che non lo comprende: il token continua a funzionare per
+# leggere le iscrizioni, ma commentThreads.insert e subscriptions.insert
+# rispondono 403 insufficientPermissions finché non rifà il login (vedi
+# can_write / WRITE_SCOPE).
+WRITE_SCOPE = "https://www.googleapis.com/auth/youtube"
 OAUTH_SCOPES = f"https://www.googleapis.com/auth/youtube.readonly {WRITE_SCOPE}"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 # Device flow ("TV e dispositivi con input limitato"): il server chiede un
@@ -660,8 +666,9 @@ class AuthManager:
         autenticato ma può solo leggere: serve rifare il login.
 
         Un solo metodo per entrambe le azioni perché lo scope è lo stesso
-        (`youtube.force-ssl`): due nomi diversi suggerirebbero due permessi
-        distinti che YouTube non distingue.
+        (`youtube`, non `youtube.force-ssl` — il device flow non accetta
+        quest'ultimo, vedi il commento su WRITE_SCOPE): due nomi diversi
+        suggerirebbero due permessi distinti che YouTube non distingue.
         """
         return self.is_authenticated() and WRITE_SCOPE in (self._token.get("scope") or "")
 

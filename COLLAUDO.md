@@ -106,7 +106,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 - [ ] **Elenco iscrizioni** (OAuth) — `GET /api/subscriptions` elenca i canali con logo.
 - [ ] **Stato iscrizione** — `GET /api/subscriptions/status/<cid>` risponde **senza consumare quota**
       (lo legge da `data/subscriptions.json`, non da YouTube).
-- [ ] **Iscriversi / disiscriversi** (OAuth con `youtube.force-ssl`) — il pulsante cambia stato e
+- [ ] **Iscriversi / disiscriversi** (OAuth con `youtube`) — il pulsante cambia stato e
       resta cambiato dopo un ricaricamento. Con un token vecchio senza quello scope: **403
       `insufficientPermissions` spiegato all'utente**, non un errore muto. ⚠️ modifica il tuo account
       reale: provalo solo se l'utente lo chiede, e su un canale che sceglie lui.
@@ -121,7 +121,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       (`api` o `ytdlp`). Funzionante **anche senza OAuth** (via yt-dlp).
 - [ ] **Risposte** — `GET /api/comments/<vid>/replies` restituisce le risposte a un commento.
 - [ ] **Commenti disattivati** — un video con i commenti chiusi produce un messaggio chiaro, non un errore.
-- [ ] **Pubblicazione** (OAuth con `youtube.force-ssl`) — il commento compare. Senza lo scope: 403
+- [ ] **Pubblicazione** (OAuth con `youtube`) — il commento compare. Senza lo scope: 403
       spiegato. ⚠️ scrive davvero su YouTube: solo su richiesta esplicita dell'utente.
 
 ## 8. Cronologia e preferenze
