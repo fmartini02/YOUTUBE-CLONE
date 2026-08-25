@@ -188,7 +188,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **OK** — `curl -m15 http://127.0.0.1:8097/api/subscriptions/status/UCtRrFIehQpQii6pu3YVNNig` →
       `{"subscribed":true,...}` in 9ms (`time curl`), troppo veloce per una chiamata di rete a
       YouTube: conferma la lettura locale.
-- [ ] **Iscriversi / disiscriversi** (OAuth con `youtube.force-ssl`) — il pulsante cambia stato e
+- [ ] **Iscriversi / disiscriversi** (OAuth con `youtube`) — il pulsante cambia stato e
       resta cambiato dopo un ricaricamento. Con un token vecchio senza quello scope: **403
       `insufficientPermissions` spiegato all'utente**, non un errore muto. ⚠️ modifica il tuo account
       reale: provalo solo se l'utente lo chiede, e su un canale che sceglie lui.
@@ -227,7 +227,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       questo video" vive solo nel ramo Data API (main.py, branch `commentsDisabled`), irraggiungibile
       con il token attuale — col solo yt-dlp l'utente vedrebbe il messaggio generico "Commenti non
       disponibili al momento" anche per un video con commenti davvero disattivati.
-- [ ] **Pubblicazione** (OAuth con `youtube.force-ssl`) — il commento compare. Senza lo scope: 403
+- [ ] **Pubblicazione** (OAuth con `youtube`) — il commento compare. Senza lo scope: 403
       spiegato. ⚠️ scrive davvero su YouTube: solo su richiesta esplicita dell'utente.
       **non eseguito** — azione irreversibile su dati reali, richiede richiesta esplicita dell'utente.
 
