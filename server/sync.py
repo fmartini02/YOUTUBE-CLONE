@@ -1,11 +1,13 @@
 """
 sync.py — Sincronizzazione automatica in background
-Ogni ora: rinnova token + aggiorna iscrizioni
+Ogni ora: rinnova token + aggiorna iscrizioni. La logica di un singolo ciclo
+sta in sync_runner.py (qui supererebbe le 5 funzioni per file, vedi CLAUDE.md).
 """
-
 import asyncio
-import time
 from typing import Callable
+
+from auth import oauth_status
+from sync_runner import esegui_sync
 
 SYNC_INTERVAL = 3600  # 1 ora
 
@@ -17,35 +19,17 @@ class SyncScheduler:
         self._status = "idle"  # idle | syncing | ok | error
         self._last_error: str = ""
 
-    def start(self, auth_manager, ydl_opts_fn: Callable):
+    def start(self, state, ydl_opts_fn: Callable):
         """Avvia il loop di sync in background."""
         if self._task and not self._task.done():
             return
-        self._task = asyncio.create_task(self._loop(auth_manager, ydl_opts_fn))
+        self._task = asyncio.create_task(self._loop(state, ydl_opts_fn))
 
-    async def _loop(self, auth_manager, ydl_opts_fn):
+    async def _loop(self, state, ydl_opts_fn):
         while True:
-            if auth_manager.is_authenticated():
-                await self._run_sync(auth_manager, ydl_opts_fn)
+            if oauth_status.is_authenticated(state):
+                await esegui_sync(self, state, ydl_opts_fn)
             await asyncio.sleep(SYNC_INTERVAL)
-
-    async def _run_sync(self, auth_manager, ydl_opts_fn):
-        self._status = "syncing"
-        try:
-            await auth_manager.sync_subscriptions()
-            print(f"[sync] Iscrizioni aggiornate — {len(auth_manager.get_subscriptions())} canali")
-            # Scansione completa (tutti i canali) del feed 'Iscrizioni': lenta
-            # (una richiesta per canale, parallelizzata), per questo gira solo
-            # qui in background e non ad ogni caricamento della pagina.
-            feed = await auth_manager.refresh_subscriptions_feed(ydl_opts_fn)
-            print(f"[sync] Feed iscrizioni aggiornato — {len(feed)} video")
-            self._last_sync = time.time()
-            self._status = "ok"
-            self._last_error = ""
-        except Exception as e:
-            self._status = "error"
-            self._last_error = str(e)
-            print(f"[sync] Errore sync: {e}")
 
     def get_status(self) -> dict:
         return {
@@ -54,9 +38,9 @@ class SyncScheduler:
             "last_error": self._last_error,
         }
 
-    async def force_sync(self, auth_manager, ydl_opts_fn):
+    async def force_sync(self, state, ydl_opts_fn):
         """Sync immediato su richiesta."""
-        await self._run_sync(auth_manager, ydl_opts_fn)
+        await esegui_sync(self, state, ydl_opts_fn)
 
 
 scheduler = SyncScheduler()
