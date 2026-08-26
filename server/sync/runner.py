@@ -1,8 +1,8 @@
 """
-sync_runner.py — un ciclo di sincronizzazione (iscrizioni + feed).
+runner.py — un ciclo di sincronizzazione (iscrizioni + feed).
 
-Isolato da SyncScheduler (in sync.py) perché insieme ai 5 metodi della classe
-si sarebbe superato il tetto di 5 funzioni per file (vedi CLAUDE.md).
+Isolato da SyncScheduler (in scheduler.py) perché insieme ai 5 metodi della
+classe si sarebbe superato il tetto di 5 funzioni per file (vedi CLAUDE.md).
 """
 import time
 from typing import Callable

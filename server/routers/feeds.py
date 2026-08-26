@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 from auth import channel_avatars, feed_channel, feed_home, feed_related, feed_subscriptions
 from auth.cookies import get_cookie_path
 from auth.state import state
-from ytdlp_helpers import ydl_opts_base
+from ytdlp.helpers import ydl_opts_base
 
 router = APIRouter()
 

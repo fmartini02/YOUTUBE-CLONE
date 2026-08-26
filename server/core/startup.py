@@ -4,8 +4,8 @@ from pathlib import Path
 
 from auth.state import state
 from auth.storage import proteggi_file_riservati
-from sync import scheduler
-from ytdlp_helpers import ydl_opts_base
+from sync.scheduler import scheduler
+from ytdlp.helpers import ydl_opts_base
 
 # Cartella dei download di una volta: /api/download non scrive più su disco
 # (vedi il suo docstring), ma le installazioni già in giro hanno qui dentro
@@ -37,6 +37,7 @@ async def on_startup():
     # I file di credenziali creati dalle versioni precedenti sono a 0644: qui
     # vengono riportati a 0600 una volta sola, all'avvio.
     proteggi_file_riservati()
-    # Il loop di sync gira subito un ciclo se già autenticato (vedi sync.py),
-    # quindi non serve un altro force_sync qui: raddoppierebbe le richieste.
+    # Il loop di sync gira subito un ciclo se già autenticato (vedi
+    # sync/scheduler.py), quindi non serve un altro force_sync qui:
+    # raddoppierebbe le richieste.
     scheduler.start(state, ydl_opts_base)

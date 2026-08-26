@@ -3,7 +3,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 from auth import cookies as auth_cookies, cookies_import
 from auth.state import state
-from ytdlp_helpers import in_executor
+from ytdlp.helpers import in_executor
 
 router = APIRouter()
 

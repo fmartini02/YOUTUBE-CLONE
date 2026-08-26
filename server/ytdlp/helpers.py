@@ -1,4 +1,4 @@
-"""ytdlp_helpers.py — opzioni base di yt-dlp ed esecuzione fuori dall'event loop."""
+"""helpers.py — opzioni base di yt-dlp ed esecuzione fuori dall'event loop."""
 import asyncio
 import shutil
 from typing import Optional

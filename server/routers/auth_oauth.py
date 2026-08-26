@@ -9,8 +9,8 @@ from auth import channel_avatars, cookies as auth_cookies, identity, oauth_flow,
 from auth import prefs as auth_prefs, subscriptions_sync
 from auth.state import state
 from auth.storage import OAUTH_SETUP_FILE, scrivi_privato
-from sync import scheduler
-from ytdlp_helpers import ydl_opts_base
+from sync.scheduler import scheduler
+from ytdlp.helpers import ydl_opts_base
 
 router = APIRouter()
 

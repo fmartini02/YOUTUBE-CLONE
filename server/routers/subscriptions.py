@@ -8,8 +8,8 @@ from auth import oauth_status, subscriptions_actions, subscriptions_state, subsc
 from auth.errors import YouTubeAPIError
 from auth.state import state
 from routers.subscription_guards import subscription_api_error, subscription_write_guard
-from sync import scheduler
-from ytdlp_helpers import ydl_opts_base
+from sync.scheduler import scheduler
+from ytdlp.helpers import ydl_opts_base
 
 router = APIRouter()
 
