@@ -281,34 +281,58 @@ di quella generica di Google. L'App ID si incolla in Impostazioni.
 
 ```
 ytproxy/
-├── server/
-│   ├── main.py          # FastAPI: endpoint + hosting del frontend
-│   ├── auth.py          # OAuth Google, cookie, feed, cronologia, preferenze
-│   ├── sync.py          # sync orario iscrizioni + cache feed
+├── server/              # FastAPI + yt-dlp: API e hosting del frontend
+│   ├── main.py          # crea l'app, monta i router e il frontend buildato
+│   ├── routers/         # un endpoint HTTP per dominio
+│   ├── auth/            # OAuth Google, cookie, feed, cronologia, preferenze
+│   ├── core/            # guardia sulle scritture, porta del server, avvio
+│   ├── ytdlp/           # opzioni, selettori di formato e patch di yt-dlp
+│   ├── sync/            # sync orario delle iscrizioni + cache feed
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx       # routing (History API)
-│   │   ├── api.js        # chiamate API + rilevamento dispositivo
-│   │   ├── components/   # Header, Sidebar, VideoCard, CastBar, ServerSetup…
-│   │   ├── hooks/        # useCast, useInfiniteScroll, useToast…
-│   │   └── pages/        # Home, Search, Video, Subscriptions, Settings
+│   │   ├── App/         # routing a mano (History API)
+│   │   ├── api/         # chiamate al server + rilevamento del dispositivo
+│   │   ├── components/  # Header, Sidebar, VideoCard, player, commenti…
+│   │   ├── hooks/       # useCast, useInfiniteScroll, usePrefs…
+│   │   └── pages/       # Home, Ricerca, Video, Canale, Iscrizioni, Impostazioni…
 │   ├── public/cast-receiver.html
-│   ├── dist/             # build servita dal server (versionata)
-│   └── android/          # progetto Capacitor
-├── electron/             # app desktop (avvia il server Python)
-├── data/                 # cookie, token, cache, cronologia (non versionati)
-├── scripts/
-│   ├── start_server.sh   # Avvio Linux/Mac
-│   ├── start_server.bat  # Avvio Windows
-│   └── build_apk.sh      # Catena completa APK Android → dist-android/
-├── docker/
-│   ├── Dockerfile           # Immagine del server (frontend copiato, non buildato)
-│   ├── docker-compose.yml   # Avvio con `make up` (vedi Makefile)
-│   └── docker-entrypoint.sh # Aggiorna yt-dlp poi avvia uvicorn
-├── Makefile              # scorciatoie `make up/down/logs/...` per Docker
+│   ├── dist/            # build servita dal server (versionata)
+│   └── android/         # progetto Capacitor
+├── electron/            # app desktop (avvia il server Python)
+├── data/                # cookie, token, cache, cronologia (non versionati)
+├── scripts/             # avvio, build APK, controllo dello stile del codice
+├── docker/              # immagine, compose ed entrypoint per l'alternativa Docker
+├── DOCS/COLLAUDO.md     # elenco feature + condizione per dire "funziona"
+├── Makefile             # scorciatoie `make up/down/logs/...` per Docker
 └── README.md
 ```
+
+### Cosa c'è in ogni cartella
+
+**`server/`** — un unico processo FastAPI, niente database: tutto lo stato vive nei JSON di `data/`.
+- `main.py` — cablaggio: crea l'app, registra la guardia sulle scritture e il CORS, include i router, monta `frontend/dist/`.
+- `routers/` — un modulo per ogni gruppo di endpoint: ricerca, streaming (`/api/mux`, `/api/download`), commenti, autenticazione OAuth, iscrizioni, feed, cookie, cronologia, preferenze, route dell'app (SPA).
+- `auth/` — tutto ciò che riguarda l'account e i suoi dati: sessione cookie di YouTube, device flow OAuth, le quattro sorgenti di feed (home, correlati, canale, iscrizioni), commenti, iscrizioni, cronologia, preferenze, e la lettura/scrittura sicura dei JSON in `data/`.
+- `core/` — infrastruttura dell'app, non un dominio a sé: la guardia che blocca le scritture da un'origine esterna, la porta del server, la pulizia una tantum all'avvio.
+- `ytdlp/` — tutto ciò che riguarda yt-dlp in sé: le opzioni base ed esecuzione fuori dall'event loop, i selettori di formato per la riproduzione, la patch che recupera l'id canale mancante nei video in collaborazione.
+- `sync/` — lo scheduler che ogni ora rinnova le iscrizioni via API e ricostruisce la cache del feed iscrizioni.
+
+**`frontend/src/`** — React 18 + Vite, senza router né librerie di stato.
+- `App/` — il routing a mano sulla History API: URL, layout generale, banner d'avviso sui cookie, gestione del tasto Indietro.
+- `api/` — tutte le chiamate al server e il rilevamento del dispositivo (server locale vs indirizzo salvato su Android, indirizzo LAN per il Cast).
+- `components/` — pezzi di UI riusabili: intestazione, barra laterale, card video, pulsante iscriviti, pulsante Cast, e due sottocartelle più grosse per il player video e i commenti.
+- `hooks/` — logica condivisa tra pagine: Chromecast, scroll infinito, preferenze utente, notifiche, media query.
+- `pages/` — le pagine vere e proprie: Home, Ricerca, Video, Canale, Iscrizioni, Cronologia, Impostazioni.
+
+**Il resto del repo**
+- `frontend/dist/` — la build del frontend, **versionata**: il server la serve così com'è, senza buildarla da sé.
+- `frontend/android/` — il progetto Capacitor da cui si genera l'APK.
+- `electron/` — l'app desktop: una finestra Electron che avvia da sé il server Python.
+- `data/` — tutto lo stato persistente (cookie, token OAuth, iscrizioni, cronologia, preferenze): **non versionato**, vive solo sulla macchina che fa da server.
+- `scripts/` — script di avvio (`start_server.sh`/`.bat`), catena di build dell'APK Android, controllo automatico dello stile del codice (`norm_check.py`).
+- `docker/` — immagine, `docker-compose.yml` ed entrypoint per l'alternativa Docker a `scripts/start_server.sh`.
+- `DOCS/COLLAUDO.md` — l'elenco di tutte le feature con la condizione osservabile che deve valere perché funzionino: sostituisce una suite di test automatici, che qui non c'è.
 
 ---
 
