@@ -1,5 +1,5 @@
 """
-server_config.py — porta del server.
+config.py — porta del server.
 
 Ripetuta in più punti che devono restare allineati: qui, il proxy in
 frontend/vite.config.js, electron/main.js, scripts/start_server.sh/.bat,

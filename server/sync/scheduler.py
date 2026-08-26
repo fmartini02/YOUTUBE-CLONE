@@ -1,13 +1,13 @@
 """
-sync.py — Sincronizzazione automatica in background
+scheduler.py — Sincronizzazione automatica in background
 Ogni ora: rinnova token + aggiorna iscrizioni. La logica di un singolo ciclo
-sta in sync_runner.py (qui supererebbe le 5 funzioni per file, vedi CLAUDE.md).
+sta in runner.py (qui supererebbe le 5 funzioni per file, vedi CLAUDE.md).
 """
 import asyncio
 from typing import Callable
 
 from auth import oauth_status
-from sync_runner import esegui_sync
+from sync.runner import esegui_sync
 
 SYNC_INTERVAL = 3600  # 1 ora
 

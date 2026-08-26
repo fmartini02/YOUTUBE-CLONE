@@ -79,7 +79,7 @@ async def refresh_subscriptions_feed(state, ydl_opts_base_fn, max_channels=None)
     """
     Scarica gli ultimi video di TUTTI i canali iscritti in parallelo (bounded
     a 10 richieste contemporanee) e li mette in cache ordinati per data.
-    Chiamata ogni ora da sync_runner.py.
+    Chiamata ogni ora da sync/runner.py.
     """
     channels = state.subs if max_channels is None else state.subs[:max_channels]
     sem = asyncio.Semaphore(10)

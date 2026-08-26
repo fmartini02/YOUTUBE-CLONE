@@ -1,5 +1,5 @@
 """
-security.py — Chi può far scrivere il server.
+security.py — chi può far scrivere il server.
 
 Il server ascolta su 0.0.0.0 e non ha login. Con allow_origins=["*"] bastava
 che il browser di casa aprisse un sito qualunque perché quella pagina potesse

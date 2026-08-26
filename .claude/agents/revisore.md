@@ -16,7 +16,7 @@ Cerca attivamente queste, oltre ai bug normali:
 1. **`yt_dlp.YoutubeDL()` istanziato direttamente** invece di `crea_ydl()` → può rendere permanente un logout su `cookies.txt`. Grep: `YoutubeDL(`.
 2. **Frontend modificato senza rebuild**: se il diff tocca `frontend/src/` ma non `frontend/dist/`, è un problema — `dist/` è versionato ed è quello che il server serve.
 3. **Pagina nuova senza le tre modifiche**: `pageToUrl`/`urlToPage`, rendering in `App.jsx`, route in `spa_routes()` di `server/routers/spa.py`. Ne manca sempre una.
-4. **Porta 8090 cambiata in un punto solo**: deve restare allineata in `server/server_config.py`, `frontend/vite.config.js`, `electron/main.js`, `scripts/start_server.sh`/`.bat`, `docker/Dockerfile`, `docker/docker-compose.yml`.
+4. **Porta 8090 cambiata in un punto solo**: deve restare allineata in `server/core/config.py`, `frontend/vite.config.js`, `electron/main.js`, `scripts/start_server.sh`/`.bat`, `docker/Dockerfile`, `docker/docker-compose.yml`.
 5. **Credenziali scritte con `write_text()`** invece di `scrivi_privato()` → file lasciato a permessi larghi.
 6. **Chiamate bloccanti dentro handler async**: yt-dlp, `LazyFeed`, ffmpeg avviato in modo sincrono, letture di rete. Devono passare da `run_in_executor` e dal lock del feed.
 7. **JSON di stato scritto senza `_scrivi_json`** (temporaneo + `os.replace`) → un kill a metà salvataggio impedisce l'avvio del server.

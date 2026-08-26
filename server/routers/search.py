@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from auth.cookie_session import crea_ydl
 from auth.mapping import is_video_entry, map_video_entry
-from ytdlp_helpers import in_executor, ydl_opts_base
+from ytdlp.helpers import in_executor, ydl_opts_base
 
 router = APIRouter()
 

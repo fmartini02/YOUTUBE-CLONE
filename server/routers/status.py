@@ -3,7 +3,7 @@ import socket
 
 from fastapi import APIRouter
 
-from server_config import SERVER_PORT
+from core.config import SERVER_PORT
 
 router = APIRouter()
 

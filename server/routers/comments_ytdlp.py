@@ -13,7 +13,7 @@ import asyncio
 import time
 
 from auth.cookie_session import crea_ydl
-from ytdlp_helpers import ydl_opts_base
+from ytdlp.helpers import ydl_opts_base
 
 _YTDLP_TIERS = [100, 300, 800, 2000]   # quanti commenti chiedere a yt-dlp, per tentativi successivi
 _YTDLP_CACHE_TTL = 900                 # 15 min: oltre, il thread può essere cambiato

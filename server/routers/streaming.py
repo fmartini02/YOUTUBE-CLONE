@@ -10,9 +10,9 @@ import time
 from fastapi import APIRouter, HTTPException
 
 from auth.cookie_session import crea_ydl
-from format_selectors import adaptive_format_selector, cast_format_selector
+from ytdlp.format_selectors import adaptive_format_selector, cast_format_selector
 from routers.ffmpeg_pipe import ffmpeg_pipe_response
-from ytdlp_helpers import ydl_opts_base
+from ytdlp.helpers import ydl_opts_base
 
 router = APIRouter()
 

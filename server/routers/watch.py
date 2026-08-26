@@ -3,7 +3,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from ytdlp_helpers import _estrai_video, in_executor
+from ytdlp.helpers import _estrai_video, in_executor
 
 router = APIRouter()
 

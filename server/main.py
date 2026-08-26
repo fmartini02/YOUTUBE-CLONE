@@ -12,10 +12,10 @@ from routers import (auth_oauth, comment_replies, comments, cookies, feeds,
                       history, prefs, search, spa, status, streaming,
                       subscriptions, watch)
 from routers.spa import HashedStaticFiles, frontend_dist
-from security import ORIGINI_EXTRA, ORIGINI_LOCALI_RE, blocca_scritture_esterne
-from server_config import SERVER_PORT
-from startup import on_startup
-from ytdlp_patch import applica_patch_collaborazioni
+from core.security import ORIGINI_EXTRA, ORIGINI_LOCALI_RE, blocca_scritture_esterne
+from core.config import SERVER_PORT
+from core.startup import on_startup
+from ytdlp.patch import applica_patch_collaborazioni
 
 # Va applicata prima di qualsiasi estrazione: recupera l'id del canale nelle
 # card dei video in collaborazione, che altrimenti restano senza logo e non
@@ -24,7 +24,7 @@ applica_patch_collaborazioni()
 
 app = FastAPI(title="YTProxy")
 
-# Guardia sulle scritture esterne (vedi security.py). Dichiarata PRIMA di
+# Guardia sulle scritture esterne (vedi core/security.py). Dichiarata PRIMA di
 # CORSMiddleware: così il preflight OPTIONS lo gestisce CORSMiddleware e la
 # guardia vede solo le richieste vere.
 app.middleware("http")(blocca_scritture_esterne)
