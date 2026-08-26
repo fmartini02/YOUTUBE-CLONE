@@ -2,7 +2,7 @@
 import asyncio
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from auth import channel_avatars, cookies as auth_cookies, identity, oauth_flow, oauth_status
@@ -47,7 +47,12 @@ async def auth_device_start(body: DeviceStart):
     È il metodo consigliato perché non usa nessun redirect: vale anche quando
     il server gira su un altro computer della rete (Raspberry, NAS).
     """
-    data = await oauth_flow.start_device_flow(body.client_id)
+    try:
+        data = await oauth_flow.start_device_flow(body.client_id)
+    except ValueError as ex:
+        # Client ID sbagliato, cancellato lato Google, o senza lo scope del
+        # device flow: sono errori dell'utente, non un guasto del server.
+        raise HTTPException(400, str(ex))
     # scrivi_privato: contiene il client secret dell'app OAuth dell'utente.
     scrivi_privato(OAUTH_SETUP_FILE,
                    json.dumps({"client_id": body.client_id, "client_secret": body.client_secret}))
