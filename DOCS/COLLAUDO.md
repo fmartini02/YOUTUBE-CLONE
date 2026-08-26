@@ -359,18 +359,16 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **non verificabile** (il percorso felice, con credenziali Google vere) — completarlo richiede
       un dispositivo interattivo per digitare il codice su google.com/device, non disponibile in
       questo ambiente headless, oltre a un Client ID reale che l'utente deve creare da sé.
-      **Bug collaterale trovato, non corretto (divieto di toccare il codice applicativo)**: con un
-      `client_id`/`client_secret` che Google rifiuta (mai registrato), l'endpoint risponde **500
-      Internal Server Error** invece di un errore gestito. Riprodotto: `curl -X POST -d
+      **Bug collaterale trovato e corretto**: con un `client_id`/`client_secret` che Google rifiuta
+      (mai registrato), l'endpoint rispondeva **500 Internal Server Error** invece di un errore
+      gestito — `server/auth/oauth_flow.py` fa `raise ValueError(...)` dopo che Google risponde
+      `"The OAuth client was not found."`, e `server/routers/auth_oauth.py` non la intercettava.
+      **OK** (riverificato dopo la correzione) — `curl -X POST -d
       '{"client_id":"fake.apps.googleusercontent.com","client_secret":"fakesecret"}'
-      http://127.0.0.1:8097/api/auth/device/start` → 500; nel log: `server/auth/oauth_flow.py:22` fa
-      `raise ValueError(data.get("error_description", data["error"]))` dopo che Google risponde
-      `"The OAuth client was not found."`, e nessuno lo intercetta in
-      `server/routers/auth_oauth.py:44-60` per trasformarlo in un `HTTPException` con messaggio
-      leggibile — un utente che sbaglia a incollare il Client ID vedrebbe un generico "Internal
-      Server Error" invece del motivo vero. Confermato che **non** scrive `data/oauth_setup.json` in
-      questo caso (la `scrivi_privato()` sta dopo la riga che solleva l'eccezione), quindi nessun
-      file di credenziali toccato dal tentativo.
+      http://127.0.0.1:8096/api/auth/device/start` → ora **400**
+      `{"detail":"The OAuth client was not found."}`. Confermato che **non** scrive
+      `data/oauth_setup.json` in questo caso (la `scrivi_privato()` sta dopo la riga che solleva
+      l'eccezione), quindi nessun file di credenziali toccato dal tentativo.
 - [ ] **`GET /api/auth/me`** — restituisce l'account collegato; `POST /api/auth/logout` lo scollega.
       **non verificabile — manca l'OAuth** (nessun `oauth_token.json`, non un token rotto come nel
       giro precedente) — `curl http://127.0.0.1:8097/api/auth/me` →
