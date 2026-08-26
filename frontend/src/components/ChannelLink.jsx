@@ -38,6 +38,33 @@ export function daLinkCanale(e) {
   return !!e.target?.closest?.(".channel-link");
 }
 
+function onPointerDownTap(e, tapRef) {
+  if (e.pointerType === "mouse") return;
+  e.stopPropagation();
+  tapRef.current.start = { x: e.clientX, y: e.clientY };
+}
+
+/** Ripiego per il tocco: se il dito non si è spostato oltre TAP_SLOP_PX, prepara `vai` col ritardo di CLICK_FALLBACK_MS. */
+function onPointerUpTap(e, tapRef, vai) {
+  if (e.pointerType === "mouse") return;
+  e.stopPropagation();
+  const start = tapRef.current.start;
+  tapRef.current.start = null;
+  if (!start) return;
+  if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return;
+  clearTimeout(tapRef.current.timer);
+  tapRef.current.timer = setTimeout(vai, CLICK_FALLBACK_MS);
+}
+
+/** Naviga una volta sola: click e ripiego col dito possono scattare entrambi, il secondo va ignorato. */
+function vaiUnaVolta(tapRef, navigate, channelId, name) {
+  const t = tapRef.current;
+  clearTimeout(t.timer);
+  if (Date.now() - t.done < 800) return;
+  t.done = Date.now();
+  navigate("channel", { channelId, channelName: name });
+}
+
 export default function ChannelLink({ channelId, name, navigate, className = "", style, title, children }) {
   const contenuto = children ?? name;
   const tapRef = useRef({ start: null, timer: null, done: 0 });
@@ -48,41 +75,17 @@ export default function ChannelLink({ channelId, name, navigate, className = "",
     return <span className={className} style={style}>{contenuto}</span>;
   }
 
-  function vai() {
-    const t = tapRef.current;
-    clearTimeout(t.timer);
-    // Click e ripiego possono scattare tutti e due: la seconda navigazione a
-    // ruota della prima va ignorata.
-    if (Date.now() - t.done < 800) return;
-    t.done = Date.now();
-    navigate("channel", { channelId, channelName: name });
-  }
+  const vai = () => vaiUnaVolta(tapRef, navigate, channelId, name);
 
   return (
     <span
       className={`channel-link ${className}`.trim()}
       style={style}
       title={title || `Vai al canale ${name || ""}`.trim()}
-      onPointerDown={e => {
-        if (e.pointerType === "mouse") return;
-        e.stopPropagation();
-        tapRef.current.start = { x: e.clientX, y: e.clientY };
-      }}
-      onPointerUp={e => {
-        if (e.pointerType === "mouse") return;
-        e.stopPropagation();
-        const start = tapRef.current.start;
-        tapRef.current.start = null;
-        if (!start) return;
-        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return;
-        clearTimeout(tapRef.current.timer);
-        tapRef.current.timer = setTimeout(vai, CLICK_FALLBACK_MS);
-      }}
+      onPointerDown={e => onPointerDownTap(e, tapRef)}
+      onPointerUp={e => onPointerUpTap(e, tapRef, vai)}
       onPointerCancel={() => { tapRef.current.start = null; }}
-      onClick={e => {
-        e.stopPropagation();
-        vai();
-      }}
+      onClick={e => { e.stopPropagation(); vai(); }}
     >
       {contenuto}
     </span>

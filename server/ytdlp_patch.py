@@ -52,6 +52,42 @@ def _id_ospite(comando, ucid_or_none):
         "innertubeCommand", "browseEndpoint", "browseId", {ucid_or_none}))
 
 
+def _completa(entry, channel_id):
+    if not channel_id:
+        return entry
+    entry["channel_id"] = channel_id
+    entry["channel_url"] = f"https://www.youtube.com/channel/{channel_id}"
+    return entry
+
+
+def _con_channel_id_lockup(self, view_model, originale):
+    """Card di home, iscrizioni, correlati e pagina canale."""
+    entry = originale(self, view_model)
+    if not isinstance(entry, dict) or entry.get("channel_id"):
+        return entry
+    comando = traverse_obj(view_model, (
+        "metadata", "lockupMetadataViewModel", "image", "avatarStackViewModel",
+        "rendererContext", "commandContext", "onTap", "innertubeCommand", {dict}))
+    return _completa(entry, _id_ospite(comando, self.ucid_or_none))
+
+
+def _con_channel_id_video(self, renderer, originale):
+    """Card della ricerca."""
+    entry = originale(self, renderer)
+    if not isinstance(entry, dict) or entry.get("channel_id"):
+        return entry
+    # Qui c'è una scorciatoia che nell'altro formato non esiste: la miniatura
+    # del canale accanto alla card è già un link al canale ospite.
+    miniatura = traverse_obj(renderer, (
+        "channelThumbnailSupportedRenderers", "channelThumbnailWithLinkRenderer",
+        "navigationEndpoint", "browseEndpoint", {dict}))
+    channel_id = traverse_obj(miniatura, ("browseId", {self.ucid_or_none}))
+    if not channel_id:
+        channel_id = _id_ospite(traverse_obj(renderer, (
+            "ownerText", "runs", 0, "navigationEndpoint", {dict})), self.ucid_or_none)
+    return _completa(entry, channel_id)
+
+
 def applica_patch_collaborazioni():
     """Avvolge i due estrattori di card di yt-dlp. Chiamarla una volta all'avvio."""
     if YoutubeTabBaseInfoExtractor is None:
@@ -62,38 +98,11 @@ def applica_patch_collaborazioni():
     lockup_originale = YoutubeTabBaseInfoExtractor._extract_lockup_view_model
     video_originale = YoutubeTabBaseInfoExtractor._extract_video
 
-    def _completa(entry, channel_id):
-        if not channel_id:
-            return entry
-        entry["channel_id"] = channel_id
-        entry["channel_url"] = f"https://www.youtube.com/channel/{channel_id}"
-        return entry
-
     def _extract_lockup_view_model(self, view_model):
-        """Card di home, iscrizioni, correlati e pagina canale."""
-        entry = lockup_originale(self, view_model)
-        if not isinstance(entry, dict) or entry.get("channel_id"):
-            return entry
-        comando = traverse_obj(view_model, (
-            "metadata", "lockupMetadataViewModel", "image", "avatarStackViewModel",
-            "rendererContext", "commandContext", "onTap", "innertubeCommand", {dict}))
-        return _completa(entry, _id_ospite(comando, self.ucid_or_none))
+        return _con_channel_id_lockup(self, view_model, lockup_originale)
 
     def _extract_video(self, renderer):
-        """Card della ricerca."""
-        entry = video_originale(self, renderer)
-        if not isinstance(entry, dict) or entry.get("channel_id"):
-            return entry
-        # Qui c'è una scorciatoia che nell'altro formato non esiste: la miniatura
-        # del canale accanto alla card è già un link al canale ospite.
-        miniatura = traverse_obj(renderer, (
-            "channelThumbnailSupportedRenderers", "channelThumbnailWithLinkRenderer",
-            "navigationEndpoint", "browseEndpoint", {dict}))
-        channel_id = traverse_obj(miniatura, ("browseId", {self.ucid_or_none}))
-        if not channel_id:
-            channel_id = _id_ospite(traverse_obj(renderer, (
-                "ownerText", "runs", 0, "navigationEndpoint", {dict})), self.ucid_or_none)
-        return _completa(entry, channel_id)
+        return _con_channel_id_video(self, renderer, video_originale)
 
     _extract_lockup_view_model._ytproxy_patched = True
     YoutubeTabBaseInfoExtractor._extract_lockup_view_model = _extract_lockup_view_model
