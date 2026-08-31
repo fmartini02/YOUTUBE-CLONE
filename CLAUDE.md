@@ -62,6 +62,8 @@ Conseguenza diretta sulla struttura: `server/auth.py` e `server/main.py` di una 
 
 `frontend/dist/` **è versionato** (il server lo serve così com'è): dopo aver toccato il frontend serve `npm run build` e i file buildati vanno committati. `frontend/node_modules/` e i file personali in `data/` sono invece ignorati.
 
+**Rebuild automatico**: `scripts/rebuild_frontend.sh` (versionato) ricostruisce `dist/` se e solo se i sorgenti sotto `frontend/` sono più recenti del build — no-op veloce altrimenti, e silenzioso se Node non c'è. Non fa mai commit: `git add frontend/dist` resta manuale. Sulla macchina di sviluppo è agganciato agli hook `Stop`/`SubagentStop` in `.claude/settings.json` (non versionato perché `.gitignore` esclude `.claude/*`), così `dist/` non resta mai indietro rispetto ai `.jsx`. Chi clona il repo o non usa quell'hook lancia lo script a mano (o il solito `npm run build`).
+
 ## Architettura
 
 Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste database: tutto lo stato sta in file JSON dentro `data/`.
