@@ -148,11 +148,21 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 - [ ] **Qualità fino a 4K** — il menu del player e le Impostazioni offrono `2160p (4K)` e `1440p`;
       `GET /api/mux/<vid>?quality=2160` su un video che ha il 4K restituisce un flusso `ffprobe`
       con `height=2160`, e `quality=best` (default) sale da solo fino a 2160p. `adaptive_format_selector`
-      default → 2160; `cast_format_selector` resta tetto 1080 (H.264 più alto su YouTube), quindi il
-      Cast non riceve mai un AV1 4K che non decodifica. **Il menu 4K compare solo dopo `npm run build`
+      default → 2160. **Il menu 4K compare solo dopo `npm run build`
       del frontend** (dist versionato). Nota costo: ogni seek su un 4K scarica ~15s di video
       (~20-40 MB) per il probe del keyframe di `_keyframe_before`; se pesa, l'ottimizzazione è una
       cache del GOP per video (fuori scope qui).
+- [ ] **4K sul Cast (VP9 in WebM)** — `GET /api/mux/<vid>?quality=2160&compat=1` su un video con
+      il 4K restituisce un flusso **`video/webm`** (VP9 + Opus), non più il tetto 1080 H.264:
+      oltre i 1080p YouTube non ha H.264 e l'unico 4K che un Chromecast (Ultra / Google TV / TV
+      con Cast nativo) decodifica è il VP9, che Google Cast accetta solo in WebM. `compat=1`
+      senza `quality` 1440/2160 resta H.264+AAC in MP4 come prima; `/api/download` non cambia
+      (resta H.264 1080, file compatibile ovunque). Frontend: `useCastMedia` annuncia
+      `contentType: video/webm` al receiver quando la qualità scelta è 1440p/2160p.
+      **da verificare con un dispositivo reale** — serve (a) un ricevitore Cast che decodifichi
+      il VP9 4K e (b) la prova che il suo receiver riproduca un WebM in streaming senza
+      `Content-Length` né Range (come già fa con l'MP4). Ramo ffmpeg: `-live 1 -cluster_time_limit
+      1000 -f webm` in `_build_ffmpeg_cmd`.
 - [ ] **Velocità di riproduzione** — "Riproduzione veloce" dal menu e 2x tenendo premuto:
       funzionante quando la velocità **resta** dopo un salto (che riapre il flusso e chiama `load()`).
       **non verificabile** — serve un browser reale.
@@ -463,6 +473,12 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 - [ ] **Trasmissione** — il video parte sul Chromecast con i codec compatibili e i comandi di base
       rispondono. Non verificabile senza un Chromecast in rete.
       **non verificabile** — serve un Chromecast in rete, assente qui.
+- [ ] **Trasmissione in 4K** — con la qualità impostata su 2160p/1440p il video parte sul
+      ricevitore Cast in VP9/WebM (vedi "4K sul Cast" in §3). Se il receiver non regge il VP9 4K
+      o il WebM in streaming, l'utente riabbassa a 1080p e torna all'H.264. **non verificabile** —
+      serve un ricevitore Cast 4K in rete (es. Chromecast Ultra, Chromecast/Google TV, o una TV
+      con Google Cast nativo — sulle Samsung Tizen richiede l'aggiornamento Cast, non su tutti i
+      modelli 2023).
 
 ## 12. Piattaforme e confezionamento
 

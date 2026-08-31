@@ -12,13 +12,17 @@ import { useTheaterMode } from "./useTheaterMode";
 
 // Video da mandare al Chromecast. L'URL si costruisce in modo sincrono da
 // videoId+quality (compat=1 → H.264/AAC): il rimux lato server parte solo
-// quando la TV richiede davvero lo stream.
+// quando la TV richiede davvero lo stream. A 1440p/4K il server passa al
+// VP9 in WebM (l'unico 4K che un Chromecast decodifica), quindi cambia
+// anche il contentType annunciato al receiver.
 function useCastMedia(videoId, quality, info) {
+  const webm = quality === "2160" || quality === "1440";
   return useMemo(() => ({
     streamUrl: api.castUrl(videoId, quality),
+    contentType: webm ? "video/webm" : "video/mp4",
     title: info?.title || "Video", channel: info?.channel || "",
     thumbnail: info?.thumbnail, duration: info?.duration, videoId,
-  }), [videoId, quality, info]);
+  }), [videoId, quality, info, webm]);
 }
 
 /** Raccoglie tutto lo stato della pagina video, così index.jsx resta solo markup. */

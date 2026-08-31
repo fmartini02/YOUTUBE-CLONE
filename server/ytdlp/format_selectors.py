@@ -18,7 +18,7 @@ def adaptive_format_selector(quality: str) -> str:
     return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
 
 
-def cast_format_selector(quality: str) -> str:
+def cast_format_selector(quality: str, allow_hq: bool = False) -> str:
     """
     Formati per il Chromecast: H.264 (avc1) + AAC (mp4a).
 
@@ -29,7 +29,23 @@ def cast_format_selector(quality: str) -> str:
     invece decodificati da qualunque dispositivo Cast, e su YouTube arrivano
     comunque fino a 1080p — quindi anche chiedendo 1440p/4K al Cast si resta
     tetto 1080, l'H.264 più alto che YouTube offre.
+
+    `allow_hq=True` (solo la riproduzione Cast, non /api/download) sblocca il
+    4K: oltre i 1080p YouTube non ha più H.264, e l'unico codec che un
+    Chromecast 4K (Ultra, Chromecast/Google TV) decodifica a 2160p è il VP9.
+    Google Cast però accetta il VP9 SOLO in un contenitore WebM con audio
+    Opus/Vorbis, mai in MP4 — vedi il ramo `-f webm` di `_build_ffmpeg_cmd`
+    (`server/routers/streaming.py`), scelto in base all'estensione del formato.
+    Fallback all'H.264 1080 se il VP9 a quell'altezza non c'è.
     """
+    if allow_hq and _QUALITY_HEIGHTS.get(quality, 0) > 1080:
+        h = _QUALITY_HEIGHTS[quality]
+        return (
+            f"bestvideo[height<={h}][vcodec^=vp9]+bestaudio[acodec^=opus]"
+            f"/bestvideo[height<={h}]+bestaudio[acodec^=opus]"
+            f"/bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]"
+            f"/best[height<={h}]"
+        )
     h = min(_QUALITY_HEIGHTS.get(quality, 1080), 1080)
     return (
         f"bestvideo[height<={h}][vcodec^=avc1]+bestaudio[acodec^=mp4a]"

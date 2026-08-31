@@ -29,16 +29,17 @@ _mux_fmt_cache: dict = {}
 _MUX_FMT_CACHE_TTL = 1800
 
 
-def _mux_formats(video_id: str, quality: str, compat: bool):
-    """URL video+audio (o singolo URL progressivo), con cache."""
-    key = (video_id, quality, compat)
+def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
+    """URL video+audio (o singolo URL progressivo) più il contenitore, con cache."""
+    key = (video_id, quality, compat, hq)
     hit = _mux_fmt_cache.get(key)
     if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
         return hit[1]
 
     # compat=1 (usato dal Chromecast): forza H.264+AAC invece del meglio
-    # assoluto, che sarebbe AV1+Opus e la TV non lo riprodurrebbe.
-    selector = cast_format_selector(quality) if compat else adaptive_format_selector(quality)
+    # assoluto, che sarebbe AV1+Opus e la TV non lo riprodurrebbe. hq=1 (solo
+    # la riproduzione Cast) sblocca il 4K in VP9, che però va servito in WebM.
+    selector = cast_format_selector(quality, hq) if compat else adaptive_format_selector(quality)
     opts = {**ydl_opts_base(), "extract_flat": False, "format": selector}
     with crea_ydl(opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
@@ -47,12 +48,13 @@ def _mux_formats(video_id: str, quality: str, compat: bool):
     if requested and len(requested) >= 2:
         video_fmt = next((f for f in requested if f.get("vcodec") != "none"), requested[0])
         audio_fmt = next((f for f in requested if f.get("acodec") != "none" and f.get("vcodec") == "none"), requested[-1])
-        urls = (video_fmt["url"], audio_fmt["url"])
+        cont = "webm" if video_fmt.get("ext") == "webm" else "mp4"
+        urls = (video_fmt["url"], audio_fmt["url"], cont)
     else:
         url = info.get("url")
         if not url:
             return None
-        urls = (url, None)
+        urls = (url, None, "mp4")
 
     _mux_fmt_cache[key] = (time.time(), urls)
     # Potatura opportunistica: senza, la cache cresce per tutta la vita del
@@ -96,7 +98,7 @@ def _keyframe_before(video_url: str, start: float) -> float:
     return max(keys) if keys else start
 
 
-def _build_ffmpeg_cmd(video_url: str, audio_url, seek=()) -> list:
+def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4") -> list:
     """
     Comando ffmpeg in sola copia (-c copy, nessuna transcodifica): unisce
     video+audio se separati, altrimenti fa solo remux del progressivo.
@@ -109,6 +111,12 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=()) -> list:
     `seek` (`-ss` prima di ogni input) è già allineato a un keyframe da
     `_keyframe_before`, quindi niente `-copypriorss`: si parte esatti sul
     keyframe, senza spezzone da scartare né attesa di quello dopo.
+
+    `container="webm"` è il ramo del Chromecast in 4K: Google Cast decodifica
+    il VP9 solo dentro un WebM, mai in MP4. `-live 1` mette il muxer Matroska
+    in modalità flusso (niente seek all'indietro per scrivere Cues/durata a
+    fine stream, come `empty_moov` per l'MP4); `cluster_time_limit` 1s dà lo
+    stesso avvio rapido di `frag_duration`.
     """
     base = [_FFMPEG_BIN, "-loglevel", "error"]
     if audio_url:
@@ -116,6 +124,8 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=()) -> list:
                "-map", "0:v:0", "-map", "1:a:0", "-c", "copy"]
     else:
         cmd = [*base, *seek, "-i", video_url, "-c", "copy"]
+    if container == "webm":
+        return [*cmd, "-live", "1", "-cluster_time_limit", "1000", "-f", "webm", "pipe:1"]
     return [*cmd, "-movflags", "empty_moov+default_base_moof",
             "-frag_duration", "1000000", "-f", "mp4", "pipe:1"]
 
@@ -140,28 +150,28 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     """
     try:
         urls = await asyncio.get_running_loop().run_in_executor(
-            None, _mux_formats, video_id, quality, compat
+            None, _mux_formats, video_id, quality, compat, compat
         )
     except Exception as ex:
         raise HTTPException(500, str(ex))
     if not urls:
         raise HTTPException(404, "Nessun formato disponibile")
 
-    video_url, audio_url = urls
+    video_url, audio_url, container = urls
     start = max(0.0, start)
     if start > 0:
         start = await asyncio.get_running_loop().run_in_executor(
             None, _keyframe_before, video_url, start
         )
     seek = ["-ss", f"{start:.3f}"] if start > 0 else []
-    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek)
+    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek, container=container)
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
     # "Range: bytes=0-" e riceve un 200 invece del 206 che si aspetta,
     # ritardando l'avvio dello streaming progressivo di diversi secondi.
     return await ffmpeg_pipe_response(
         cmd, f"mux {video_id} (quality={quality}, start={start})",
-        headers={"Accept-Ranges": "none"},
+        headers={"Accept-Ranges": "none"}, media_type=f"video/{container}",
     )
 
 
@@ -183,7 +193,7 @@ async def download_video(video_id: str, quality: str = "best"):
     if not urls:
         raise HTTPException(404, "Nessun formato disponibile")
 
-    video_url, audio_url = urls
+    video_url, audio_url, _cont = urls
     cmd = _build_ffmpeg_cmd(video_url, audio_url)
 
     # Il nome del file lo mette il frontend con l'attributo `download` del

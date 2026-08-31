@@ -12,7 +12,9 @@ export async function waitForDevices(ctx, ms = 3000) {
 
 export function buildMediaInfo(media) {
   const cc = window.chrome.cast;
-  const info = new cc.media.MediaInfo(media.streamUrl, "video/mp4");
+  // Di norma H.264 in MP4; il 4K per il Cast esce in VP9 dentro un WebM
+  // (Google Cast non regge il VP9 in MP4) — vedi api.castUrl / useCastMedia.
+  const info = new cc.media.MediaInfo(media.streamUrl, media.contentType || "video/mp4");
   info.streamType = cc.media.StreamType.BUFFERED;
   info.metadata = new cc.media.GenericMediaMetadata();
   info.metadata.title = media.title || "";

@@ -40,11 +40,16 @@ async def _stream_stdout(proc, tag: str, errbuf: list, err_task):
         err_task.cancel()
 
 
-async def ffmpeg_pipe_response(cmd: list, tag: str, headers: dict = None) -> StreamingResponse:
-    """Condivisa da /api/mux e /api/download: entrambi producono un MP4 in tempo reale via ffmpeg in sola copia."""
+async def ffmpeg_pipe_response(cmd: list, tag: str, headers: dict = None,
+                               media_type: str = "video/mp4") -> StreamingResponse:
+    """
+    Condivisa da /api/mux e /api/download: producono un flusso in tempo reale
+    via ffmpeg in sola copia. `media_type` è `video/mp4` tranne il ramo VP9 4K
+    del Cast, che esce in `video/webm` (Google Cast non regge il VP9 in MP4).
+    """
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     errbuf: list = []
     err_task = asyncio.create_task(_drain_stderr(proc, errbuf))
     return StreamingResponse(_stream_stdout(proc, tag, errbuf, err_task),
-                             media_type="video/mp4", headers=headers or {})
+                             media_type=media_type, headers=headers or {})
