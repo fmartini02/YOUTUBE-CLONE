@@ -48,8 +48,14 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
     if requested and len(requested) >= 2:
         video_fmt = next((f for f in requested if f.get("vcodec") != "none"), requested[0])
         audio_fmt = next((f for f in requested if f.get("acodec") != "none" and f.get("vcodec") == "none"), requested[-1])
-        cont = "webm" if video_fmt.get("ext") == "webm" else "mp4"
-        urls = (video_fmt["url"], audio_fmt["url"], cont)
+        # WebM SOLO per il ramo Cast 4K (compat+hq, video VP9). La
+        # riproduzione normale nel browser resta sempre MP4 frammentato: il
+        # video VP9/AV1 di YouTube (spesso .webm) va in `-c copy` dentro l'MP4
+        # come prima — è la strada su cui è tarato tutto il seek (start=,
+        # _keyframe_before, empty_moov). Instradarla su `-f webm` rompeva i
+        # salti su ogni video con sorgente webm.
+        webm = compat and hq and video_fmt.get("ext") == "webm"
+        urls = (video_fmt["url"], audio_fmt["url"], "webm" if webm else "mp4")
     else:
         url = info.get("url")
         if not url:
