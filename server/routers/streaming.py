@@ -5,7 +5,6 @@ in tempo reale dei flussi video+audio adattivi di YouTube. Vedi CLAUDE.md
 """
 import asyncio
 import shutil
-import subprocess
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -18,7 +17,6 @@ from ytdlp.helpers import ydl_opts_base
 router = APIRouter()
 
 _FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
-_FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
 # Cache degli URL di formato usati da /api/mux e /api/download. Serve al
 # seek: saltare in un altro punto del video significa riavviare ffmpeg, e
@@ -51,9 +49,9 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
         # WebM SOLO per il ramo Cast 4K (compat+hq, video VP9). La
         # riproduzione normale nel browser resta sempre MP4 frammentato: il
         # video VP9/AV1 di YouTube (spesso .webm) va in `-c copy` dentro l'MP4
-        # come prima — è la strada su cui è tarato tutto il seek (start=,
-        # _keyframe_before, empty_moov). Instradarla su `-f webm` rompeva i
-        # salti su ogni video con sorgente webm.
+        # come prima — è la strada su cui è tarato tutto il seek (`start=`,
+        # `empty_moov`, ricodifica audio sui salti). Instradarla su `-f webm`
+        # rompeva i salti su ogni video con sorgente webm.
         webm = compat and hq and video_fmt.get("ext") == "webm"
         urls = (video_fmt["url"], audio_fmt["url"], "webm" if webm else "mp4")
     else:
@@ -72,41 +70,6 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
     return urls
 
 
-def _keyframe_before(video_url: str, start: float) -> float:
-    """
-    Ultimo keyframe video a `start` o prima. Serve solo a tenere onesta la
-    barra: `-ss` prima dell'input, in `-c:v copy`, atterra comunque da sé sul
-    keyframe precedente, ma il player mostra `start + currentTime`, quindi
-    passando qui come `start` il keyframe vero la posizione mostrata coincide
-    con il fotogramma mostrato (scarto ≤ 1 GOP, non deriva nel tempo). Il buco
-    audio/video dopo il salto NON si cura qui — lo cura la ricodifica audio in
-    `_build_ffmpeg_cmd` (vedi lì).
-
-    Finestra di 6s: il probe è una range request sul flusso video, e su un 4K
-    una finestra di 15s costava 9-13s — oltre il `timeout=8` sotto, quindi
-    andava sempre in timeout e restituiva `start` grezzo. 6s stanno sotto i 5s
-    misurati e contengono sempre almeno un keyframe (GOP YouTube 3-7s). Se il
-    probe fallisce lo stesso si ricade su `start`: ora è innocuo, ffmpeg
-    aggancia il keyframe precedente per conto suo.
-    """
-    frm = max(0.0, start - 6.0)
-    cmd = [_FFPROBE_BIN, "-loglevel", "error", "-select_streams", "v",
-           "-skip_frame", "nokey", "-show_entries", "frame=pts_time",
-           "-of", "csv=p=0", "-read_intervals", f"{frm:.3f}%{start:.3f}", video_url]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=8).stdout
-    except (subprocess.SubprocessError, OSError):
-        return start
-    keys = []
-    for tok in out.replace(",", " ").split():   # csv a volte lascia una virgola in coda
-        try:
-            keys.append(float(tok))
-        except ValueError:
-            pass
-    keys = [k for k in keys if k <= start + 0.001]
-    return max(keys) if keys else start
-
-
 def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4") -> list:
     """
     Comando ffmpeg che unisce video+audio adattivi (o remuxa il progressivo).
@@ -118,19 +81,30 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4") -> li
     frag_keyframe il primo blocco utilizzabile non potrebbe chiudersi prima
     di allora (misurato: da 10-15s a 1-2s di avvio con frag_duration=1s).
 
-    SALTI (`seek` = `-ss` prima di ogni input): con `-c copy` su due input
-    HTTP separati, ognuno col proprio `-ss` e il proprio range request, l'MP4
-    che ne esce ha un buco DETERMINISTICO di ~9s senza un solo pacchetto video
-    subito dopo il primo keyframe (l'audio invece scorre) — e il `<video>` del
-    browser resta a bufferare all'infinito. Succede anche con `-ss` esatto sul
-    keyframe, quindi non è un problema di allineamento: è l'interleaver di
-    ffmpeg che, in sola copia, non riesce a sincronizzare i due flussi appena
-    aperti. Ricodificare la SOLA traccia audio (`-c:a aac`, encoder nativo,
-    sempre disponibile; ~130 kbit/s, costo trascurabile anche su un Raspberry)
-    lo forza a riallineare e il buco sparisce (verificato: 6/6 salti puliti
-    contro 6/6 col buco). Senza salto (`start=0`, `/api/download`) resta tutto
-    `-c copy` come prima. Il ramo `webm` (Cast 4K) è lasciato in copia: l'AAC
-    non entra in un WebM e quel percorso va provato con un ricevitore reale.
+    SALTI (`seek` = `-ss` col secondo grezzo richiesto, prima di ogni input):
+    con `-c copy` su due input HTTP separati, ognuno col proprio `-ss` e il
+    proprio range request, l'MP4 che ne esce ha un buco DETERMINISTICO di ~9s
+    senza un solo pacchetto video subito dopo il primo keyframe (l'audio invece
+    scorre) — e il `<video>` del browser resta a bufferare all'infinito.
+    Succede anche con `-ss` esatto sul keyframe, quindi non è un problema di
+    allineamento: è l'interleaver di ffmpeg che, in sola copia, non riesce a
+    sincronizzare i due flussi appena aperti. Ricodificare la SOLA traccia
+    audio (`-c:a aac`, encoder nativo, sempre disponibile; ~130 kbit/s, costo
+    trascurabile anche su un Raspberry) lo forza a riallineare e il buco
+    sparisce (verificato: 6/6 salti puliti contro 6/6 col buco). Senza salto
+    (`start=0`, `/api/download`) resta tutto `-c copy` come prima. Il ramo
+    `webm` (Cast 4K) è lasciato in copia: l'AAC non entra in un WebM e quel
+    percorso va provato con un ricevitore reale.
+
+    Nessun probe del keyframe prima del salto: `-ss` in `-c:v copy` atterra da
+    sé sull'ultimo keyframe ≤ valore (primo pacchetto video sempre `K`), e un
+    `ffprobe` mirato per trovarlo costava 4-5s sul flusso 4K — tutto sul
+    percorso critico del salto. In più dare a ffmpeg un `-ss` *esatto* sul
+    keyframe rallentava il suo avvio di ~1.7s rispetto a un valore "largo"
+    (misurato, 3/3). Il player mostra comunque `start + currentTime`: dopo un
+    salto la barra può essere avanti di ≤ 1 GOP (qui ~3s) rispetto al
+    fotogramma, offset fisso che non deriva — come lo snap ai segmenti di
+    YouTube. Il probe (`_keyframe_before`, finestra `ffprobe`) è stato rimosso.
 
     `container="webm"` è il ramo del Chromecast in 4K: Google Cast decodifica
     il VP9 solo dentro un WebM, mai in MP4. `-live 1` mette il muxer Matroska
@@ -164,13 +138,14 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     dal secondo richiesto (ffmpeg `-ss` prima degli input, sul Range degli
     URL googlevideo) e mostra `start + currentTime` come posizione.
 
-    Sul salto lo stesso `-ss` va a video e audio prima dei rispettivi input;
-    `start` è prima riportato all'ultimo keyframe che lo precede
-    (`_keyframe_before`) solo per far combaciare la posizione mostrata col
-    fotogramma mostrato — si "atterra" fino a ~1 GOP prima del punto cliccato,
-    come lo snap ai segmenti del player di YouTube. Il buco audio/video che
-    `-c copy` lasciava dopo ogni salto (player a bufferare all'infinito) è
-    risolto in `_build_ffmpeg_cmd` ricodificando la sola traccia audio.
+    Sul salto lo stesso `-ss` (il secondo grezzo richiesto) va a video e audio
+    prima dei rispettivi input; ffmpeg in `-c:v copy` atterra da sé sul
+    keyframe precedente, quindi si "atterra" fino a ~1 GOP prima del punto
+    cliccato, come lo snap ai segmenti del player di YouTube. Nessun `ffprobe`
+    del keyframe prima del salto: costava 4-5s sul percorso critico e non
+    serviva più. Il buco audio/video che `-c copy` lasciava dopo ogni salto
+    (player a bufferare all'infinito) è risolto in `_build_ffmpeg_cmd`
+    ricodificando la sola traccia audio.
     """
     try:
         urls = await asyncio.get_running_loop().run_in_executor(
@@ -183,10 +158,6 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
 
     video_url, audio_url, container = urls
     start = max(0.0, start)
-    if start > 0:
-        start = await asyncio.get_running_loop().run_in_executor(
-            None, _keyframe_before, video_url, start
-        )
     seek = ["-ss", f"{start:.3f}"] if start > 0 else []
     cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek, container=container)
 

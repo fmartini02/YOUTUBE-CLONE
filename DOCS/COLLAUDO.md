@@ -117,36 +117,39 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       sembra strutturale), non abbassa il voto della voce.
 - [ ] **Il video parte nella UI** — si apre, si vede e si sente, senza errori in console.
       **non verificabile** — serve un browser reale.
-- [ ] **Seek lungo** — spostare la barra a metà video: riparte da lì (a meno di ~1 GOP, il flusso
-      viene allineato all'ultimo keyframe ≤ `start` da `_keyframe_before`) e il tempo mostrato è
-      circa `start + currentTime`, **non zero**.
-      **non verificabile nella UI** — serve un browser reale. Lato server verificato: `/api/mux?start=`
-      chiama `ffprobe -skip_frame nokey -read_intervals` (finestra 6s) sulla URL video, riporta
-      `start` al keyframe precedente e passa lo stesso `-ss` a video **e** audio; sul ramo MP4 con
-      salto l'audio viene ricodificato in AAC (`-c:v copy -c:a aac -b:a 160k`). Test con URL
-      googlevideo reali (video AV1 2160p): comando generato da `_build_ffmpeg_cmd`, **5/5 run** con
-      primo pacchetto video e audio a pts 0, `maxgap` 0.04s (un frame), audio `codec=aac`. Se
-      ffprobe fallisce si ricade sul `start` chiesto (ora innocuo: ffmpeg aggancia il keyframe da sé).
+- [ ] **Seek lungo** — spostare la barra a metà video: riparte da lì (a meno di ~1 GOP: `-ss` grezzo
+      in `-c:v copy` atterra sul keyframe precedente) e il tempo mostrato è circa
+      `start + currentTime`, **non zero**.
+      **non verificabile nella UI** — serve un browser reale. Lato server verificato contro il vero
+      endpoint `/api/mux` (server dal branch, URL googlevideo reali, video AV1 2160p): `start=30`,
+      `start=300`, `start=580` — tutti `http 200`, primo pacchetto video `K` a pts 0, `maxgap` 1.00s
+      (cadenza dei frammenti), audio `codec=aac`, decodifica completa senza warning (2160 frame su
+      2160p). `_keyframe_before` (probe `ffprobe` del keyframe) **rimosso**: costava 4-5s sul
+      percorso critico e ffmpeg allinea da sé.
 - [ ] **Seek corto** — tasti ← → e doppio tocco su telefono: il video si sposta di pochi secondi e
       **non torna all'inizio**. È la trappola di `seekable` vuoto: qui si vede o non si vede.
       **non verificabile** — serve un browser reale.
 - [ ] **Seek in avanti senza attesa / senza restare a caricare all'infinito** — un salto in avanti
-      *singolo* riparte in un paio di secondi e **non "rimane a caricare" per sempre**. Due cause
-      distinte, entrambe corrette: (1) era `-copypriorss 0` che aspettava il keyframe successivo →
-      oggi si parte sul keyframe precedente; (2) **il buco vero**: con `-c copy` su due input HTTP
-      separati, ognuno col proprio `-ss`, l'MP4 usciva con ~9s senza pacchetti video subito dopo il
-      keyframe (audio regolare) e il `<video>` restava a bufferare per sempre — *deterministico*,
-      anche con `-ss` esatto sul keyframe, verificato **6/6** con URL reali. Cura: ricodifica della
-      sola traccia audio in AAC sul ramo MP4 con salto; stesso test **6/6** pulito (`maxgap` ≤ 0.04s).
-      **non verificabile nella UI** — serve un browser reale; meccanismo ffmpeg verificato con URL
-      googlevideo reali (non più solo file sintetici).
+      *singolo* riparte in ~1s (come aprire un video nuovo) e **non "rimane a caricare" per sempre**.
+      Tre pezzi: (1) era `-copypriorss 0` che aspettava il keyframe successivo → oggi `-ss` grezzo e
+      ffmpeg atterra sul keyframe precedente; (2) **il buco vero**: con `-c copy` su due input HTTP
+      separati l'MP4 usciva con ~9s senza pacchetti video dopo il keyframe (audio regolare) → il
+      `<video>` a bufferare per sempre; *deterministico*, anche con `-ss` esatto sul keyframe,
+      **6/6** con URL reali. Cura: ricodifica della sola traccia audio in AAC sul ramo MP4 con
+      salto → stesso test **6/6** pulito. (3) **latenza**: `_keyframe_before` faceva un `ffprobe`
+      del keyframe (4-5s sul flusso 4K) prima di lanciare ffmpeg, e per giunta un `-ss` esatto sul
+      keyframe rallenta l'avvio di ffmpeg di ~1.7s vs un valore "largo" (3/3) → rimosso, il salto
+      non aspetta più niente.
+      **non verificabile nella UI** — serve un browser reale; meccanismo verificato contro il vero
+      endpoint `/api/mux` con URL googlevideo reali.
 - [ ] **Seek vicino alla fine** — spostare la barra o premere → negli ultimi secondi del video:
       l'audio **non sparisce** e il player non si pianta. Era `-copypriorss 0` nell'ultimo GOP (nessun
       keyframe dopo il punto) a produrre un flusso **con 0 pacchetti video** che bloccava anche
-      l'audio (test sintetico CASE H/I: `v/a pkts: 0/21`). Con lo snap al keyframe che apre l'ultimo
-      GOP il flusso è di nuovo completo (test: `ask 44.6 -> snap 43.633`, video 118 pkt + audio 251).
-      In più, la ricodifica audio in AAC sul ramo MP4 con salto elimina il buco ~9s che restava
-      anche con keyframe allineato (vedi "Seek in avanti senza attesa").
+      l'audio (test sintetico CASE H/I: `v/a pkts: 0/21`). Oggi `-ss` grezzo in `-c:v copy` fa
+      partire ffmpeg dal keyframe che apre l'ultimo GOP (nessun `-copypriorss`), e la ricodifica
+      audio in AAC sul ramo MP4 con salto elimina il buco ~9s che restava anche con keyframe
+      allineato (vedi "Seek in avanti senza attesa"). Verificato contro l'endpoint reale:
+      `/api/mux?start=580` su un video ~600s → primo pacchetto video `K`, flusso completo, audio aac.
       **da confermare in un browser reale** — il meccanismo esatto del sintomo "perdo l'audio"
       (traccia video vuota che pianta l'elemento, oppure traccia audio più corta del video) non è
       isolabile senza browser; evitare il flusso vuoto è comunque corretto in entrambi i casi.
@@ -157,9 +160,8 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `GET /api/mux/<vid>?quality=2160` su un video che ha il 4K restituisce un flusso `ffprobe`
       con `height=2160`, e `quality=best` (default) sale da solo fino a 2160p. `adaptive_format_selector`
       default → 2160. **Il menu 4K compare solo dopo `npm run build`
-      del frontend** (dist versionato). Nota costo: ogni seek su un 4K scarica ~6s di video
-      (finestra ridotta da 15s, che costava 9-13s e superava il `timeout=8` di `_keyframe_before`);
-      se pesa ancora, l'ottimizzazione è una cache del GOP per video (fuori scope qui).
+      del frontend** (dist versionato). Nota: il seek su un 4K non paga più il probe del keyframe
+      (`_keyframe_before` rimosso, costava 4-5s sul flusso 4K) — riparte in ~1s come un video nuovo.
 - [ ] **4K sul Cast (VP9 in WebM)** — `GET /api/mux/<vid>?quality=2160&compat=1` su un video con
       il 4K restituisce un flusso **`video/webm`** (VP9 + Opus), non più il tetto 1080 H.264:
       oltre i 1080p YouTube non ha H.264 e l'unico 4K che un Chromecast (Ultra / Google TV / TV
