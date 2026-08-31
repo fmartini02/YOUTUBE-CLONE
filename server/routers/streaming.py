@@ -5,6 +5,7 @@ in tempo reale dei flussi video+audio adattivi di YouTube. Vedi CLAUDE.md
 """
 import asyncio
 import shutil
+import subprocess
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -17,6 +18,7 @@ from ytdlp.helpers import ydl_opts_base
 router = APIRouter()
 
 _FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
+_FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
 
 # Cache degli URL di formato usati da /api/mux e /api/download. Serve al
 # seek: saltare in un altro punto del video significa riavviare ffmpeg, e
@@ -62,7 +64,39 @@ def _mux_formats(video_id: str, quality: str, compat: bool):
     return urls
 
 
-def _build_ffmpeg_cmd(video_url: str, audio_url, extra_output=(), seek=()) -> list:
+def _keyframe_before(video_url: str, start: float) -> float:
+    """
+    Ultimo keyframe video a `start` o prima. Serve al seek: in sola copia il
+    flusso non può partire da metà GOP. `-ss` prima dell'input porta comunque
+    al keyframe precedente — video subito ma audio disallineato di qualche
+    secondo — mentre `-copypriorss 0` aspetta il keyframe *successivo* (diversi
+    secondi di caricamento) e vicino alla fine del video, dove un keyframe dopo
+    non c'è, dà un flusso senza video che pianta anche l'audio. Allineando
+    `-ss` di *entrambi* gli input a questo keyframe: video immediato, audio in
+    sincrono, nessun buco. La finestra di 15s tiene il probe a una range
+    request delimitata (~15s di video, non l'intero file) e copre anche i GOP
+    lunghi di YouTube; su un 4K sono comunque decine di MB per salto — se pesa,
+    l'ottimizzazione è una cache del GOP per video.
+    """
+    frm = max(0.0, start - 15.0)
+    cmd = [_FFPROBE_BIN, "-loglevel", "error", "-select_streams", "v",
+           "-skip_frame", "nokey", "-show_entries", "frame=pts_time",
+           "-of", "csv=p=0", "-read_intervals", f"{frm:.3f}%{start:.3f}", video_url]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=8).stdout
+    except (subprocess.SubprocessError, OSError):
+        return start
+    keys = []
+    for tok in out.replace(",", " ").split():   # csv a volte lascia una virgola in coda
+        try:
+            keys.append(float(tok))
+        except ValueError:
+            pass
+    keys = [k for k in keys if k <= start + 0.001]
+    return max(keys) if keys else start
+
+
+def _build_ffmpeg_cmd(video_url: str, audio_url, seek=()) -> list:
     """
     Comando ffmpeg in sola copia (-c copy, nessuna transcodifica): unisce
     video+audio se separati, altrimenti fa solo remux del progressivo.
@@ -71,13 +105,17 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, extra_output=(), seek=()) -> li
     YouTube hanno spesso il secondo keyframe a 5-6s dall'inizio, e con
     frag_keyframe il primo blocco utilizzabile non potrebbe chiudersi prima
     di allora (misurato: da 10-15s a 1-2s di avvio con frag_duration=1s).
+
+    `seek` (`-ss` prima di ogni input) è già allineato a un keyframe da
+    `_keyframe_before`, quindi niente `-copypriorss`: si parte esatti sul
+    keyframe, senza spezzone da scartare né attesa di quello dopo.
     """
     base = [_FFMPEG_BIN, "-loglevel", "error"]
     if audio_url:
         cmd = [*base, *seek, "-i", video_url, *seek, "-i", audio_url,
-               "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", *extra_output]
+               "-map", "0:v:0", "-map", "1:a:0", "-c", "copy"]
     else:
-        cmd = [*base, *seek, "-i", video_url, "-c", "copy", *extra_output]
+        cmd = [*base, *seek, "-i", video_url, "-c", "copy"]
     return [*cmd, "-movflags", "empty_moov+default_base_moof",
             "-frag_duration", "1000000", "-f", "mp4", "pipe:1"]
 
@@ -94,10 +132,11 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     dal secondo richiesto (ffmpeg `-ss` prima degli input, sul Range degli
     URL googlevideo) e mostra `start + currentTime` come posizione.
 
-    `-copypriorss 0` (solo quando si cerca davvero) scarta il keyframe che
-    precede il punto richiesto: senza, ffmpeg in sola copia produce un
-    flusso che comincia con un fotogramma fermo fino al punto vero (misurato
-    fino a 7s di immagine congelata) e un audio ~10s in anticipo.
+    In sola copia il flusso non può partire da metà GOP: `start` viene
+    riportato all'ultimo keyframe video che lo precede (`_keyframe_before`) e
+    lo stesso `-ss` va a video e audio, così partono in sincrono e senza
+    attese. Si "atterra" fino a ~1 GOP prima del punto cliccato, come lo snap
+    ai segmenti del player di YouTube.
     """
     try:
         urls = await asyncio.get_running_loop().run_in_executor(
@@ -110,9 +149,12 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
 
     video_url, audio_url = urls
     start = max(0.0, start)
+    if start > 0:
+        start = await asyncio.get_running_loop().run_in_executor(
+            None, _keyframe_before, video_url, start
+        )
     seek = ["-ss", f"{start:.3f}"] if start > 0 else []
-    prior = ["-copypriorss", "0"] if start > 0 else []
-    cmd = _build_ffmpeg_cmd(video_url, audio_url, extra_output=prior, seek=seek)
+    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek)
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
     # "Range: bytes=0-" e riceve un 200 invece del 206 che si aspetta,

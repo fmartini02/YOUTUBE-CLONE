@@ -117,16 +117,42 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       sembra strutturale), non abbassa il voto della voce.
 - [ ] **Il video parte nella UI** — si apre, si vede e si sente, senza errori in console.
       **non verificabile** — serve un browser reale.
-- [ ] **Seek lungo** — spostare la barra a metà video: riparte da lì e il tempo mostrato è
-      `start + currentTime`, cioè il punto chiesto, **non zero**.
-      **non verificabile** — serve un browser reale (l'endpoint `/api/mux?start=` risponde
-      correttamente lato server, vedi sopra; il comportamento è nel JS del player).
+- [ ] **Seek lungo** — spostare la barra a metà video: riparte da lì (a meno di ~1 GOP, il flusso
+      viene allineato all'ultimo keyframe ≤ `start` da `_keyframe_before`) e il tempo mostrato è
+      circa `start + currentTime`, **non zero**.
+      **non verificabile nella UI** — serve un browser reale. Lato server verificato: `/api/mux?start=`
+      chiama `ffprobe -skip_frame nokey -read_intervals` sulla URL video, riporta `start` al keyframe
+      precedente e passa lo stesso `-ss` a video **e** audio (test su file sintetici a GOP irregolare:
+      `ask 20.0 -> snap 17.967`, primo pacchetto video e audio entrambi a pts 0). Se ffprobe fallisce
+      si ricade sul `start` chiesto.
 - [ ] **Seek corto** — tasti ← → e doppio tocco su telefono: il video si sposta di pochi secondi e
       **non torna all'inizio**. È la trappola di `seekable` vuoto: qui si vede o non si vede.
       **non verificabile** — serve un browser reale.
+- [ ] **Seek in avanti senza attesa** — un salto in avanti *singolo* (non solo raffiche di frecce)
+      riparte **subito**, non "rimane a caricare" per secondi: era `-copypriorss 0` che aspettava il
+      keyframe successivo (test sintetico: 600 pacchetti video su 900, un GOP intero scartato in
+      testa). Ora si parte esatti sul keyframe precedente.
+      **non verificabile nella UI** — serve un browser reale; meccanismo ffmpeg verificato su file
+      sintetici (`-ss <keyframe>` su entrambi gli input, `-c copy`, nessun pacchetto mancante).
+- [ ] **Seek vicino alla fine** — spostare la barra o premere → negli ultimi secondi del video:
+      l'audio **non sparisce** e il player non si pianta. Era `-copypriorss 0` nell'ultimo GOP (nessun
+      keyframe dopo il punto) a produrre un flusso **con 0 pacchetti video** che bloccava anche
+      l'audio (test sintetico CASE H/I: `v/a pkts: 0/21`). Con lo snap al keyframe che apre l'ultimo
+      GOP il flusso è di nuovo completo (test: `ask 44.6 -> snap 43.633`, video 118 pkt + audio 251).
+      **da confermare in un browser reale** — il meccanismo esatto del sintomo "perdo l'audio"
+      (traccia video vuota che pianta l'elemento, oppure traccia audio più corta del video) non è
+      isolabile senza browser; evitare il flusso vuoto è comunque corretto in entrambi i casi.
 - [ ] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
       **non verificabile** — serve un browser reale.
+- [ ] **Qualità fino a 4K** — il menu del player e le Impostazioni offrono `2160p (4K)` e `1440p`;
+      `GET /api/mux/<vid>?quality=2160` su un video che ha il 4K restituisce un flusso `ffprobe`
+      con `height=2160`, e `quality=best` (default) sale da solo fino a 2160p. `adaptive_format_selector`
+      default → 2160; `cast_format_selector` resta tetto 1080 (H.264 più alto su YouTube), quindi il
+      Cast non riceve mai un AV1 4K che non decodifica. **Il menu 4K compare solo dopo `npm run build`
+      del frontend** (dist versionato). Nota costo: ogni seek su un 4K scarica ~15s di video
+      (~20-40 MB) per il probe del keyframe di `_keyframe_before`; se pesa, l'ottimizzazione è una
+      cache del GOP per video (fuori scope qui).
 - [ ] **Velocità di riproduzione** — "Riproduzione veloce" dal menu e 2x tenendo premuto:
       funzionante quando la velocità **resta** dopo un salto (che riapre il flusso e chiama `load()`).
       **non verificabile** — serve un browser reale.

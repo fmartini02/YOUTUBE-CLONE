@@ -1,6 +1,6 @@
 """format_selectors.py — selettori di formato yt-dlp per la riproduzione."""
 
-_QUALITY_HEIGHTS = {"1080": 1080, "720": 720, "480": 480, "360": 360}
+_QUALITY_HEIGHTS = {"2160": 2160, "1440": 1440, "1080": 1080, "720": 720, "480": 480, "360": 360}
 
 
 def adaptive_format_selector(quality: str) -> str:
@@ -9,8 +9,12 @@ def adaptive_format_selector(quality: str) -> str:
     360p YouTube quasi mai offre un unico file già combinato, e il player
     <video> del browser non sa riprodurre due URL separati come fa VLC. Usata
     da /api/mux, che li ricompone al volo con ffmpeg.
+
+    `quality="best"` (il default) sale fino a 2160p (4K): il remux è in sola
+    copia, quindi il costo lato server è solo I/O; a decodificare il 4K
+    (AV1/VP9) ci pensa il browser.
     """
-    h = _QUALITY_HEIGHTS.get(quality, 1080)
+    h = _QUALITY_HEIGHTS.get(quality, 2160)
     return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
 
 
@@ -23,9 +27,10 @@ def cast_format_selector(quality: str) -> str:
     recenti sa decodificare AV1, e Opus dentro un contenitore MP4 è supportato
     male ovunque — il risultato è che la TV non riproduce nulla. H.264+AAC sono
     invece decodificati da qualunque dispositivo Cast, e su YouTube arrivano
-    comunque fino a 1080p.
+    comunque fino a 1080p — quindi anche chiedendo 1440p/4K al Cast si resta
+    tetto 1080, l'H.264 più alto che YouTube offre.
     """
-    h = _QUALITY_HEIGHTS.get(quality, 1080)
+    h = min(_QUALITY_HEIGHTS.get(quality, 1080), 1080)
     return (
         f"bestvideo[height<={h}][vcodec^=avc1]+bestaudio[acodec^=mp4a]"
         f"/best[height<={h}][vcodec^=avc1][acodec^=mp4a]"

@@ -2,6 +2,8 @@ import { Section, PrefRow, PrefToggle } from "./settingsShared";
 
 const QUALITY_OPTIONS = [
   { value: "best", label: "Migliore disponibile" },
+  { value: "2160", label: "2160p (4K)" },
+  { value: "1440", label: "1440p" },
   { value: "1080", label: "1080p" },
   { value: "720", label: "720p" },
   { value: "480", label: "480p" },

@@ -1,7 +1,7 @@
 import { formatSpeed } from "./speedMath";
 import SubtitlesSection from "./SubtitlesSection";
 
-const QUALITIES = [["best", "Migliore qualità"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["360", "360p"]];
+const QUALITIES = [["best", "Migliore qualità"], ["2160", "2160p (4K)"], ["1440", "1440p"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"], ["360", "360p"]];
 const SUB_SIZES = [["small", "Piccoli"], ["normal", "Normali"], ["large", "Grandi"]];
 
 function PlaybackSection({ speed, onGoSpeed }) {
