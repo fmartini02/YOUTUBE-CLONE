@@ -384,13 +384,17 @@ body {
 }
 .player-progress-track {
   position: relative; width: 100%; height: 4px;
-  background: rgba(255,255,255,0.25); border-radius: 2px;
+  background: rgba(255,255,255,0.18); border-radius: 2px;
   transition: height 0.1s;
 }
 .player-progress:hover .player-progress-track { height: 6px; }
+/* Parte già scaricata in avanti: tenuta ben più chiara del binario spento
+   (0.18) così si distingue a colpo d'occhio quanto "cuscinetto" c'è prima di
+   dover riaprire il flusso. Su YouTube è più tenue, ma qui il buffer parte da
+   `stream.start` e non da zero, quindi vale la pena renderlo evidente. */
 .player-progress-buffer {
   position: absolute; top: 0; bottom: 0;
-  background: rgba(255,255,255,0.45); border-radius: 2px;
+  background: rgba(255,255,255,0.7); border-radius: 2px;
 }
 .player-progress-played {
   position: absolute; left: 0; top: 0; bottom: 0;
