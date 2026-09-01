@@ -518,13 +518,15 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `activeTrackIds`); la velocità cambia a caldo (`setPlaybackRate`) e viene riapplicata dopo
       ogni ricarica. Le scelte aggiornano anche lo stato della pagina, così alla fine del cast il
       player locale riparte già allineato.
-      **non verificabile** — serve APK + Chromecast. Punti da controllare col dispositivo:
-      (a) i sottotitoli side-loaded arrivano sul receiver — il `.vtt` è servito con
-      `Access-Control-Allow-Origin: *` (`server/routers/watch.py`), che il Default Media Receiver
-      richiede per i track (a differenza del flusso video); se non compaiono, verificare che
-      l'origine del receiver non sia bloccata dal `CORSMiddleware`.
-      (b) la dimensione sottotitoli usa `TextTrackStyle.setFontScale` nel `loadMedia`: da provare
-      che il receiver la onori.
+      **verificato senza hardware**: (1) niente header `Access-Control-Allow-Origin` doppio — probe
+      con `TestClient` + lo stesso `CORSMiddleware`: origine assente o non in allow-list → un solo
+      `*` (giusto per il receiver Cast); origine LAN in allow-list → il middleware lo sostituisce
+      con l'origine esatta (un solo header). (2) menu ⚙: `.player-settings-*` sono `position:
+      absolute` e si ancorano a `.player-wrap` (già `relative`), con `bottom:62px` che scavalca la
+      `CastRemoteBar` sorella — stessa struttura del player locale. `norm_check` pulito, build OK.
+      **non verificabile** — serve APK + Chromecast: (a) i sottotitoli side-loaded compaiono
+      davvero sul receiver; (b) `TextTrackStyle.setFontScale` viene onorato; (c) resa visiva del
+      menu ⚙ con una sessione cast attiva.
 - [ ] **Trasmissione in 4K** — con la qualità impostata su 2160p/1440p il video parte sul
       ricevitore Cast in VP9/WebM (vedi "4K sul Cast" in §3). Se il receiver non regge il VP9 4K
       o il WebM in streaming, l'utente riabbassa a 1080p e torna all'H.264. **non verificabile** —

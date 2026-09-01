@@ -20,15 +20,16 @@ export default function CastRemote({ cast, player, info }) {
   const playing = cast.playerState === "playing";
   const togglePlay = useCallback(() => (playing ? remote.pause() : remote.play()), [remote, playing]);
 
+  // .player-wrap è già position:relative + overflow:hidden: il menu ⚙ e il suo
+  // backdrop (.player-settings-*, position:absolute) si ancorano lì, come nel
+  // player locale, e `bottom:62px` del menu scavalca la barra qui sotto.
   return (
     <div className="player-wrap">
-      <div style={{ position: "relative" }}>
-        <CastRemoteScreen
-          thumbnail={info?.thumbnail || media?.thumbnail} deviceName={cast.deviceName}
-          playerState={cast.playerState} onSkip={remote.skip} onTogglePlay={togglePlay}
-        />
-        <CastRemoteSettings cast={cast} player={player} />
-      </div>
+      <CastRemoteScreen
+        thumbnail={info?.thumbnail || media?.thumbnail} deviceName={cast.deviceName}
+        playerState={cast.playerState} onSkip={remote.skip} onTogglePlay={togglePlay}
+      />
+      <CastRemoteSettings cast={cast} player={player} />
       <CastRemoteBar
         position={cast.position || 0} duration={duration} playing={playing}
         onSeek={remote.seek} onSkip={remote.skip} onTogglePlay={togglePlay}
