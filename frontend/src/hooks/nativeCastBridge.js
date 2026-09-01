@@ -8,9 +8,14 @@ import { registerPlugin } from "@capacitor/core";
  */
 export const YtCast = registerPlugin("YtCast");
 
-/** Payload di YtCast.loadMedia dal `media` del frontend (vedi useCastMedia). */
-export function nativeLoadPayload(media, currentTime) {
-  return {
+/**
+ * Payload di YtCast.loadMedia dal `media` del frontend (vedi useCastMedia).
+ * `opts` (fase 2): `sub` = {url, lang} per un track sottotitolo side-loaded,
+ * `fontScale` per la dimensione, `rate` da riapplicare dopo la ricarica
+ * (un nuovo load azzera la velocità sul receiver, come `load()` lato player).
+ */
+export function nativeLoadPayload(media, currentTime, opts) {
+  const p = {
     url: media.streamUrl,
     contentType: media.contentType || "video/mp4",
     title: media.title || "",
@@ -19,6 +24,13 @@ export function nativeLoadPayload(media, currentTime) {
     videoId: media.videoId || "",
     currentTime: currentTime || 0,
   };
+  if (opts?.sub?.url) {
+    p.tracks = [{ trackId: 1, url: opts.sub.url, lang: opts.sub.lang || "", name: opts.sub.lang || "CC" }];
+    p.activeTrackIds = [1];
+    p.subtitleFontScale = opts.fontScale || 1;
+  }
+  if (opts?.rate > 0) p.playbackRate = opts.rate;
+  return p;
 }
 
 // showDevicePicker apre solo il selettore: la connessione arriva (o no) come

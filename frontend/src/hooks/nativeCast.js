@@ -34,7 +34,10 @@ function buildRemote(mediaRef) {
     seek: (t) => YtCast.seek({ time: target(t) }),
     skip: (d) => YtCast.seek({ time: target((cur().position || 0) + d) }),
     setRate: (rate) => YtCast.setPlaybackRate({ rate }),
-    reload: (media, at) => YtCast.loadMedia(nativeLoadPayload(media, at ?? cur().position ?? 0)),
+    // Ricarica alla posizione corrente con qualità/sottotitolo/velocità nuovi:
+    // sul Default Media Receiver i track e la sorgente si cambiano solo al load.
+    reload: (media, opts) =>
+      YtCast.loadMedia(nativeLoadPayload(media, opts?.at ?? cur().position ?? 0, opts)),
   };
 }
 

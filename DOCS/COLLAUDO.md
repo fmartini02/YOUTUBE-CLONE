@@ -512,6 +512,19 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **non verificabile** — servono APK installato + un Chromecast in rete. Verificato da codice:
       `hooks/nativeCast.js` + `nativeCastBridge.js` instradano i comandi su `CastBridgePlugin.java`
       (`RemoteMediaClient`), `norm_check` pulito, `npm run build` OK.
+- [ ] **Qualità / sottotitoli / velocità via cast (APK)** — dal menu ⚙ del `CastRemote`: cambiare
+      qualità o attivare un sottotitolo **ricarica il video sulla TV alla stessa posizione**
+      (`CastRemote/useCastReload.js` → `YtCast.loadMedia` con `currentTime`, `tracks`,
+      `activeTrackIds`); la velocità cambia a caldo (`setPlaybackRate`) e viene riapplicata dopo
+      ogni ricarica. Le scelte aggiornano anche lo stato della pagina, così alla fine del cast il
+      player locale riparte già allineato.
+      **non verificabile** — serve APK + Chromecast. Punti da controllare col dispositivo:
+      (a) i sottotitoli side-loaded arrivano sul receiver — il `.vtt` è servito con
+      `Access-Control-Allow-Origin: *` (`server/routers/watch.py`), che il Default Media Receiver
+      richiede per i track (a differenza del flusso video); se non compaiono, verificare che
+      l'origine del receiver non sia bloccata dal `CORSMiddleware`.
+      (b) la dimensione sottotitoli usa `TextTrackStyle.setFontScale` nel `loadMedia`: da provare
+      che il receiver la onori.
 - [ ] **Trasmissione in 4K** — con la qualità impostata su 2160p/1440p il video parte sul
       ricevitore Cast in VP9/WebM (vedi "4K sul Cast" in §3). Se il receiver non regge il VP9 4K
       o il WebM in streaming, l'utente riabbassa a 1080p e torna all'H.264. **non verificabile** —

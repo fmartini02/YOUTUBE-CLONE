@@ -22,7 +22,7 @@ function PlayerControlsBar({ isCasting, cast }) {
  * (cast web desktop, che si comanda dal telecomando della TV).
  */
 function PlayerOrCasting({ isCasting, cast, info, player }) {
-  if (isCasting && cast?.remote) return <CastRemote cast={cast} media={player.castMedia} info={info} />;
+  if (isCasting && cast?.remote) return <CastRemote cast={cast} player={player} info={info} />;
   if (isCasting) return <CastingScreen cast={cast} thumbnail={info?.thumbnail} />;
   return (
     <VideoPlayer

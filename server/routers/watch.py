@@ -98,7 +98,14 @@ async def get_subtitle_vtt(video_id: str, lang: str):
         async with httpx.AsyncClient() as client:
             r = await client.get(url, timeout=15)
             r.raise_for_status()
-        return Response(content=r.content, media_type="text/vtt")
+        # Access-Control-Allow-Origin: * serve al Chromecast — il receiver
+        # scarica i track sottotitolo side-loaded con una fetch che, a
+        # differenza del flusso <video>, applica il CORS. È testo di
+        # sottotitoli pubblici su una GET di sola lettura: aprirlo non allarga
+        # la superficie (la guardia blocca_scritture_esterne copre solo le
+        # scritture). Vedi CastRemote / api.castSubtitleUrl.
+        return Response(content=r.content, media_type="text/vtt",
+                        headers={"Access-Control-Allow-Origin": "*"})
     except HTTPException:
         raise
     except Exception as ex:

@@ -18,6 +18,7 @@ import com.google.android.gms.cast.MediaMetadata;
 import com.google.android.gms.cast.MediaSeekOptions;
 import com.google.android.gms.cast.MediaStatus;
 import com.google.android.gms.cast.MediaTrack;
+import com.google.android.gms.cast.TextTrackStyle;
 import com.google.android.gms.cast.framework.CastContext;
 import com.google.android.gms.cast.framework.CastSession;
 import com.google.android.gms.cast.framework.SessionManager;
@@ -197,7 +198,12 @@ public class CastBridgePlugin extends Plugin {
                 .setMetadata(meta)
                 .setCustomData(customData);
         List<MediaTrack> tracks = parseTracks(call.getArray("tracks", null));
-        if (!tracks.isEmpty()) info.setMediaTracks(tracks);
+        if (!tracks.isEmpty()) {
+            info.setMediaTracks(tracks);
+            TextTrackStyle style = new TextTrackStyle();
+            style.setFontScale((float) call.getDouble("subtitleFontScale", 1.0));
+            info.setTextTrackStyle(style);
+        }
 
         MediaLoadRequestData.Builder req = new MediaLoadRequestData.Builder()
                 .setMediaInfo(info.build())
