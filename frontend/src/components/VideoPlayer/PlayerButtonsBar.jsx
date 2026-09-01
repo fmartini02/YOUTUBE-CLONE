@@ -1,6 +1,7 @@
 import { formatTime } from "./videoPlayerHelpers";
 import { formatSpeed } from "./speedMath";
 import { SKIP_SECONDS } from "./playerConstants";
+import { isCapacitor } from "../../api/device";
 
 function VolumeControl({ muted, volume, toggleMute, changeVolume }) {
   return (
@@ -34,7 +35,15 @@ function SettingsButton({ settingsOpen, onOpenSettings, speed }) {
 
 // Icona disegnata a mano: il rettangolo largo/stretto della modalità cinema
 // non ha un equivalente affidabile fra le Material Symbols.
+//
+// Nell'app installata (Capacitor) il tasto non compare: la modalità cinema
+// allarga il video accanto alla sidebar dei correlati, un layout che sul
+// telefono è già a colonna singola — lì lo switch non ha nessun effetto utile
+// da mostrare. Resta su web/desktop, dove quel layout affiancato esiste
+// davvero. `isCapacitor()` è una scelta a runtime, non a build: nello stesso
+// bundle servito sia al sito sia impacchettato nell'APK.
 function TheaterButton({ theater, onToggleTheater }) {
+  if (isCapacitor()) return null;
   return (
     <button className="player-btn" onClick={() => onToggleTheater?.()} title={theater ? "Modalità predefinita (t)" : "Modalità cinema (t)"}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
