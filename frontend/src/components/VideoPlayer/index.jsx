@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../../api";
 import { isCapacitor } from "../../api/device";
 import { useTouchDevice } from "../../hooks/useMediaQuery";
-import { formatTime, isBuffered, isSeekable } from "./videoPlayerHelpers";
+import { formatTime, isBuffered, isSeekable, qualityForScreen } from "./videoPlayerHelpers";
 import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
 import { HOLD_SPEED, HOLD_MS } from "./speedMath";
 import PlayerOverlays from "./PlayerOverlays";
@@ -55,6 +55,10 @@ export default function VideoPlayer({
   // aperto parte da solo. Le riaperture del flusso dovute a un salto o a un
   // cambio di qualità mantengono invece lo stato di prima.
   autoplay = true,
+  // Preferenza "Adatta la qualità allo schermo" (Impostazioni): con "Migliore
+  // qualità" selezionata, non chiede al server più della risoluzione che il
+  // pannello regge davvero. Vedi qualityForScreen in videoPlayerHelpers.
+  fitScreen = true,
 }) {
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
@@ -128,7 +132,7 @@ export default function VideoPlayer({
     const deveAndare = nuovo ? autoplayRef.current : andavaRef.current;
     caricatoRef.current = videoId;
 
-    v.src = api.muxUrl(videoId, quality, stream.start);
+    v.src = api.muxUrl(videoId, qualityForScreen(quality, fitScreen), stream.start);
     v.load();
     setBuffering(true);
     setPosition(stream.start);
@@ -145,7 +149,10 @@ export default function VideoPlayer({
       v.preload = "auto";
       setBuffering(false);
     }
-  }, [videoId, quality, stream]);
+    // `fitScreen` è tra le dipendenze perché concorre a formare l'URL del
+    // flusso al pari di `quality` (di norma non cambia a player montato: le
+    // Impostazioni sono un'altra route e lo smontano).
+  }, [videoId, quality, stream, fitScreen]);
 
   // ── Velocità ───────────────────────────────────────────────────────────
   // Dipende anche da `stream` perché `load()` riporta `playbackRate` a
@@ -159,7 +166,7 @@ export default function VideoPlayer({
     if (!v) return;
     v.defaultPlaybackRate = rate;
     v.playbackRate = rate;
-  }, [rate, videoId, quality, stream]);
+  }, [rate, videoId, quality, stream, fitScreen]);
 
   // ── Recupero da uno stallo di rete ───────────────────────────────────────
   // Lasciato a sé, il browser riprende non appena arriva un filo di dati:
@@ -192,11 +199,11 @@ export default function VideoPlayer({
   }, [bufferedEnd, position]);
 
   // Uno stallo vecchio non deve restare "in attesa" su un flusso appena
-  // riaperto (salto, cambio qualità, video nuovo).
+  // riaperto (salto, cambio qualità, cambio di "adatta allo schermo", video nuovo).
   useEffect(() => {
     rebufferingRef.current = false;
     setRebuffering(false);
-  }, [videoId, quality, stream]);
+  }, [videoId, quality, stream, fitScreen]);
 
   // ── Salto nel tempo ────────────────────────────────────────────────────
   const seekTo = useCallback((target) => {

@@ -1,4 +1,4 @@
-"""prefs.py — preferenze utente (qualità, autoplay, tema)."""
+"""prefs.py — preferenze utente (qualità, autoplay, tema, adatta allo schermo)."""
 from typing import Optional
 
 from fastapi import APIRouter
@@ -14,6 +14,7 @@ class PrefsUpdate(BaseModel):
     quality: Optional[str] = None
     autoplay: Optional[bool] = None
     theme: Optional[str] = None
+    fitScreen: Optional[bool] = None
 
 
 @router.get("/api/prefs")

@@ -23,6 +23,11 @@ export default function PreferencesSection({ prefs, salvaPrefs }) {
   return (
     <Section title="Preferenze" icon="🎛️">
       <PrefRow label="Qualità video predefinita" value={prefs.quality || "best"} options={QUALITY_OPTIONS} onChange={v => salvaPrefs({ quality: v })} />
+      <PrefToggle
+        label="Adatta la qualità allo schermo"
+        sublabel="Con «Migliore disponibile» non scarica più della risoluzione che lo schermo può mostrare"
+        value={prefs.fitScreen !== false} onChange={v => salvaPrefs({ fitScreen: v })}
+      />
       <PrefRow label="Tema" value={prefs.theme || "dark"} options={THEME_OPTIONS} onChange={v => salvaPrefs({ theme: v })} />
       <PrefToggle
         label="Autoplay video" sublabel="Fa partire da solo un video appena aperto"

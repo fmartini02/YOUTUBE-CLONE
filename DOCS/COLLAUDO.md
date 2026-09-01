@@ -162,6 +162,17 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       default → 2160. **Il menu 4K compare solo dopo `npm run build`
       del frontend** (dist versionato). Nota: il seek su un 4K non paga più il probe del keyframe
       (`_keyframe_before` rimosso, costava 4-5s sul flusso 4K) — riparte in ~1s come un video nuovo.
+- [ ] **Adatta la qualità allo schermo** — preferenza attiva di default (`GET /api/prefs` include
+      `"fitScreen": true`). Con `quality` = `best`, il player chiede a `/api/mux` non `quality=best`
+      ma il gradino YouTube più alto che il pannello regge — `qualityForScreen` in
+      `components/VideoPlayer/videoPlayerHelpers.js`: `min(screen.width, screen.height) *
+      devicePixelRatio`, senza tetto sul DPR (tolleranza 5%), mappato su `[2160,1440,1080,720,480]`.
+      Funzionante quando: su un monitor/telefono 1080p con "Migliore disponibile" selezionata il
+      `<video>.currentSrc` finisce in `?quality=1080` (non `best`); su un pannello che regge il
+      1440p finisce in `?quality=1440`; una scelta numerica esplicita dal menu (es. 2160p) passa
+      **intatta** anche con l'opzione attiva; disattivando l'opzione in Impostazioni il flusso si
+      riapre e torna a `?quality=best`. Non tocca `/api/download` né il Cast (`castUrl`), dove lo
+      schermo di riferimento non è quello del browser. **non verificabile** — serve un browser reale.
 - [ ] **4K sul Cast (VP9 in WebM)** — `GET /api/mux/<vid>?quality=2160&compat=1` su un video con
       il 4K restituisce un flusso **`video/webm`** (VP9 + Opus), non più il tetto 1080 H.264:
       oltre i 1080p YouTube non ha H.264 e l'unico 4K che un Chromecast (Ultra / Google TV / TV
@@ -329,10 +340,11 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       singola confermata sopra; per lo svuotamento totale: aggiunta una seconda voce di prova
       (`COLLAUDOTEST02`), poi `DELETE /api/history` → `{"ok":true}`, `GET /api/history` →
       `{"history":[]}`. **non verificabile** (riflesso nella UI) — serve un browser reale.
-- [x] **Preferenze** — `GET /api/prefs` torna almeno `quality`, `autoplay`, `theme`;
+- [x] **Preferenze** — `GET /api/prefs` torna almeno `quality`, `autoplay`, `theme`, `fitScreen`;
       `PATCH /api/prefs` le aggiorna e sopravvivono al riavvio del server.
       **OK** (stavolta verificato anche il riavvio vero, non solo la scrittura su disco) —
-      `GET /api/prefs` → `{"quality":"best","autoplay":true,"theme":"dark"}`.
+      `GET /api/prefs` → `{"quality":"best","autoplay":true,"theme":"dark"}` (prima di `fitScreen`;
+      oggi la risposta include anche `"fitScreen": true` — da ri-verificare al prossimo giro).
       `PATCH -d '{"theme":"light"}'` → risposta aggiornata e `data/prefs.json` riscritto con
       `{"theme": "light"}`. Server fermato e riavviato da zero (nuovo processo uvicorn): `GET
       /api/prefs` → ancora `{"theme":"light"}`, cioè la preferenza è sopravvissuta al riavvio, non

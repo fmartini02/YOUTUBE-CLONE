@@ -24,7 +24,8 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
       subtitleLangs={player.subtitleLangs} subtitleLang={player.subtitleLang} onSubtitleLangChange={player.setSubtitleLang}
       subtitleSize={player.subtitleSize} onSubtitleSizeChange={player.setSubtitleSize}
       theater={player.theater} onToggleTheater={player.toggleTheater}
-      onError={() => player.addToast("Errore stream — ricarica la pagina")} onNotice={player.addToast} autoplay={player.autoplay}
+      onError={() => player.addToast("Errore stream — ricarica la pagina")} onNotice={player.addToast}
+      autoplay={player.autoplay} fitScreen={player.fitScreen}
     />
   );
 }
@@ -37,11 +38,11 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
  */
 export default function VideoMainPlayer({
   isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang,
-  subtitleLangs, subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay,
+  subtitleLangs, subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen,
 }) {
   const player = {
     videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs,
-    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay,
+    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen,
   };
   return (
     <>

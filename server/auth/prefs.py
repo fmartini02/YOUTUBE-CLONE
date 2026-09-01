@@ -1,4 +1,4 @@
-"""prefs.py — preferenze utente (qualità, autoplay, tema)."""
+"""prefs.py — preferenze utente (qualità, autoplay, tema, adatta allo schermo)."""
 from auth.storage import PREFS_FILE, _scrivi_json
 
 
@@ -9,6 +9,10 @@ def get_prefs(state) -> dict:
         # "dark" | "light" | "auto": la legge usePrefs e diventa
         # l'attributo data-theme su <html>.
         "theme": state.prefs.get("theme", "dark"),
+        # Con "quality" = "best", il player non chiede più della risoluzione
+        # dello schermo del dispositivo. Attivo di default. Vedi
+        # qualityForScreen in frontend/src/components/VideoPlayer/videoPlayerHelpers.js.
+        "fitScreen": state.prefs.get("fitScreen", True),
     }
 
 
