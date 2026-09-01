@@ -4,7 +4,8 @@
 export const RECEIVER_APP_ID = import.meta.env.VITE_CAST_APP_ID || "CC1AD845";
 
 export const CAST_UNAVAILABLE_MESSAGE = {
-  "app-android": "La trasmissione non è disponibile nell'app Android: il componente Google Cast esiste solo in Chrome, Brave o Edge su computer. Per mandare un video sulla TV apri YTProxy dal browser del PC; in alternativa usa la trasmissione schermo di Android.",
+  // Nell'APK Android il cast ora c'è (plugin nativo YtCast): niente più voce
+  // "app-android". Restano i runtime desktop senza Cast Web Sender.
   electron: "La trasmissione non è disponibile nell'app desktop: apri YTProxy in Chrome, Brave o Edge.",
   browser: "Serve un browser Chrome, Brave o Edge per trasmettere.",
   blocked: "Lo script di Google Cast è stato bloccato (Brave Shields o adblocker). Disattiva lo scudo su questo sito e ricarica.",

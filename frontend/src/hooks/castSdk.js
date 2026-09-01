@@ -5,14 +5,12 @@
  */
 let sdkPromise = null;
 
-// WebView di Android (app Capacitor): la UA contiene "Chrome" e supererebbe
-// il controllo sul browser qui sotto, ma il componente Cast non c'è. Senza
-// questo caso si scaricava lo script di Google per niente e si aspettavano
-// 8 secondi per dire "timeout", un motivo sbagliato: su Android quel
-// componente non esiste, non è un problema di rete o di impostazioni.
+// Nell'APK Android il cast non passa più di qui: useCast sceglie il ramo
+// nativo (hooks/nativeCast.js) prima ancora di caricare questo SDK. Restano i
+// runtime desktop dove il Cast Web Sender non c'è: Electron e i browser non
+// Chromium.
 function detectUnavailableReason() {
   if (/Electron/i.test(navigator.userAgent) || window.__YTPROXY_ELECTRON__) return "electron";
-  if (window.Capacitor?.isNativePlatform?.() || /;\s*wv\)/.test(navigator.userAgent)) return "app-android";
   if (!/Chrome|Edg|Brave|Chromium/i.test(navigator.userAgent)) return "browser";
   return null;
 }

@@ -1,5 +1,6 @@
 import VideoPlayer from "../../components/VideoPlayer";
 import CastingScreen from "./CastingScreen";
+import CastRemote from "../../components/CastRemote";
 
 // Solo in cast c'è qualcosa di vero da dire ("sta girando su quella TV").
 // Un video normale non è una diretta: mostrare "Streaming diretto" sempre,
@@ -15,8 +16,13 @@ function PlayerControlsBar({ isCasting, cast }) {
   );
 }
 
-/** Il player vero, o la schermata di stato quando il video sta girando sulla TV. */
+/**
+ * Il player vero, o — quando il video sta girando sulla TV — il telecomando
+ * (APK Android, `cast.remote` presente) oppure la sola schermata di stato
+ * (cast web desktop, che si comanda dal telecomando della TV).
+ */
 function PlayerOrCasting({ isCasting, cast, info, player }) {
+  if (isCasting && cast?.remote) return <CastRemote cast={cast} media={player.castMedia} info={info} />;
   if (isCasting) return <CastingScreen cast={cast} thumbnail={info?.thumbnail} />;
   return (
     <VideoPlayer
@@ -37,11 +43,11 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
  * barra di avanzamento.
  */
 export default function VideoMainPlayer({
-  isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang,
-  subtitleLangs, subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen,
+  isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang, subtitleLangs,
+  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia,
 }) {
   const player = {
-    videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs,
+    videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs, castMedia,
     subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen,
   };
   return (

@@ -42,6 +42,11 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Il plugin del cast va registrato PRIMA che l'activity parta: come per i
+        // launcher di activity result di Capacitor, a partita avviata non viene
+        // più accettato. Sblocca il Chromecast nativo nell'APK, dove il Cast Web
+        // Sender di Google non esiste (vedi CastBridgePlugin e hooks/nativeCast.js).
+        registerPlugin(CastBridgePlugin.class);
         super.onCreate(savedInstanceState);
 
         Bridge bridge = getBridge();

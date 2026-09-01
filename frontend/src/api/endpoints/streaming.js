@@ -8,5 +8,8 @@ export const streamingEndpoints = {
   muxUrl: (id, quality = "best", start = 0) =>
     `${getServerBase()}/api/mux/${id}?quality=${quality}${start > 0 ? `&start=${start.toFixed(2)}` : ""}`,
   // Per il Chromecast: URL assoluto (la TV scarica da sé) e codec compatibili.
-  castUrl: (id, quality = "best") => `${getLanBase()}/api/mux/${id}?quality=${quality}&compat=1`,
+  // `start`: come muxUrl, il flusso non è cercabile — sui salti via cast si
+  // ricarica il media da un altro punto (vedi CastRemote / nativeCast.js).
+  castUrl: (id, quality = "best", start = 0) =>
+    `${getLanBase()}/api/mux/${id}?quality=${quality}&compat=1${start > 0 ? `&start=${start.toFixed(2)}` : ""}`,
 };

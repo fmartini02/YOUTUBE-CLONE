@@ -22,6 +22,7 @@ function VideoMain({ s, videoId, navigate, onSubsChange }) {
         info={s.info} subtitleLang={s.subtitleLang} setSubtitleLang={s.setSubtitleLang} subtitleLangs={s.subtitleLangs}
         subtitleSize={s.subtitleSize} setSubtitleSize={s.setSubtitleSize} theater={s.theater} toggleTheater={s.toggleTheater}
         addToast={s.addToast} autoplay={s.prefs.autoplay !== false} fitScreen={s.prefs.fitScreen !== false}
+        castMedia={s.castMedia}
       />
       <VideoInfoSection
         info={s.info} descExpanded={s.descExpanded} setDescExpanded={s.setDescExpanded} channelAvatar={s.channelAvatar}

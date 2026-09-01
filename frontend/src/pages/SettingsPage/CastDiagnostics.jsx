@@ -7,10 +7,11 @@ function buildDiagnosticRows(cast, castBase, origin) {
   const chromeCast = typeof window !== "undefined" && !!window.chrome?.cast;
   const castFw = typeof window !== "undefined" && !!window.cast?.framework;
   const script = typeof document !== "undefined" && !!document.getElementById("__cast_sdk_script");
-  // Ci sono piattaforme dove il componente Cast non esiste proprio (app
-  // Android, Electron, browser non Chromium): lì le righe sull'SDK sarebbero
-  // tutte rosse senza dire niente in più della frase di spiegazione.
-  const senzaSupporto = ["app-android", "electron", "browser"].includes(cast?.unavailableReason);
+  // Runtime dove il Cast Web Sender non esiste (Electron, browser non
+  // Chromium): lì le righe sull'SDK sarebbero tutte rosse senza dire niente in
+  // più della frase di spiegazione. Nell'APK il cast passa dal plugin nativo e
+  // `available` lo riflette già da sé.
+  const senzaSupporto = ["electron", "browser"].includes(cast?.unavailableReason);
   return [
     ["Indirizzo dato alla TV", castBase === null ? "…" : (castBase || `non ricavabile (pagina su ${origin})`), !!castBase],
     ...(senzaSupporto ? [] : [

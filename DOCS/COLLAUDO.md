@@ -496,13 +496,22 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 
 ## 11. Cast
 
-- [ ] **Disponibilità** — su Chrome/Edge/Brave desktop il `CastButton` è attivo; altrove è **visibile
-      e spiega il motivo** invece di sparire.
-      **non verificabile** — serve Chrome/Edge/Brave desktop reale, non disponibile in questo
-      ambiente headless.
-- [ ] **Trasmissione** — il video parte sul Chromecast con i codec compatibili e i comandi di base
-      rispondono. Non verificabile senza un Chromecast in rete.
+- [ ] **Disponibilità** — su Chrome/Edge/Brave desktop il `CastButton` è attivo; **nell'APK Android
+      è attivo** (plugin nativo `YtCast`, Cast SDK di Android); su Electron e browser non Chromium
+      resta **visibile e spiega il motivo** invece di sparire. Non c'è più il messaggio
+      "non disponibile nell'app Android".
+      **non verificabile** — serve un runtime reale (desktop o APK installato su un telefono con
+      Google Play services), non disponibile in questo ambiente headless.
+- [ ] **Trasmissione (desktop)** — il video parte sul Chromecast con i codec compatibili; poi si
+      comanda dal telecomando della TV / Google Home (il ramo web è "manda e basta").
       **non verificabile** — serve un Chromecast in rete, assente qui.
+- [ ] **Telecomando dall'APK Android** — trasmesso un video dal telefono, il player locale lascia
+      il posto a `CastRemote`: play/pausa, barra di avanzamento con seek, ±10s e doppio tocco ai
+      lati comandano la TV dal telefono; la barra segue la posizione (eventi `mediaStatusChanged`,
+      ~1/s). Chiudere la sessione (`CastButton` → "Interrompi") spegne il receiver.
+      **non verificabile** — servono APK installato + un Chromecast in rete. Verificato da codice:
+      `hooks/nativeCast.js` + `nativeCastBridge.js` instradano i comandi su `CastBridgePlugin.java`
+      (`RemoteMediaClient`), `norm_check` pulito, `npm run build` OK.
 - [ ] **Trasmissione in 4K** — con la qualità impostata su 2160p/1440p il video parte sul
       ricevitore Cast in VP9/WebM (vedi "4K sul Cast" in §3). Se il receiver non regge il VP9 4K
       o il WebM in streaming, l'utente riabbassa a 1080p e torna all'H.264. **non verificabile** —
@@ -549,6 +558,12 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `"server": {"androidScheme": "http"}`, corretto. **non verificabile** (build e installazione
       vere) — manca la toolchain Android (`which java`/`which adb` non trovano nulla) e un
       dispositivo/emulatore su cui installare l'APK.
+      *Aggiornamento*: l'APK ora include il plugin nativo `YtCast` (Cast SDK di Android) e la
+      dipendenza `play-services-cast-framework` — la prima build dopo questa modifica va rifatta con
+      `./scripts/build_apk.sh` (scarica la nuova dipendenza) e va verificato che `assembleDebug`
+      compili. Permessi aggiunti al manifest: `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`,
+      `WAKE_LOCK`. L'App ID del receiver entra da `VITE_CAST_APP_ID` via `resValue` in
+      `app/build.gradle` (fallback `CC1AD845`).
 - [x] **Docker** — `make up` (`docker compose -f docker/docker-compose.yml up -d --build`) avvia il
       server, `./data` sull'host resta popolato e sopravvive a `docker compose down`.
       **OK** (riverificato) — `docker compose -f docker/docker-compose.yml config` conferma che
