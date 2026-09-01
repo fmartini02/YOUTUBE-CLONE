@@ -113,6 +113,7 @@ find_jdk() {
     /usr/local/android-studio/jbr \
     "/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
     "$HOME/Android"/jdk-* \
+    "$HOME/android-toolchain"/jdk-* \
     /usr/lib/jvm/* \
     /Library/Java/JavaVirtualMachines/*/Contents/Home
   do
