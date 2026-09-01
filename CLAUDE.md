@@ -50,7 +50,7 @@ Conseguenza diretta sulla struttura: `server/auth.py` e `server/main.py` di una 
 
 ## Subagent
 
-`.claude/agents/` è versionato (unica eccezione dentro `.claude/`, vedi `.gitignore`): sono i subagent del progetto, conoscenza condivisa come questo file.
+Dentro `.claude/` sono versionati (le uniche eccezioni alla riga `.claude/*` del `.gitignore`, vedi lì) tre percorsi, tutti conoscenza condivisa come questo file: `.claude/agents/` (i subagent), `.claude/commands/` (gli slash command), `.claude/settings.json` (gli hook). Resta fuori `.claude/settings.local.json`, per le scelte personali di chi clona (permessi, override del modello).
 
 | Agente | Quando |
 |---|---|
@@ -60,9 +60,24 @@ Conseguenza diretta sulla struttura: `server/auth.py` e `server/main.py` di una 
 | `revisore` | rilettura prima del commit, sola lettura |
 | `collaudo-api` | provare che funzioni: prima il problema segnalato, poi tutto `DOCS/COLLAUDO.md` |
 
+**Slash command** (`.claude/commands/`, versionati):
+
+| Comando | Cosa fa |
+|---|---|
+| `/commit-ready` | controlla che le modifiche pendenti siano pronte: rebuild `dist/`, `norm_check`, porta 8090 allineata, tre modifiche per una pagina nuova, `crea_ydl`, `COLLAUDO.md` aggiornato. Non committa. |
+| `/nuova-pagina <Nome> [/url]` | promemoria e passi per le tre modifiche coerenti di una pagina SPA (`App/routing.js`, `App/AppRoutes.jsx`, `spa_routes()`). |
+| `/collaudo [problema]` | invoca il subagent `collaudo-api` sul problema indicato (o dedotto dal diff), poi su `DOCS/COLLAUDO.md`. |
+
+**MCP** (`.mcp.json` in radice, versionato): un solo server, `playwright` (`@playwright/mcp`, pin `0.0.80`, headless + profilo isolato), per i controlli di UI che `curl` non copre — seek e barra del player, fullscreen, tema, `data-theme` su `<html>`. Al primo avvio Claude Code chiede di fidarsi del server; il binario del browser va installato una volta (`npx playwright install chrome`). L'agente `collaudo-api` resta volutamente su `curl`/API: i controlli col browser si fanno dalla sessione principale. Per aggiornare il pin: cambia la versione in `.mcp.json` dopo aver verificato `npx -y @playwright/mcp@<nuova> --version`.
+
 `frontend/dist/` **è versionato** (il server lo serve così com'è): dopo aver toccato il frontend serve `npm run build` e i file buildati vanno committati. `frontend/node_modules/` e i file personali in `data/` sono invece ignorati.
 
-**Rebuild automatico**: `scripts/rebuild_frontend.sh` (versionato) ricostruisce `dist/` se e solo se i sorgenti sotto `frontend/` sono più recenti del build — no-op veloce altrimenti, e silenzioso se Node non c'è. Non fa mai commit: `git add frontend/dist` resta manuale. Sulla macchina di sviluppo è agganciato agli hook `Stop`/`SubagentStop` in `.claude/settings.json` (non versionato perché `.gitignore` esclude `.claude/*`), così `dist/` non resta mai indietro rispetto ai `.jsx`. Chi clona il repo o non usa quell'hook lancia lo script a mano (o il solito `npm run build`).
+**Hook** (`.claude/settings.json`, ora versionato):
+
+- `Stop` / `SubagentStop` → `scripts/rebuild_frontend.sh` (versionato): ricostruisce `dist/` se e solo se i sorgenti sotto `frontend/` sono più recenti del build — no-op veloce altrimenti, silenzioso se Node non c'è. Non fa mai commit: `git add frontend/dist` resta manuale. Così `dist/` non resta mai indietro rispetto ai `.jsx`.
+- `PostToolUse` (Edit/Write/MultiEdit) → `scripts/norm_check_hook.py` (versionato): dopo ogni scrittura lancia `norm_check.py` sul **solo** file toccato, se è un `.py`/`.js`/`.jsx` sotto `server/`, `frontend/src/`, `electron/` o `scripts/`. Se ci sono violazioni della regola "stile 42" le rimette nel contesto (exit 2); non annulla la modifica né blocca — è un promemoria, come il rebuild.
+
+Chi clona il repo eredita gli hook così come sono. Chi non usa Claude Code lancia `rebuild_frontend.sh` / `norm_check.py` a mano (o il solito `npm run build`).
 
 ## Architettura
 

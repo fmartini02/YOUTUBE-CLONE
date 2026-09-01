@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/norm_check_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "norm_check (stile 42) sul file appena scritto"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/rebuild_frontend.sh\"",
+            "timeout": 180,
+            "statusMessage": "Rebuild frontend/dist se i sorgenti sono cambiati"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/rebuild_frontend.sh\"",
+            "timeout": 180,
+            "statusMessage": "Rebuild frontend/dist se i sorgenti sono cambiati"
+          }
+        ]
+      }
+    ]
+  }
+}
