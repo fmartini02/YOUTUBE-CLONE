@@ -23,7 +23,9 @@ import PlayerSettingsMenu from "./PlayerSettingsMenu";
  * (sottotitoli sì/no, modalità cinema) trovano posto nella stessa barra.
  *
  * NOTA SULLA NORMA (vedi CLAUDE.md, "Stile: 5 funzioni per file"): questo
- * componente resta volutamente sopra le 25 righe. Le due sezioni "Velocità" e
+ * componente resta volutamente sopra le 25 righe. norm-check: ignora-file
+ * (marcatore letto da scripts/norm_check_hook.py — il controllo sull'intero
+ * repo continua comunque a elencarlo). Le due sezioni "Velocità" e
  * "Caricamento / riapertura del flusso" qui sotto devono restare adiacenti e
  * nello stesso ordine — l'effetto della velocità dipende da `stream` perché
  * `load()` riporta `playbackRate` a `defaultPlaybackRate`, quindi deve essere

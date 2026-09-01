@@ -40,11 +40,16 @@ dist-electron/
 # ── Claude Code — configurazione locale e worktree ─────────────────────────
 # I worktree sotto .claude/worktrees/ sono checkout completi del repo stesso:
 # versionarli significherebbe infilare il repo dentro sé stesso.
-# Eccezione: .claude/agents/ sono i subagent del progetto — conoscenza condivisa
-# come CLAUDE.md, quindi versionata. La negazione richiede `.claude/*` al posto
-# di `.claude/`: git non può re-includere un file se la cartella padre è esclusa.
+# Eccezione: .claude/agents/ sono i subagent del progetto, .claude/commands/ gli
+# slash command, .claude/settings.json gli hook (rebuild dist/ + norm_check) —
+# conoscenza condivisa come CLAUDE.md, quindi versionata. Resta fuori
+# .claude/settings.local.json, per le scelte personali di chi clona (permessi,
+# override). La negazione richiede `.claude/*` al posto di `.claude/`: git non
+# può re-includere un file se la cartella padre è esclusa.
 .claude/*
 !.claude/agents/
+!.claude/commands/
+!.claude/settings.json
 
 # ── Varie ────────────────────────────────────────────────────────────────────
 .ytdlp_last_update
