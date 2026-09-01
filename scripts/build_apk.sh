@@ -197,8 +197,20 @@ if ! grep -qxF "sdk.dir=$SDK" "$ANDROID_DIR/local.properties" 2>/dev/null; then
   echo "   ↳ scritto $ANDROID_DIR/local.properties"
 fi
 
-# ── Dipendenze npm ────────────────────────────────────────────
+# ── Variabili d'ambiente del frontend ────────────────────────
+# Vite legge frontend/.env da sé; qui lo si esporta anche nell'ambiente della
+# shell perché serve pure a Gradle: app/build.gradle legge VITE_CAST_APP_ID
+# (System.getenv) per l'App ID del ricevitore Cast nativo. Senza, l'APK ricade
+# sul Default Media Receiver mentre il web userebbe il receiver di .env.
 cd "$DIR/frontend"
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
+# ── Dipendenze npm ────────────────────────────────────────────
 if [ ! -d node_modules ]; then
   echo "📦 Installazione dipendenze npm (prima volta, ~1 minuto)..."
   npm install --silent

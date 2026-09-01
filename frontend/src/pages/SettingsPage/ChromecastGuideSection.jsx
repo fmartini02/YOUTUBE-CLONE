@@ -15,8 +15,8 @@ export default function ChromecastGuideSection() {
         <li>Clicca <strong>"Add new application"</strong> → scegli <strong>"Custom Receiver"</strong></li>
         <li>URL Receiver: <code style={CODE_STYLE}>http://IP-DEL-TUO-PC:8090/cast-receiver.html</code></li>
         <li>Copia l'<strong>App ID</strong> generato</li>
-        <li>Aggiungilo al file <code style={CODE_STYLE}>.env</code>: <code style={CODE_STYLE}>VITE_CAST_APP_ID=XXXXXXXX</code></li>
-        <li>Rebuild frontend: <code style={CODE_STYLE}>npm run build</code></li>
+        <li>Aggiungilo al file <code style={CODE_STYLE}>frontend/.env</code>: <code style={CODE_STYLE}>VITE_CAST_APP_ID=XXXXXXXX</code></li>
+        <li>Rebuild: <code style={CODE_STYLE}>npm run build</code> (web/desktop) oppure <code style={CODE_STYLE}>./scripts/build_apk.sh</code> (app Android — legge lo stesso <code style={CODE_STYLE}>.env</code> e lo passa al Cast SDK nativo)</li>
       </ol>
       <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(0,200,100,0.08)", borderRadius: 8, fontSize: 13, color: "#00c864" }}>
         💡 Senza registrazione funziona lo stesso con il receiver generico di Google — la differenza
