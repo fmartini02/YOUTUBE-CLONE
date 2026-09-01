@@ -2,7 +2,14 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: senza, su un telefono con notch/fotocamera a foro il
+         viewport CSS si ferma prima di quell'area, e un elemento a schermo
+         intero (il player video) non riesce a coprirla — resta una striscia che
+         il sistema riempie con un grigio suo, non con il nero del player. Il
+         resto della pagina (header, e tutto ciò che ne dipende) si tiene al
+         riparo da quell'area con lo stesso inset — vedi --header-height e
+         .header in App.css. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>YTProxy — YouTube senza pubblicità</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▶</text></svg>" />
   </head>

@@ -4,6 +4,13 @@
 export const SKIP_SECONDS = 10;
 export const VOLUME_STEP = 0.05;
 
+// Quanto buffer avanti alla posizione attuale si aspetta, dopo uno stallo di
+// rete, prima di far ripartire da sé la riproduzione (vedi "Recupero da uno
+// stallo di rete" in index.jsx). Senza, il browser riparte non appena arriva
+// un filo di dati e con una connessione più lenta del bitrate il video va a
+// scatti invece di fermarsi una volta sola.
+export const REBUFFER_MARGIN_S = 5;
+
 // Quanto si aspetta un secondo tocco prima di dare per buono il primo. È anche
 // il ritardo con cui il tocco singolo mette in pausa: sotto i ~250ms i doppi
 // tocchi veri sfuggono, sopra i ~400ms il player sembra lento a rispondere.

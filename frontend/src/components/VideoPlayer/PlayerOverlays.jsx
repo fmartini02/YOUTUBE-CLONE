@@ -17,10 +17,10 @@ function SeekFlash({ seekFlash }) {
 // I riscontri visivi sopra il video: spinner di caricamento, doppio tocco per
 // saltare, "tieni premuto" per il 2x, e il grande tasto play quando è in
 // pausa. Nessuno tocca stato del player, solo props.
-export default function PlayerOverlays({ buffering, seekFlash, holding, playing, togglePlay }) {
+export default function PlayerOverlays({ buffering, rebuffering, seekFlash, holding, playing, togglePlay }) {
   return (
     <>
-      {buffering && <div className="player-spinner" />}
+      {(buffering || rebuffering) && <div className="player-spinner" />}
       <SeekFlash seekFlash={seekFlash} />
 
       {/* Riscontro del "tieni premuto": senza, il 2x è invisibile finché non si
@@ -32,7 +32,7 @@ export default function PlayerOverlays({ buffering, seekFlash, holding, playing,
         </div>
       )}
 
-      {!playing && !buffering && (
+      {!playing && !buffering && !rebuffering && (
         <button className="player-big-play" onClick={togglePlay} aria-label="Riproduci">
           <span className="material-symbols-outlined">play_arrow</span>
         </button>

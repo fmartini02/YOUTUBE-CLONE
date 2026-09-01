@@ -1,11 +1,15 @@
 import VideoPlayer from "../../components/VideoPlayer";
 import CastingScreen from "./CastingScreen";
 
+// Solo in cast c'è qualcosa di vero da dire ("sta girando su quella TV").
+// Un video normale non è una diretta: mostrare "Streaming diretto" sempre,
+// come prima, era fuorviante — quindi qui sotto non c'è nessun fallback.
 function PlayerControlsBar({ isCasting, cast }) {
+  if (!isCasting) return null;
   return (
     <div className="player-controls">
       <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: "auto" }}>
-        {isCasting ? `📺 ${cast.deviceName}` : "🟢 Streaming diretto"}
+        📺 {cast.deviceName}
       </span>
     </div>
   );

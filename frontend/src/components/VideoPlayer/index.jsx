@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../../api";
+import { isCapacitor } from "../../api/device";
 import { useTouchDevice } from "../../hooks/useMediaQuery";
 import { formatTime, isBuffered, isSeekable } from "./videoPlayerHelpers";
-import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, TAP_SLOP_PX, TAP_SIDE_RATIO } from "./playerConstants";
+import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
 import { HOLD_SPEED, HOLD_MS } from "./speedMath";
 import PlayerOverlays from "./PlayerOverlays";
 import PlayerButtonsBar from "./PlayerButtonsBar";
@@ -101,6 +102,10 @@ export default function VideoPlayer({
   // uno stato: serve dentro l'effect di caricamento, che non deve rieseguirsi
   // quando cambia.
   const andavaRef = useRef(false);
+  // Vero solo dopo un `onPlaying` genuino sul flusso corrente: distingue il
+  // buffering del primo caricamento (normale) da un vero stallo a metà
+  // riproduzione (vedi "Recupero da uno stallo di rete" più sotto).
+  const hasPlayedRef = useRef(false);
   // Ultimo video effettivamente caricato: distingue "video nuovo" (dove decide
   // l'autoplay) da "stesso video riaperto" per un salto o un cambio di qualità
   // (dove si ripristina lo stato di prima).
@@ -128,6 +133,10 @@ export default function VideoPlayer({
     setBuffering(true);
     setPosition(stream.start);
     setBufferedEnd(stream.start);
+    // Il primo caricamento di un flusso appena aperto non è uno stallo: lo è
+    // solo se il buffering torna DOPO che il video ha già iniziato a scorrere
+    // davvero (vedi "Recupero da uno stallo di rete" più sotto).
+    hasPlayedRef.current = false;
     if (deveAndare) {
       v.play().catch(() => {});   // l'autoplay può essere bloccato: non è un errore
     } else {
@@ -151,6 +160,43 @@ export default function VideoPlayer({
     v.defaultPlaybackRate = rate;
     v.playbackRate = rate;
   }, [rate, videoId, quality, stream]);
+
+  // ── Recupero da uno stallo di rete ───────────────────────────────────────
+  // Lasciato a sé, il browser riprende non appena arriva un filo di dati:
+  // con una connessione più lenta del bitrate del video il risultato sono
+  // scatti continui invece di una pausa sola e pulita. Qui si prende il
+  // controllo di quel momento: a un vero stallo durante la riproduzione
+  // (`onWaiting` mentre `playing` è vero, cioè si stava ancora cercando di
+  // andare avanti) si mette in pausa esplicitamente e si aspetta che il
+  // buffer sia avanti di `REBUFFER_MARGIN_S` secondi rispetto alla posizione
+  // attuale prima di far ripartire da sé il video. `playing` (non `andavaRef`,
+  // che resta vero anche dopo una pausa dell'utente) è la guardia giusta: se
+  // l'utente ha già messo in pausa lui stesso, un `waiting` residuo non deve
+  // far ripartire nulla da solo.
+  const rebufferingRef = useRef(false);
+  const [rebuffering, setRebuffering] = useState(false);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !buffering || !hasPlayedRef.current || !playing || rebufferingRef.current) return;
+    rebufferingRef.current = true;
+    setRebuffering(true);
+    v.pause();
+  }, [buffering, playing]);
+
+  useEffect(() => {
+    if (!rebufferingRef.current || bufferedEnd - position < REBUFFER_MARGIN_S) return;
+    rebufferingRef.current = false;
+    setRebuffering(false);
+    videoRef.current?.play().catch(() => {});
+  }, [bufferedEnd, position]);
+
+  // Uno stallo vecchio non deve restare "in attesa" su un flusso appena
+  // riaperto (salto, cambio qualità, video nuovo).
+  useEffect(() => {
+    rebufferingRef.current = false;
+    setRebuffering(false);
+  }, [videoId, quality, stream]);
 
   // ── Salto nel tempo ────────────────────────────────────────────────────
   const seekTo = useCallback((target) => {
@@ -182,6 +228,11 @@ export default function VideoPlayer({
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
+    // Un tocco dell'utente vince sempre sull'attesa automatica del buffer:
+    // sia che riprenda in anticipo, sia che metta in pausa lui stesso, da
+    // qui in poi la pausa non è più "in attesa di un margine".
+    rebufferingRef.current = false;
+    setRebuffering(false);
     if (v.paused) v.play().catch(() => {});
     else v.pause();
   }, []);
@@ -453,7 +504,10 @@ export default function VideoPlayer({
         case "ArrowDown": nudgeVolume(-VOLUME_STEP); break;
         case "m": toggleMute(); break;
         case "c": toggleSubtitles(); break;
-        case "t": onToggleTheater?.(); break;
+        // Nell'app il tasto della modalità cinema non c'è (vedi TheaterButton
+        // in PlayerButtonsBar.jsx): la scorciatoia da tastiera resta coerente
+        // con quello, per chi ha una tastiera Bluetooth collegata al telefono.
+        case "t": if (!isCapacitor()) onToggleTheater?.(); break;
         default: return;
       }
       e.preventDefault();   // solo per i tasti gestiti: lo spazio non deve scorrere la pagina
@@ -531,7 +585,7 @@ export default function VideoPlayer({
         onPlay={() => { setPlaying(true); andavaRef.current = true; bumpControls(); }}
         onPause={() => { setPlaying(false); setControlsVisible(true); }}
         onWaiting={() => setBuffering(true)}
-        onPlaying={() => setBuffering(false)}
+        onPlaying={() => { setBuffering(false); hasPlayedRef.current = true; }}
         onCanPlay={() => setBuffering(false)}
         onLoadedMetadata={applyTextTrack}
         onTimeUpdate={() => {
@@ -565,7 +619,7 @@ export default function VideoPlayer({
         )}
       </video>
 
-      <PlayerOverlays buffering={buffering} seekFlash={seekFlash} holding={holding} playing={playing} togglePlay={togglePlay} />
+      <PlayerOverlays buffering={buffering} rebuffering={rebuffering} seekFlash={seekFlash} holding={holding} playing={playing} togglePlay={togglePlay} />
 
       {/* ── Barra dei controlli ──────────────────────────────────────── */}
       <div className="player-bar" onPointerMove={e => { if (e.pointerType === "mouse") bumpControls(); }}>
