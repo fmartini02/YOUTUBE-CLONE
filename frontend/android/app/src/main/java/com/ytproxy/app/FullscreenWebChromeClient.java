@@ -112,6 +112,21 @@ public class FullscreenWebChromeClient extends BridgeWebChromeClient {
 
     private void setSystemBarsHidden(boolean hidden) {
         Window window = activity.getWindow();
+
+        // `layoutInDisplayCutoutMode` qui sotto dà solo alla FINESTRA il
+        // permesso di disegnare sotto il ritaglio della fotocamera — non
+        // basta da solo. Senza questo, la gerarchia delle view (dove sta
+        // anche `customView`, aggiunta con MATCH_PARENT in onShowCustomView)
+        // resta comunque misurata come se il ritaglio ci fosse ancora, e lo
+        // spazio fra il vero bordo dello schermo e dove il contenuto si ferma
+        // resta scoperto — non nero del player, ma lo sfondo del tema
+        // Android sotto di tutto. Era la causa della striscia grigia in
+        // fullscreen: `viewport-fit=cover` lato web non serve a niente senza
+        // anche questo, sono due meccanismi separati (finestra vs contenuto).
+        // Si rimette a `true` uscendo dal fullscreen: la navigazione normale
+        // dell'app non ha questo problema e non deve cambiare comportamento.
+        WindowCompat.setDecorFitsSystemWindows(window, !hidden);
+
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
         controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         if (hidden) controller.hide(WindowInsetsCompat.Type.systemBars());
