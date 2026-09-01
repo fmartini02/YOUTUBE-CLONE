@@ -162,7 +162,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       default → 2160. **Il menu 4K compare solo dopo `npm run build`
       del frontend** (dist versionato). Nota: il seek su un 4K non paga più il probe del keyframe
       (`_keyframe_before` rimosso, costava 4-5s sul flusso 4K) — riparte in ~1s come un video nuovo.
-- [ ] **Adatta la qualità allo schermo** — preferenza attiva di default (`GET /api/prefs` include
+- [x] **Adatta la qualità allo schermo** — preferenza attiva di default (`GET /api/prefs` include
       `"fitScreen": true`). Con `quality` = `best`, il player chiede a `/api/mux` non `quality=best`
       ma il gradino YouTube più alto che il pannello regge — `qualityForScreen` in
       `components/VideoPlayer/videoPlayerHelpers.js`: `min(screen.width, screen.height) *
@@ -172,7 +172,15 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       1440p finisce in `?quality=1440`; una scelta numerica esplicita dal menu (es. 2160p) passa
       **intatta** anche con l'opzione attiva; disattivando l'opzione in Impostazioni il flusso si
       riapre e torna a `?quality=best`. Non tocca `/api/download` né il Cast (`castUrl`), dove lo
-      schermo di riferimento non è quello del browser. **non verificabile** — serve un browser reale.
+      schermo di riferimento non è quello del browser.
+      **OK** (2026-09-01, Chromium headless con `window.screen` e viewport 1920×1080, dpr 1 — la
+      MCP Playwright del repo è agganciata al canale `chrome`, non installabile qui senza root, quindi
+      Chromium bundled pilotato a mano): aperto `/watch?v=dQw4w9WgXcQ` con `fitScreen: true`,
+      `<video>.currentSrc` = `…/api/mux/dQw4w9WgXcQ?quality=1080` (non `best`); disattivato
+      l'interruttore in `/settings` (→ `GET /api/prefs` `"fitScreen": false`) e riaperto il video,
+      `currentSrc` = `…/api/mux/dQw4w9WgXcQ?quality=best`. Preferenza ripristinata a `true` a fine
+      prova. Sotto-casi non coperti: pannello 1440p → `?quality=1440` e scelta numerica esplicita dal
+      menu che deve passare intatta con l'opzione attiva.
 - [ ] **4K sul Cast (VP9 in WebM)** — `GET /api/mux/<vid>?quality=2160&compat=1` su un video con
       il 4K restituisce un flusso **`video/webm`** (VP9 + Opus), non più il tetto 1080 H.264:
       oltre i 1080p YouTube non ha H.264 e l'unico 4K che un Chromecast (Ultra / Google TV / TV
