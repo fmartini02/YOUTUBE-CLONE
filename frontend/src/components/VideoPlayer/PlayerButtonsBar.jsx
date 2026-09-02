@@ -2,6 +2,7 @@ import { formatTime } from "./videoPlayerHelpers";
 import { formatSpeed } from "./speedMath";
 import { SKIP_SECONDS } from "./playerConstants";
 import { isCapacitor } from "../../api/device";
+import PlayerCastButton from "./PlayerCastButton";
 
 function VolumeControl({ muted, volume, toggleMute, changeVolume }) {
   return (
@@ -57,6 +58,9 @@ function RightControls(props) {
   const { subtitleLang, toggleSubtitles, fullscreen, toggleFullscreen } = props;
   return (
     <div className="player-buttons-right">
+      {/* Comando Chromecast anche qui, non solo nella riga sotto il video: così
+          resta a portata a schermo intero. Stesso hook del CastButton testuale. */}
+      <PlayerCastButton cast={props.cast} media={props.castMedia} onNotice={props.onNotice} />
       <button
         className={`player-btn${subtitleLang ? " on" : ""}`}
         onClick={toggleSubtitles}
@@ -79,7 +83,8 @@ export default function PlayerButtonsBar(props) {
   const { playing, togglePlay, skip, shown, duration } = props;
   const { muted, volume, toggleMute, changeVolume } = props;
   const { subtitleLang, toggleSubtitles, settingsOpen, onOpenSettings, speed, theater, onToggleTheater, fullscreen, toggleFullscreen } = props;
-  const rightProps = { subtitleLang, toggleSubtitles, settingsOpen, onOpenSettings, speed, theater, onToggleTheater, fullscreen, toggleFullscreen };
+  const { cast, castMedia, onNotice } = props;
+  const rightProps = { subtitleLang, toggleSubtitles, settingsOpen, onOpenSettings, speed, theater, onToggleTheater, fullscreen, toggleFullscreen, cast, castMedia, onNotice };
   return (
     <div className="player-buttons">
       <button className="player-btn" onClick={togglePlay} title={playing ? "Pausa (k)" : "Riproduci (k)"}>
