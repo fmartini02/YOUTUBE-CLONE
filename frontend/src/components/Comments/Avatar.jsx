@@ -1,3 +1,4 @@
+import { proxyImg } from "../../api";
 import ChannelLink from "../ChannelLink";
 
 /**
@@ -18,7 +19,7 @@ export default function Avatar({ src, name, size = 36, channelId, navigate }) {
           localhost yt3.ggpht.com risponde 429 e Chromium blocca la risposta —
           senza, al posto dei loghi si vedeva il testo alternativo. */}
       {src
-        ? <img src={src} alt={name || ""} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ? <img src={proxyImg(src)} alt={name || ""} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         : (name || "?").replace("@", "")[0]}
     </ChannelLink>
   );

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api, formatDuration, formatViews, formatDate } from "../api";
+import { api, formatDuration, formatViews, formatDate, proxyImg } from "../api";
 import { useToast } from "../hooks/useToast";
 import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
 
@@ -47,7 +47,7 @@ function SearchResultCard({ v, navigate }) {
       }}
     >
       <div className="search-thumb">
-        <img src={v.thumbnail} alt={v.title} loading="lazy" />
+        <img src={proxyImg(v.thumbnail)} alt={v.title} />
         {v.duration && <span className="search-duration">{formatDuration(v.duration)}</span>}
       </div>
       <SearchMeta v={v} navigate={navigate} />

@@ -1,10 +1,13 @@
-import { formatDuration, formatViews, formatDate } from "../api";
+import { formatDuration, formatViews, formatDate, proxyImg } from "../api";
 import ChannelLink, { daLinkCanale } from "./ChannelLink";
 
 function Thumbnail({ video }) {
   return (
     <div className="thumbnail-wrap">
-      <img src={video.thumbnail} alt={video.title} loading="lazy" />
+      {/* niente loading="lazy": nella WebView dell'APK le immagini lazy non
+          partono finché lo schermo non è acceso e composto, e restavano vuote
+          (le miniature ora passano comunque dal proxy locale, veloce). */}
+      <img src={proxyImg(video.thumbnail)} alt={video.title} />
       {video.duration && <span className="duration">{formatDuration(video.duration)}</span>}
       {/* Sulla copertina non c'è nessun comando: cliccare ovunque fa partire
           il video, come su YouTube. Il download sta solo nella pagina video. */}
@@ -25,7 +28,7 @@ function videoStatsLine(video) {
 // (ERR_BLOCKED_BY_ORB) — senza questo il logo resta vuoto.
 function AvatarOrInitial({ video, avatar }) {
   return avatar
-    ? <img src={avatar} alt={video.channel} loading="lazy" referrerPolicy="no-referrer" />
+    ? <img src={proxyImg(avatar)} alt={video.channel} referrerPolicy="no-referrer" />
     : (video.channel || "?")[0];
 }
 

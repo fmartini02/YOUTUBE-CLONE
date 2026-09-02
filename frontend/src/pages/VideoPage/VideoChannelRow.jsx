@@ -1,3 +1,4 @@
+import { proxyImg } from "../../api";
 import ChannelLink from "../../components/ChannelLink";
 import SubscribeButton from "../../components/SubscribeButton";
 import CastButton from "../../components/CastButton";
@@ -26,7 +27,7 @@ export default function VideoChannelRow({ info, channelAvatar, navigate, addToas
       <div className="channel-row">
         <ChannelLink channelId={info.channel_id} name={info.channel} navigate={navigate} className="channel-avatar">
           {channelAvatar
-            ? <img src={channelAvatar} alt={info.channel} referrerPolicy="no-referrer" />
+            ? <img src={proxyImg(channelAvatar)} alt={info.channel} referrerPolicy="no-referrer" />
             : (info.channel || "?")[0]}
         </ChannelLink>
         <div className="channel-name">

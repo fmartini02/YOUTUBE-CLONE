@@ -1,4 +1,4 @@
-import { formatDuration, formatViews } from "../../api";
+import { formatDuration, formatViews, proxyImg } from "../../api";
 import ChannelLink, { daLinkCanale } from "../../components/ChannelLink";
 import { queuePayloadFor } from "../../components/CastRemote/castRemoteHelpers";
 
@@ -20,7 +20,7 @@ function RelatedItem({ v, navigate, onQueue }) {
       onClick={e => { if (daLinkCanale(e)) return; navigate("video", { videoId: v.id }); }}
     >
       <div className="related-thumb">
-        <img src={v.thumbnail} alt={v.title} loading="lazy" />
+        <img src={proxyImg(v.thumbnail)} alt={v.title} />
         {v.duration && <span className="related-duration">{formatDuration(v.duration)}</span>}
       </div>
       <div className="related-meta">

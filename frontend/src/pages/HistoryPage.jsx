@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, formatDuration, timeAgo } from "../api";
+import { api, formatDuration, timeAgo, proxyImg } from "../api";
 import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
 import { useToast } from "../hooks/useToast";
 import { raggruppaPerGiorno } from "./historyGrouping";
@@ -18,7 +18,7 @@ function HistoryRow({ v, navigate, onRemove }) {
   return (
     <div className="history-row" onClick={e => !daLinkCanale(e) && navigate("video", { videoId: v.id })}>
       <div className="history-thumb">
-        <img src={v.thumbnail || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`} alt={v.title} loading="lazy" />
+        <img src={proxyImg(v.thumbnail || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`)} alt={v.title} />
         {v.duration ? <span className="duration">{formatDuration(v.duration)}</span> : null}
       </div>
       <div className="history-meta">

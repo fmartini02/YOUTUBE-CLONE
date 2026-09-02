@@ -1,3 +1,4 @@
+import { proxyImg } from "../../api";
 import SubscribeButton from "../../components/SubscribeButton";
 import { formatSubscribers } from "./channelMessages";
 
@@ -5,12 +6,12 @@ import { formatSubscribers } from "./channelMessages";
 // localhost quei server rispondono 429 e Chromium blocca la risposta.
 function ChannelBanner({ banner }) {
   if (!banner) return null;
-  return <img src={banner} alt="" referrerPolicy="no-referrer" style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 12, marginBottom: 16 }} />;
+  return <img src={proxyImg(banner)} alt="" referrerPolicy="no-referrer" style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 12, marginBottom: 16 }} />;
 }
 
 function ChannelAvatar({ avatar, nome }) {
   if (avatar) {
-    return <img src={avatar} alt={nome} referrerPolicy="no-referrer" style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+    return <img src={proxyImg(avatar)} alt={nome} referrerPolicy="no-referrer" style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
   }
   return (
     <div style={{ width: 80, height: 80, borderRadius: "50%", background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, flexShrink: 0 }}>

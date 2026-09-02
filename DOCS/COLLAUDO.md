@@ -603,6 +603,25 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       compili. Permessi aggiunti al manifest: `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`,
       `WAKE_LOCK`. L'App ID del receiver entra da `VITE_CAST_APP_ID` via `resValue` in
       `app/build.gradle` (fallback `CC1AD845`).
+- [x] **APK su rete solo-LAN: icone e miniature** — con il telefono su una rete senza DNS
+      pubblico (la WebView non risolve `fonts.googleapis.com` / `i.ytimg.com`), aperta l'app:
+      (a) l'header e i comandi del player mostrano le **icone**, non le parole `menu` / `play_circle`
+      / `pause`; (b) le **miniature** di feed, correlati e ricerca si vedono, e così i **loghi
+      canale** in commenti e pagine canale.
+      Come funziona: i due font (Roboto + Material Symbols) sono impacchettati nel bundle
+      (`frontend/src/assets/fonts/*.woff2`, `@font-face` locale in `App.css`, niente più `@import`
+      da Google); le immagini di YouTube passano dal proxy del server `GET /api/img?u=<url>`
+      (`server/routers/images.py`), che riscarica lato server (ha internet per yt-dlp) e rimanda
+      sulla LAN; il frontend avvolge ogni `<img src>` con `proxyImg()` (`api/img.js`). Tolto
+      `loading="lazy"` dalle miniature: nella WebView non partivano finché lo schermo non era
+      acceso e composto.
+      **OK** (verifica in questa sessione via Chrome DevTools sul WebView di un telefono reale):
+      prima `net::ERR_NAME_NOT_RESOLVED` su `fonts.googleapis.com`; dopo, `document.fonts.check`
+      per "Material Symbols Outlined" → `true`, gli `<span class=material-symbols-outlined>` resi
+      come glifo (larghezza ~20px, non ~50px di testo), `assets/*.woff2` serviti 200 dall'APK,
+      e `fetch('/api/img?u=…i.ytimg.com…')` dal contesto pagina → `200 image/jpeg`.
+      `grep googleapis frontend/dist/assets/*.css` → nessun risultato. `curl` diretto:
+      `/api/img?u=<ytimg>` → `200 image/jpeg`, `/api/img?u=<host non YouTube>` → `400`.
 - [x] **Docker** — `make up` (`docker compose -f docker/docker-compose.yml up -d --build`) avvia il
       server, `./data` sull'host resta popolato e sopravvive a `docker compose down`.
       **OK** (riverificato) — `docker compose -f docker/docker-compose.yml config` conferma che

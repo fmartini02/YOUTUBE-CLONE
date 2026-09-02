@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import (auth_oauth, comment_replies, comments, cookies, feeds,
-                      history, prefs, search, spa, status, streaming,
+                      history, images, prefs, search, spa, status, streaming,
                       subscriptions, videos, watch)
 from routers.spa import HashedStaticFiles, frontend_dist
 from core.security import ORIGINI_EXTRA, ORIGINI_LOCALI_RE, blocca_scritture_esterne
@@ -38,7 +38,7 @@ app.add_middleware(
 )
 
 for _router_module in (search, status, watch, streaming, comments, comment_replies,
-                       auth_oauth, subscriptions, videos, feeds, cookies, history, prefs, spa):
+                       auth_oauth, subscriptions, videos, feeds, images, cookies, history, prefs, spa):
     app.include_router(_router_module.router)
 
 app.on_event("startup")(on_startup)

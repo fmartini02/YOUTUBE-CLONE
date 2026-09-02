@@ -5,6 +5,7 @@
 // suddivisione di server/routers/. Gli import esistenti (`from "./api"` /
 // `from "../api"`) restano validi: puntano a questo index.js.
 export { getServerBase, setServerBase, clearServerBase, getLanBase, isCastableOrigin } from "./base";
+export { proxyImg } from "./img";
 export { apiFetch, errorMessage } from "./core";
 export { resolveCastBase, checkServerReachable } from "./cast";
 export { isCapacitor } from "./device";

@@ -1,3 +1,4 @@
+import { proxyImg } from "../../api";
 import { makeTapHandlers } from "./castRemoteHelpers";
 
 const SCREEN_STYLE = {
@@ -25,7 +26,7 @@ export default function CastRemoteScreen({ thumbnail, deviceName, playerState, o
     <div style={SCREEN_STYLE} {...makeTapHandlers(onSkip, onTogglePlay)}>
       {thumbnail && (
         <img
-          src={thumbnail} alt=""
+          src={proxyImg(thumbnail)} alt=""
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.15 }}
         />
       )}

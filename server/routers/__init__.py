@@ -15,6 +15,7 @@ nell'app da main.py.
   subscriptions.py           iscrizioni: elenco, stato, iscriviti/disiscriviti
   videos.py                   azioni account su un video (oggi: "mi piace")
   feeds.py                    home, iscrizioni, correlati, canale, loghi
+  images.py                   proxy miniature/avatar di YouTube (LAN senza DNS)
   cookies.py                   cookies.txt manuale + import dal browser
   history.py                    cronologia locale
   prefs.py                      preferenze utente

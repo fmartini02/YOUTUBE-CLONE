@@ -1,8 +1,9 @@
+import { proxyImg } from "../../api";
 import SubscribeButton from "../../components/SubscribeButton";
 
 function ChannelCardAvatar({ ch }) {
   if (ch.thumbnail) {
-    return <img src={ch.thumbnail} alt={ch.name} referrerPolicy="no-referrer" style={{ width: 64, height: 64, borderRadius: "50%", marginBottom: 8, objectFit: "cover" }} />;
+    return <img src={proxyImg(ch.thumbnail)} alt={ch.name} referrerPolicy="no-referrer" style={{ width: 64, height: 64, borderRadius: "50%", marginBottom: 8, objectFit: "cover" }} />;
   }
   return (
     <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--bg3)", margin: "0 auto 8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>
