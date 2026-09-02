@@ -226,7 +226,7 @@ public class CastBridgePlugin extends Plugin {
         if (!tracks.isEmpty()) {
             info.setMediaTracks(tracks);
             TextTrackStyle style = new TextTrackStyle();
-            style.setFontScale((float) call.getDouble("subtitleFontScale", 1.0));
+            style.setFontScale(call.getDouble("subtitleFontScale", 1.0).floatValue());
             info.setTextTrackStyle(style);
         }
         return info.build();
