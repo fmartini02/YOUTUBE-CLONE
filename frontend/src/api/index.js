@@ -19,6 +19,7 @@ import { prefsEndpoints } from "./endpoints/prefs";
 import { searchEndpoints } from "./endpoints/search";
 import { streamingEndpoints } from "./endpoints/streaming";
 import { subscriptionsEndpoints } from "./endpoints/subscriptions";
+import { videosEndpoints } from "./endpoints/videos";
 import { watchEndpoints } from "./endpoints/watch";
 
 export const api = {
@@ -29,6 +30,7 @@ export const api = {
   ...commentsEndpoints,
   ...authEndpoints,
   ...subscriptionsEndpoints,
+  ...videosEndpoints,
   ...cookiesEndpoints,
   ...historyEndpoints,
   ...prefsEndpoints,

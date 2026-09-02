@@ -13,6 +13,7 @@ nell'app da main.py.
   auth_oauth.py             stato auth, device flow, logout, identità
   subscription_guards.py    permessi condivisi da subscriptions.py
   subscriptions.py           iscrizioni: elenco, stato, iscriviti/disiscriviti
+  videos.py                   azioni account su un video (oggi: "mi piace")
   feeds.py                    home, iscrizioni, correlati, canale, loghi
   cookies.py                   cookies.txt manuale + import dal browser
   history.py                    cronologia locale

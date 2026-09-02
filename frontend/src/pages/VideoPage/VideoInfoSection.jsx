@@ -12,7 +12,7 @@ function InfoSkeleton() {
 
 export default function VideoInfoSection({
   info, descExpanded, setDescExpanded, channelAvatar, navigate,
-  addToast, onSubsChange, cast, castMedia, onDownload, videoId,
+  addToast, onSubsChange, cast, castMedia, onDownload, videoId, canRate,
 }) {
   if (!info) return <InfoSkeleton />;
   return (
@@ -20,7 +20,8 @@ export default function VideoInfoSection({
       <h1 className="video-title-big">{info.title}</h1>
       <VideoChannelRow
         info={info} channelAvatar={channelAvatar} navigate={navigate} addToast={addToast}
-        onSubsChange={onSubsChange} cast={cast} castMedia={castMedia} onDownload={onDownload} videoId={videoId}
+        onSubsChange={onSubsChange} cast={cast} castMedia={castMedia} onDownload={onDownload}
+        videoId={videoId} canRate={canRate}
       />
       <VideoDescription info={info} expanded={descExpanded} setExpanded={setDescExpanded} />
     </>

@@ -56,5 +56,7 @@ export function useVideoPageState(videoId, authStatus) {
     prefs, quality, cambiaQualita, addToast, ToastContainer, cast, info, related,
     subtitleLangs, subtitleLang, setSubtitleLang, subtitleSize, setSubtitleSize,
     descExpanded, setDescExpanded, theater, toggleTheater, isCasting, channelAvatar, castMedia,
+    // "mi piace": lo stesso scope di scrittura di commenti/iscrizioni.
+    canRate: !!authStatus?.can_comment,
   };
 }

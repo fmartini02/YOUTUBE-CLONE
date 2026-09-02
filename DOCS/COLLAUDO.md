@@ -331,6 +331,17 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       spiegato. ⚠️ scrive davvero su YouTube: solo su richiesta esplicita dell'utente.
       **non eseguito** — azione irreversibile su dati reali, richiede richiesta esplicita dell'utente
       (e comunque non verificabile qui: manca l'OAuth).
+- [ ] **«Mi piace» a un video** (OAuth con `youtube`) — nella riga azioni della pagina video, con
+      l'account collegato in scrittura, il 👍 è un pulsante: cliccarlo mette "mi piace"
+      (`POST /api/videos/<id>/rate` `{"rating":"like"}` → `videos.rate`, 50 unità di quota),
+      ricliccarlo lo toglie (`"none"`). All'apertura pagina `GET /api/videos/<id>/rating` (1 unità)
+      dice se il video ha già "mi piace". Senza scope di scrittura → il 👍 resta il conteggio in
+      sola lettura di prima. ⚠️ scrive davvero su YouTube.
+      **verificato senza OAuth** (via `TestClient`): `GET /rating` senza account →
+      `{"rating":"none","reason":"not-authenticated"}` (200); `POST /rate` senza account → 401
+      `"Nessun account Google collegato"`; `POST /rate {"rating":"banana"}` → 400 `"Rating non
+      valido"`. `norm_check` pulito, `npm run build` OK. **non eseguito** con un account reale —
+      azione irreversibile, richiede richiesta esplicita dell'utente.
 
 ## 8. Cronologia e preferenze
 

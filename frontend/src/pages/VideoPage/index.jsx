@@ -27,7 +27,7 @@ function VideoMain({ s, videoId, navigate, onSubsChange }) {
       <VideoInfoSection
         info={s.info} descExpanded={s.descExpanded} setDescExpanded={s.setDescExpanded} channelAvatar={s.channelAvatar}
         navigate={navigate} addToast={s.addToast} onSubsChange={onSubsChange} cast={s.cast} castMedia={s.castMedia}
-        onDownload={() => downloadVideo(videoId, s.quality, s.info, s.addToast)} videoId={videoId}
+        onDownload={() => downloadVideo(videoId, s.quality, s.info, s.addToast)} videoId={videoId} canRate={s.canRate}
       />
     </div>
   );

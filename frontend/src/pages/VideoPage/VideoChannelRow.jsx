@@ -1,14 +1,12 @@
-import { formatCompact } from "../../api";
 import ChannelLink from "../../components/ChannelLink";
 import SubscribeButton from "../../components/SubscribeButton";
 import CastButton from "../../components/CastButton";
+import LikeButton from "../../components/LikeButton";
 
-function VideoActions({ info, cast, castMedia, addToast, onDownload, videoId }) {
+function VideoActions({ info, cast, castMedia, addToast, onDownload, videoId, canRate }) {
   return (
     <div className="video-actions">
-      {info.likes && (
-        <span className="action-btn" style={{ cursor: "default" }}>👍 {formatCompact(info.likes)}</span>
-      )}
+      <LikeButton videoId={videoId} likes={info.likes} canRate={canRate} onNotice={addToast} />
       {/* L'unico comando Chromecast dell'app. Sempre visibile: quando il cast
           non è disponibile spiega il perché invece di sparire senza spiegazioni. */}
       <CastButton cast={cast} media={castMedia} onNotice={addToast} />
@@ -22,7 +20,7 @@ function VideoActions({ info, cast, castMedia, addToast, onDownload, videoId }) 
 }
 
 /** Canale a sinistra, azioni a destra sulla stessa riga — come YouTube. */
-export default function VideoChannelRow({ info, channelAvatar, navigate, addToast, onSubsChange, cast, castMedia, onDownload, videoId }) {
+export default function VideoChannelRow({ info, channelAvatar, navigate, addToast, onSubsChange, cast, castMedia, onDownload, videoId, canRate }) {
   return (
     <div className="video-meta-row">
       <div className="channel-row">
@@ -38,7 +36,7 @@ export default function VideoChannelRow({ info, channelAvatar, navigate, addToas
             senza passare dalla pagina del canale. */}
         <SubscribeButton channelId={info.channel_id} channelName={info.channel} thumbnail={channelAvatar} onNotice={addToast} onChange={onSubsChange} />
       </div>
-      <VideoActions info={info} cast={cast} castMedia={castMedia} addToast={addToast} onDownload={onDownload} videoId={videoId} />
+      <VideoActions info={info} cast={cast} castMedia={castMedia} addToast={addToast} onDownload={onDownload} videoId={videoId} canRate={canRate} />
     </div>
   );
 }
