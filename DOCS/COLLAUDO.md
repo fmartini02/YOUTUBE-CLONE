@@ -516,6 +516,16 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 - [ ] **Trasmissione (desktop)** — il video parte sul Chromecast con i codec compatibili; poi si
       comanda dal telecomando della TV / Google Home (il ramo web è "manda e basta").
       **non verificabile** — serve un Chromecast in rete, assente qui.
+- [ ] **Scoperta dispositivi nell'APK (Android 13+)** — al primo tocco su "Trasmetti" l'app chiede
+      il permesso **«dispositivi nelle vicinanze»** (`NEARBY_WIFI_DEVICES`); concesso, il selettore
+      elenca i Chromecast / Android TV sulla stessa rete. Senza il permesso il Cast SDK non trova
+      nulla anche con un Chromecast acceso. Le TV senza Chromecast integrato (Samsung, LG, Roku,
+      Fire TV) restano fuori: non parlano il protocollo Google Cast.
+      **OK** (controllo statico) — `aapt2 dump permissions YTProxy.apk` elenca `NEARBY_WIFI_DEVICES`
+      (`neverForLocation`), `CHANGE_WIFI_MULTICAST_STATE`, `ACCESS_FINE_LOCATION` (`maxSdkVersion=32`);
+      `CastBridgePlugin` fa `requestPermissionForAlias("nearbyWifi", …)` in `showDevicePicker()` con
+      callback che riapre il selettore. **non verificabile** fino in fondo — serve un telefono
+      Android 13+ con un Chromecast reale in rete.
 - [ ] **Telecomando dall'APK Android** — trasmesso un video dal telefono, il player locale lascia
       il posto a `CastRemote`: play/pausa, barra di avanzamento con seek, ±10s e doppio tocco ai
       lati comandano la TV dal telefono; la barra segue la posizione (eventi `mediaStatusChanged`,

@@ -50,8 +50,27 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Scoperta e sessione Cast (play-services-cast-framework). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Scoperta e sessione Cast (play-services-cast-framework).
+
+         Il Cast SDK trova i dispositivi via mDNS. Su Android 13+ (targetSdk 36)
+         la scoperta Wi-Fi è dietro NEARBY_WIFI_DEVICES, che è un permesso
+         "runtime": va anche chiesto a mano (lo fa CastBridgePlugin alla prima
+         apertura del selettore). Senza, il selettore resta vuoto anche con un
+         Chromecast acceso sulla stessa rete — NB: le Smart TV senza Chromecast
+         integrato (Samsung, LG, Roku, Fire TV) non compaiono comunque, non
+         parlano il protocollo Google Cast.
+         CHANGE_WIFI_MULTICAST_STATE serve a ricevere i pacchetti mDNS multicast.
+         ACCESS_FINE_LOCATION è il ripiego pre-13 (cap a maxSdkVersion=32, così
+         su 13+ non chiede la posizione). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="32" />
 </manifest>

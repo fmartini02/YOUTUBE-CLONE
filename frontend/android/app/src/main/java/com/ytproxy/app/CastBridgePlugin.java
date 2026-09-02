@@ -1,16 +1,21 @@
 package com.ytproxy.app;
 
+import android.Manifest;
 import android.net.Uri;
+import android.os.Build;
 
 import androidx.mediarouter.app.MediaRouteChooserDialog;
 import androidx.mediarouter.media.MediaRouteSelector;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import com.google.android.gms.cast.CastMediaControlIntent;
 import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaLoadRequestData;
@@ -61,7 +66,15 @@ import java.util.List;
  * {@code loadMedia}. Non registriamo la sessione a mano: ci pensa il framework
  * via {@code SessionManager}.
  */
-@CapacitorPlugin(name = "YtCast")
+@CapacitorPlugin(
+        name = "YtCast",
+        permissions = {
+                // Android 13+: senza questo permesso il Cast SDK non scopre
+                // nessun dispositivo via mDNS. È "runtime", quindi va anche
+                // chiesto a mano — vedi showDevicePicker().
+                @Permission(alias = "nearbyWifi", strings = { Manifest.permission.NEARBY_WIFI_DEVICES })
+        }
+)
 public class CastBridgePlugin extends Plugin {
 
     private CastContext castContext;
@@ -116,6 +129,24 @@ public class CastBridgePlugin extends Plugin {
 
     @PluginMethod
     public void showDevicePicker(PluginCall call) {
+        // Da Android 13 la scoperta mDNS del Cast SDK non torna nessun
+        // dispositivo finché l'utente non concede NEARBY_WIFI_DEVICES. Lo si
+        // chiede qui, contestualmente al primo tocco su "Trasmetti"; il
+        // callback riapre comunque il selettore, concesso o no.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && getPermissionState("nearbyWifi") != PermissionState.GRANTED) {
+            requestPermissionForAlias("nearbyWifi", call, "nearbyWifiCallback");
+            return;
+        }
+        openPicker(call);
+    }
+
+    @PermissionCallback
+    private void nearbyWifiCallback(PluginCall call) {
+        openPicker(call);
+    }
+
+    private void openPicker(PluginCall call) {
         onMain(() -> {
             try {
                 MediaRouteSelector selector = new MediaRouteSelector.Builder()
