@@ -71,11 +71,13 @@ export async function nativeStartCast(media) {
   }
 }
 
-/** Aggancia i due listener del plugin; torna la funzione di cleanup. */
-export function subscribeCast(onState, onMedia) {
+/** Aggancia i listener del plugin (stato sessione, stato media, coda); torna
+ *  la funzione di cleanup. */
+export function subscribeCast(onState, onMedia, onQueue) {
   const subs = [
     YtCast.addListener("castStateChanged", onState),
     YtCast.addListener("mediaStatusChanged", onMedia),
+    YtCast.addListener("queueChanged", onQueue),
   ];
   return () => subs.forEach((p) => p.then((h) => h.remove()));
 }

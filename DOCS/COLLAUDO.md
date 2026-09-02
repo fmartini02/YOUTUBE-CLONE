@@ -527,6 +527,16 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **non verificabile** — serve APK + Chromecast: (a) i sottotitoli side-loaded compaiono
       davvero sul receiver; (b) `TextTrackStyle.setFontScale` viene onorato; (c) resa visiva del
       menu ⚙ con una sessione cast attiva.
+- [ ] **Coda via cast (APK)** — mentre si trasmette dal telefono, ogni video correlato mostra un
+      "＋" che lo accoda sul Chromecast (`RelatedSidebar` → `cast.remote.queueAdd` →
+      `RemoteMediaClient.queueAppendItem`). Nel `CastRemote`, con ≥2 video in coda, compare
+      `CastRemoteQueue`: elenco + "Precedente"/"Successivo" (`queueNext`/`queuePrev`). La coda è
+      quella nativa di Google Cast (`MediaQueue`), nessuna struttura lato server; il frontend la
+      rispecchia dall'evento `queueChanged`.
+      **non verificabile** — serve APK + Chromecast. Da codice: `norm_check` pulito, `npm run
+      build` OK. Da controllare col dispositivo: `queueAppendItem` su una sessione partita con un
+      solo `load()` (coda implicita di 1), l'ordine degli item e l'evidenziazione di quello in
+      riproduzione (`getCurrentItemId`), l'avanzamento automatico a fine video.
 - [ ] **Trasmissione in 4K** — con la qualità impostata su 2160p/1440p il video parte sul
       ricevitore Cast in VP9/WebM (vedi "4K sul Cast" in §3). Se il receiver non regge il VP9 4K
       o il WebM in streaming, l'utente riabbassa a 1080p e torna all'H.264. **non verificabile** —

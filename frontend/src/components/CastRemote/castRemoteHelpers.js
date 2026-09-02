@@ -1,6 +1,23 @@
 import { DOUBLE_TAP_MS, TAP_SIDE_RATIO, TAP_SLOP_PX } from "../VideoPlayer/playerConstants";
+import { api } from "../../api";
 
 export { formatTime } from "../VideoPlayer/videoPlayerHelpers";
+
+// Payload di YtCast.queueAdd per un video preso dai correlati (o dalla riga
+// azioni): shape { id | videoId, title, thumbnail, channel }. Qualità "best"
+// (compat=1 sceglie comunque codec che il Chromecast decodifica) e URL LAN
+// assoluto, come api.castUrl.
+export function queuePayloadFor(item) {
+  const id = item.videoId || item.id;
+  return {
+    streamUrl: api.castUrl(id, "best"),
+    contentType: "video/mp4",
+    title: item.title || "Video",
+    channel: item.channel || item.author || "",
+    thumbnail: item.thumbnail || "",
+    videoId: id,
+  };
+}
 
 // Doppio tocco sul terzo sinistro/destro dell'area video = salto ∓/±10s, come
 // nel player locale (stesse costanti). Un tocco singolo fa play/pausa, ma

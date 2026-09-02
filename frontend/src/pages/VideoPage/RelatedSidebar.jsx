@@ -1,7 +1,19 @@
 import { formatDuration, formatViews } from "../../api";
 import ChannelLink, { daLinkCanale } from "../../components/ChannelLink";
+import { queuePayloadFor } from "../../components/CastRemote/castRemoteHelpers";
 
-function RelatedItem({ v, navigate }) {
+function RelatedQueueBtn({ onQueue, v }) {
+  if (!onQueue) return null;
+  return (
+    <button
+      className="related-queue-btn" title="Aggiungi alla coda del cast"
+      aria-label="Aggiungi alla coda del cast"
+      onClick={e => { e.stopPropagation(); onQueue(v); }}
+    >＋</button>
+  );
+}
+
+function RelatedItem({ v, navigate, onQueue }) {
   return (
     <div
       className="related-item"
@@ -18,15 +30,21 @@ function RelatedItem({ v, navigate }) {
         </div>
         <div className="related-views">{formatViews(v.views)}</div>
       </div>
+      <RelatedQueueBtn onQueue={onQueue} v={v} />
     </div>
   );
 }
 
-export default function RelatedSidebar({ related, navigate, sentinelRef, loading }) {
+// Solo mentre si sta trasmettendo dall'APK (cast.remote presente e connesso)
+// i correlati mostrano il "＋" per accodare il video sul Chromecast.
+export default function RelatedSidebar({ related, navigate, sentinelRef, loading, cast, addToast }) {
+  const onQueue = cast?.remote && cast?.connected
+    ? (v) => { cast.remote.queueAdd(queuePayloadFor(v)); addToast?.("➕ In coda sul Chromecast"); }
+    : null;
   return (
     <div className="related-sidebar">
       <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--text2)" }}>Video correlati</h3>
-      {related.map(v => <RelatedItem key={v.id} v={v} navigate={navigate} />)}
+      {related.map(v => <RelatedItem key={v.id} v={v} navigate={navigate} onQueue={onQueue} />)}
       {/* Sentinella: entrando nel viewport carica il blocco successivo del mix */}
       <div ref={sentinelRef} style={{ height: 1 }} />
       {loading && (

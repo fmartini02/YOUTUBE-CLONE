@@ -15,6 +15,7 @@ import com.google.android.gms.cast.CastMediaControlIntent;
 import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaLoadRequestData;
 import com.google.android.gms.cast.MediaMetadata;
+import com.google.android.gms.cast.MediaQueueItem;
 import com.google.android.gms.cast.MediaSeekOptions;
 import com.google.android.gms.cast.MediaStatus;
 import com.google.android.gms.cast.MediaTrack;
@@ -174,15 +175,39 @@ public class CastBridgePlugin extends Plugin {
         withMedia(call, rmc -> rmc.setPlaybackRate(rate));
     }
 
+    // ── Coda (MediaQueue nativa di Google Cast) ──────────────────────────────
+
+    @PluginMethod
+    public void queueAdd(PluginCall call) {
+        onMain(() -> {
+            RemoteMediaClient rmc = remoteMediaClient();
+            if (rmc == null) { call.reject("no-session"); return; }
+            try {
+                MediaQueueItem item = new MediaQueueItem.Builder(buildMediaInfo(call))
+                        .setAutoplay(true).setPreloadTime(20).build();
+                rmc.queueAppendItem(item, null);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("queue-failed", e);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void queueNext(PluginCall call) { withMedia(call, rmc -> rmc.queueNext(null)); }
+
+    @PluginMethod
+    public void queuePrev(PluginCall call) { withMedia(call, rmc -> rmc.queuePrev(null)); }
+
     // ── Costruzione della richiesta di load ──────────────────────────────────
 
     /**
-     * {@link MediaLoadRequestData} dal payload JS. La firma è già quella
-     * completa: {@code tracks}/{@code activeTrackIds}/{@code playbackRate} sono
-     * gli agganci per qualità e sottotitoli via cast (fase 2), qui vengono
-     * onorati se presenti e ignorati altrimenti.
+     * {@link MediaInfo} dal payload JS: url, contenitore, titolo/canale,
+     * miniatura, videoId in customData (serve a riconoscere il video sulla TV),
+     * ed eventuali track sottotitolo side-loaded con stile (fase 2). Condiviso
+     * fra {@link #loadMedia} e {@link #queueAdd}.
      */
-    private MediaLoadRequestData buildRequest(PluginCall call) throws Exception {
+    private MediaInfo buildMediaInfo(PluginCall call) throws Exception {
         MediaMetadata meta = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE);
         meta.putString(MediaMetadata.KEY_TITLE, call.getString("title", ""));
         meta.putString(MediaMetadata.KEY_SUBTITLE, call.getString("subtitle", ""));
@@ -204,9 +229,17 @@ public class CastBridgePlugin extends Plugin {
             style.setFontScale((float) call.getDouble("subtitleFontScale", 1.0));
             info.setTextTrackStyle(style);
         }
+        return info.build();
+    }
 
+    /**
+     * {@link MediaLoadRequestData} dal payload JS. {@code tracks}/{@code
+     * activeTrackIds}/{@code playbackRate} sono onorati se presenti (fase 2:
+     * qualità e sottotitoli via cast = ricarica), ignorati altrimenti.
+     */
+    private MediaLoadRequestData buildRequest(PluginCall call) throws Exception {
         MediaLoadRequestData.Builder req = new MediaLoadRequestData.Builder()
-                .setMediaInfo(info.build())
+                .setMediaInfo(buildMediaInfo(call))
                 .setAutoplay(call.getBoolean("autoplay", true))
                 .setCurrentTime((long) (call.getDouble("currentTime", 0.0) * 1000));
         long[] active = parseActiveTrackIds(call.getArray("activeTrackIds", null));
@@ -248,11 +281,13 @@ public class CastBridgePlugin extends Plugin {
         mediaCallback = new RemoteMediaClient.Callback() {
             @Override public void onStatusUpdated() { emitMedia(); }
             @Override public void onMetadataUpdated() { emitMedia(); }
+            @Override public void onQueueStatusUpdated() { emitQueue(); }
         };
         progressListener = (progressMs, durationMs) -> emitProgress(progressMs, durationMs);
         rmc.registerCallback(mediaCallback);
         rmc.addProgressListener(progressListener, 1000);
         emitMedia();
+        emitQueue();
     }
 
     private void detachMedia(CastSession session) {
@@ -279,6 +314,34 @@ public class CastBridgePlugin extends Plugin {
         ev.put("position", progressMs / 1000.0);
         if (durationMs > 0) ev.put("duration", durationMs / 1000.0);
         notifyListeners("mediaStatusChanged", ev);
+    }
+
+    private void emitQueue() {
+        JSObject ev = new JSObject();
+        ev.put("queue", queueArray());
+        notifyListeners("queueChanged", ev);
+    }
+
+    /** La coda come array JS: [{itemId, videoId, title, current}], in ordine. */
+    private JSONArray queueArray() {
+        JSONArray arr = new JSONArray();
+        RemoteMediaClient rmc = remoteMediaClient();
+        MediaStatus ms = rmc == null ? null : rmc.getMediaStatus();
+        List<MediaQueueItem> items = ms == null ? null : ms.getQueueItems();
+        if (items == null) return arr;
+        int currentId = ms.getCurrentItemId();
+        for (MediaQueueItem it : items) {
+            MediaInfo mi = it.getMedia();
+            MediaMetadata md = mi == null ? null : mi.getMetadata();
+            JSONObject cd = mi == null ? null : mi.getCustomData();
+            JSObject o = new JSObject();
+            o.put("itemId", it.getItemId());
+            o.put("current", it.getItemId() == currentId);
+            o.put("title", md == null ? "" : md.getString(MediaMetadata.KEY_TITLE));
+            o.put("videoId", cd == null ? "" : cd.optString("videoId", ""));
+            arr.put(o);
+        }
+        return arr;
     }
 
     /** Stato completo della sessione + del media, nel formato che il JS si aspetta. */

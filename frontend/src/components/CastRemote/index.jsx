@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import CastRemoteScreen from "./CastRemoteScreen";
 import CastRemoteBar from "./CastRemoteBar";
 import CastRemoteSettings from "./CastRemoteSettings";
+import CastRemoteQueue from "./CastRemoteQueue";
 
 /**
  * Telecomando del cast — al posto del player locale quando il video sta
@@ -34,6 +35,7 @@ export default function CastRemote({ cast, player, info }) {
         position={cast.position || 0} duration={duration} playing={playing}
         onSeek={remote.seek} onSkip={remote.skip} onTogglePlay={togglePlay}
       />
+      <CastRemoteQueue queue={cast.queue} onNext={remote.queueNext} onPrev={remote.queuePrev} />
     </div>
   );
 }

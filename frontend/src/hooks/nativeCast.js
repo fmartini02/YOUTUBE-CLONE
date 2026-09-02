@@ -38,6 +38,10 @@ function buildRemote(mediaRef) {
     // sul Default Media Receiver i track e la sorgente si cambiano solo al load.
     reload: (media, opts) =>
       YtCast.loadMedia(nativeLoadPayload(media, opts?.at ?? cur().position ?? 0, opts)),
+    // Coda: la MediaQueue nativa di Google Cast (nessuna struttura lato server).
+    queueAdd: (media) => YtCast.queueAdd(nativeLoadPayload(media, 0)),
+    queueNext: () => YtCast.queueNext(),
+    queuePrev: () => YtCast.queuePrev(),
   };
 }
 
@@ -49,6 +53,7 @@ function buildRemote(mediaRef) {
 export function useNativeCast() {
   const { state, setters } = useCastState();
   const [media, setMedia] = useState({ position: 0, duration: 0, playbackRate: 1 });
+  const [queue, setQueue] = useState([]);
   const mediaRef = useRef(media);
   mediaRef.current = media;
   const remoteRef = useRef(null);
@@ -56,16 +61,15 @@ export function useNativeCast() {
 
   useEffect(() => {
     const on = (s) => applySnapshot(s, setters, setMedia);
+    const onQueue = (e) => setQueue(e?.queue || []);
     YtCast.isAvailable().then((r) => setters.setAvailable(!!r?.available)).catch(() => {});
     YtCast.getState().then(on).catch(() => {});
-    return subscribeCast(on, on);
+    return subscribeCast(on, on, onQueue);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- setters/YtCast stabili
 
+  // ...media = position/duration/playbackRate (esattamente i campi dello state)
   return {
-    ...state,
-    position: media.position,
-    duration: media.duration,
-    playbackRate: media.playbackRate,
+    ...state, ...media, queue,
     remote: remoteRef.current,
     startCast: nativeStartCast,
     stopCast: () => YtCast.endSession(),

@@ -55,7 +55,10 @@ export default function VideoPage({ videoId, navigate, authStatus, onSubsChange 
             </div>
           )}
         </div>
-        <RelatedSidebar related={s.related.related} navigate={navigate} sentinelRef={s.related.sentinelRef} loading={s.related.loading} />
+        <RelatedSidebar
+          related={s.related.related} navigate={navigate} sentinelRef={s.related.sentinelRef}
+          loading={s.related.loading} cast={s.cast} addToast={s.addToast}
+        />
       </div>
       <s.ToastContainer />
     </div>

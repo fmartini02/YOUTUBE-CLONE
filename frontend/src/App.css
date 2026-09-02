@@ -748,8 +748,18 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
   display: flex; gap: 8px; cursor: pointer;
   padding: 8px 0; border-radius: 8px;
   transition: background var(--transition);
+  position: relative;
 }
 .related-item:hover { background: var(--bg2); padding: 8px; margin: 0 -8px; }
+
+/* "＋ alla coda" — appare solo mentre si trasmette dall'APK (vedi RelatedSidebar). */
+.related-queue-btn {
+  position: absolute; top: 4px; right: 4px; z-index: 1;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: none; cursor: pointer;
+  background: rgba(0,0,0,0.65); color: #fff; font-size: 18px; line-height: 1;
+}
+.related-queue-btn:hover { background: var(--accent); }
 
 /* Larghezza in proporzione alla riga invece che in pixel fissi: così la
    miniatura si adatta a qualsiasi schermo da sola, senza una misura diversa
