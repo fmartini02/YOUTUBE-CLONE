@@ -53,6 +53,11 @@ export default function VideoPlayer({
   onToggleTheater,
   onError,
   onNotice,
+  // Chromecast: passati per il bottone nella barra dei comandi del player
+  // (PlayerCastButton), gemello del CastButton testuale sotto il video. `cast`
+  // è il contesto Cast, `castMedia` il video da mandare in TV.
+  cast,
+  castMedia,
   // Preferenza "Autoplay video" (Impostazioni): decide solo se un video appena
   // aperto parte da solo. Le riaperture del flusso dovute a un salto o a un
   // cambio di qualità mantengono invece lo stato di prima.
@@ -676,6 +681,9 @@ export default function VideoPlayer({
           onToggleTheater={onToggleTheater}
           fullscreen={fullscreen}
           toggleFullscreen={toggleFullscreen}
+          cast={cast}
+          castMedia={castMedia}
+          onNotice={onNotice}
         />
       </div>
 

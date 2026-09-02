@@ -32,6 +32,7 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
       theater={player.theater} onToggleTheater={player.toggleTheater}
       onError={() => player.addToast("Errore stream — ricarica la pagina")} onNotice={player.addToast}
       autoplay={player.autoplay} fitScreen={player.fitScreen}
+      cast={cast} castMedia={player.castMedia}
     />
   );
 }

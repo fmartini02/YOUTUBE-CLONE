@@ -513,6 +513,18 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       "non disponibile nell'app Android".
       **non verificabile** — serve un runtime reale (desktop o APK installato su un telefono con
       Google Play services), non disponibile in questo ambiente headless.
+- [ ] **Bottone Cast nella barra del player** — oltre al `CastButton` testuale sotto il video c'è
+      un gemello a icona (`VideoPlayer/PlayerCastButton.jsx`, glifo `cast` / `cast_connected`) nella
+      barra dei comandi del player, a sinistra dei sottotitoli. Vive dentro `.player-wrap`, quindi
+      **si vede sia a finestra sia a schermo intero**. Condivide con il bottone testuale l'hook
+      `useCastButton` (stessa logica a quattro stati: trasmetti / connessione / interrompi / non
+      disponibile), quindi il click si comporta identico; quando il cast non è disponibile resta
+      visibile e, cliccato, spiega il motivo con lo stesso messaggio.
+      **verificato senza hardware**: `norm_check` pulito sui 5 file toccati, `npm run build` OK,
+      catena prop `useVideoPageState` → `VideoMainPlayer` → `VideoPlayer` → `PlayerButtonsBar` →
+      `PlayerCastButton` completa (`cast`, `castMedia`, `onNotice`).
+      **non verificabile senza runtime reale** — la resa dell'icona a schermo intero e il fatto
+      che il click avvii davvero la sessione richiedono un browser reale + un Chromecast in rete.
 - [ ] **Trasmissione (desktop)** — il video parte sul Chromecast con i codec compatibili; poi si
       comanda dal telecomando della TV / Google Home (il ramo web è "manda e basta").
       **non verificabile** — serve un Chromecast in rete, assente qui.

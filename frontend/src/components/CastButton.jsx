@@ -1,6 +1,4 @@
-import { useState } from "react";
-import { resolveCastBase } from "../api";
-import { CAST_UNAVAILABLE_MESSAGE, CAST_ERROR_MESSAGE } from "../hooks/useCast.jsx";
+import { useCastButton } from "./useCastButton";
 
 function CastIcon({ casting }) {
   return (
@@ -14,65 +12,35 @@ function CastIcon({ casting }) {
   );
 }
 
-async function handleCastClick(cast, media, onNotice, busy, setBusy) {
-  if (!cast?.available) {
-    onNotice?.(CAST_UNAVAILABLE_MESSAGE[cast?.unavailableReason] || CAST_ERROR_MESSAGE.unavailable);
-    return;
-  }
-  if (!!cast?.connected && cast.castingVideoId === media?.videoId) {
-    cast.stopCast();
-    return;
-  }
-  if (!media?.videoId || busy) return;
-
-  setBusy(true);
-  try {
-    // Il Chromecast scarica il video da sé: un URL su localhost punterebbe
-    // alla TV stessa. Se la pagina è aperta così, ci facciamo dare
-    // dal server il suo indirizzo di rete e riscriviamo solo l'origine.
-    const base = await resolveCastBase();
-    if (!base) {
-      onNotice?.("Non riesco a ricavare l'indirizzo di rete del server: apri YTProxy dall'IP della LAN (es. http://192.168.1.11:8090) per trasmettere.");
-      return;
-    }
-    const streamUrl = media.streamUrl.replace(/^https?:\/\/[^/]+/, base);
-
-    const { ok, error } = await cast.startCast({ ...media, streamUrl });
-    if (ok) onNotice?.(`📺 In riproduzione su ${cast.deviceName || "TV"}`);
-    else if (error !== "cancel") onNotice?.(CAST_ERROR_MESSAGE[error] || CAST_ERROR_MESSAGE.load);
-  } finally {
-    setBusy(false);
-  }
-}
-
 /**
- * CastButton — l'UNICO comando Chromecast dell'app.
+ * CastButton — il comando Chromecast testuale, sotto il video (riga del canale).
  *
  * Un solo bottone con quattro stati: trasmetti / connessione in corso /
  * interrompi / non disponibile. Non si nasconde mai quando il cast non è
  * disponibile: cliccandolo spiega il motivo, che è più utile di un bottone
  * che sparisce senza dire niente.
  *
+ * Il gemello a icona nella barra del player (`VideoPlayer/PlayerCastButton.jsx`)
+ * condivide con questo l'hook `useCastButton`, quindi si comporta allo stesso
+ * modo — è visibile anche a schermo intero, dove questa riga non arriva.
+ *
  * `media` è il video da mandare in TV: { streamUrl, title, channel,
  * thumbnail, duration, videoId }.
  */
 export default function CastButton({ cast, media, onNotice }) {
-  const [busy, setBusy] = useState(false);
+  const { casting, connecting, available, deviceName, onClick } = useCastButton(cast, media, onNotice);
 
-  const casting = !!cast?.connected && cast.castingVideoId === media?.videoId;
-  const connecting = !!cast?.connecting || busy;
-
-  const label = !cast?.available ? "Trasmetti sulla TV"
+  const label = !available ? "Trasmetti sulla TV"
     : connecting ? "Connessione…"
-    : casting ? `Interrompi (${cast.deviceName || "TV"})`
+    : casting ? `Interrompi (${deviceName || "TV"})`
     : "Trasmetti sulla TV";
 
   return (
     <button
-      className={`action-btn${casting || !cast?.available ? "" : " primary"}`}
-      style={cast?.available ? undefined : { opacity: 0.6 }}
-      onClick={() => handleCastClick(cast, media, onNotice, busy, setBusy)}
-      title={casting ? `In riproduzione su ${cast.deviceName}` : "Trasmetti su Chromecast"}
+      className={`action-btn${casting || !available ? "" : " primary"}`}
+      style={available ? undefined : { opacity: 0.6 }}
+      onClick={onClick}
+      title={casting ? `In riproduzione su ${deviceName}` : "Trasmetti su Chromecast"}
     >
       <CastIcon casting={casting} />
       {label}
