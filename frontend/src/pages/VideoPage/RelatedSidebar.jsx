@@ -38,9 +38,15 @@ function RelatedItem({ v, navigate, onQueue }) {
 // Solo mentre si sta trasmettendo dall'APK (cast.remote presente e connesso)
 // i correlati mostrano il "＋" per accodare il video sul Chromecast.
 export default function RelatedSidebar({ related, navigate, sentinelRef, loading, cast, addToast }) {
-  const onQueue = cast?.remote && cast?.connected
-    ? (v) => { cast.remote.queueAdd(queuePayloadFor(v)); addToast?.("➕ In coda sul Chromecast"); }
-    : null;
+  const canQueue = cast?.remote && cast?.connected;
+  const onQueue = canQueue ? async (v) => {
+    try {
+      await cast.remote.queueAdd(queuePayloadFor(v));
+      addToast?.("➕ In coda sul Chromecast");
+    } catch {
+      addToast?.("Non sono riuscito ad accodare il video");
+    }
+  } : null;
   return (
     <div className="related-sidebar">
       <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--text2)" }}>Video correlati</h3>

@@ -534,9 +534,12 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       quella nativa di Google Cast (`MediaQueue`), nessuna struttura lato server; il frontend la
       rispecchia dall'evento `queueChanged`.
       **non verificabile** — serve APK + Chromecast. Da codice: `norm_check` pulito, `npm run
-      build` OK. Da controllare col dispositivo: `queueAppendItem` su una sessione partita con un
-      solo `load()` (coda implicita di 1), l'ordine degli item e l'evidenziazione di quello in
-      riproduzione (`getCurrentItemId`), l'avanzamento automatico a fine video.
+      build` OK, il toast "in coda" è dietro `await` + try/catch (niente falso positivo se il
+      plugin rifiuta). Da controllare col dispositivo: `queueAppendItem` su una sessione partita
+      con un solo `load()` (coda implicita di 1), l'ordine degli item e l'evidenziazione di quello
+      in riproduzione (`getCurrentItemId`), l'avanzamento automatico a fine video, e il
+      comportamento di "Precedente"/"Successivo" ai bordi della coda (i pulsanti non si
+      disabilitano: primo/ultimo elemento → click inerte).
 - [ ] **Trasmissione in 4K** — con la qualità impostata su 2160p/1440p il video parte sul
       ricevitore Cast in VP9/WebM (vedi "4K sul Cast" in §3). Se il receiver non regge il VP9 4K
       o il WebM in streaming, l'utente riabbassa a 1080p e torna all'H.264. **non verificabile** —
