@@ -22,9 +22,9 @@ export function isBuffered(video, t) {
   return false;
 }
 
-// Gradini di qualità che YouTube offre, dal più alto. `qualityForScreen` cerca
-// qui dentro.
-const QUALITY_STEPS = [2160, 1440, 1080, 720, 480];
+// Gradini di qualità che YouTube offre, dal più alto. Usato sia da
+// `qualityForScreen` sia da `labelForHeight` qui sotto.
+export const QUALITY_STEPS = [2160, 1440, 1080, 720, 480];
 
 // "Migliore qualità" (quality === "best") non deve scaricare più di quanto lo
 // schermo possa davvero mostrare: su un telefono o un monitor 1080p il 4K
@@ -55,4 +55,15 @@ export function isSeekable(video, t) {
     if (t >= video.seekable.start(i) && t <= video.seekable.end(i)) return true;
   }
   return false;
+}
+
+// Con "Migliore qualità" selezionata, il menu non mostra altrimenti QUALE
+// definizione sta arrivando davvero (dipende da cosa offre il video e da
+// `qualityForScreen`, non è scelta dall'utente). `videoHeight` è l'altezza
+// reale del flusso decodificato (evento `resize` del <video>): la si
+// arrotonda al gradino noto più vicino, come fa YouTube ("Automatica (1080p)").
+export function labelForHeight(h) {
+  if (!h) return "";
+  const step = QUALITY_STEPS.find(s => h >= s * 0.9) || 360;
+  return `${step}p`;
 }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../../api";
 import { isCapacitor } from "../../api/device";
 import { useTouchDevice } from "../../hooks/useMediaQuery";
-import { formatTime, isBuffered, isSeekable, qualityForScreen } from "./videoPlayerHelpers";
+import { formatTime, isBuffered, isSeekable, qualityForScreen, labelForHeight } from "./videoPlayerHelpers";
 import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
 import { HOLD_SPEED, HOLD_MS } from "./speedMath";
 import PlayerOverlays from "./PlayerOverlays";
@@ -74,6 +74,10 @@ export default function VideoPlayer({
   const [stream, setStream] = useState({ start: 0, n: 0 });
   const [position, setPosition] = useState(0);
   const [bufferedEnd, setBufferedEnd] = useState(0);
+  // Altezza reale del flusso decodificato (evento `resize` del <video>): con
+  // "Migliore qualità" non c'è altro modo di sapere quale definizione sta
+  // arrivando davvero. Solo per il menu impostazioni, vedi labelForHeight.
+  const [actualHeight, setActualHeight] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(true);
   const [volume, setVolume] = useState(1);
@@ -100,6 +104,7 @@ export default function VideoPlayer({
     setStream({ start: 0, n: 0 });
     setPosition(0);
     setBufferedEnd(0);
+    setActualHeight(0);
     setSettingsOpen(false);
     setSettingsPage("main");
   }
@@ -139,6 +144,7 @@ export default function VideoPlayer({
     setBuffering(true);
     setPosition(stream.start);
     setBufferedEnd(stream.start);
+    setActualHeight(0);
     // Il primo caricamento di un flusso appena aperto non è uno stallo: lo è
     // solo se il buffering torna DOPO che il video ha già iniziato a scorrere
     // davvero (vedi "Recupero da uno stallo di rete" più sotto).
@@ -576,6 +582,13 @@ export default function VideoPlayer({
         ref={videoRef}
         className={`subtitle-size-${subtitleSize}`}
         playsInline
+        // Dichiarato e non solo impostato a runtime (era condizionale, solo
+        // sul ramo "non deve partire da sé"): senza, su un flusso senza
+        // Content-Length il browser può smettere di scaricare oltre il primo
+        // pezzetto già col video in pausa, e la barretta grigia del buffer
+        // resta ferma anche aspettando a lungo.
+        preload="auto"
+        onResize={() => setActualHeight(videoRef.current?.videoHeight || 0)}
         // Mouse e dito si escludono a vicenda: col dito il click arriverebbe
         // comunque dopo il pointerup e metterebbe in pausa due volte, e il
         // doppio click aprirebbe lo schermo intero al posto del salto di 10s.
@@ -689,6 +702,7 @@ export default function VideoPlayer({
           onSpeedChange={setSpeed}
           quality={quality}
           onPickQuality={handleQuality}
+          actualHeight={actualHeight}
           subtitleLang={subtitleLang}
           subtitleLangs={subtitleLangs}
           onSubtitleLangChange={onSubtitleLangChange}

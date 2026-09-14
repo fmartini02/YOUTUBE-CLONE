@@ -5,6 +5,7 @@ in tempo reale dei flussi video+audio adattivi di YouTube. Vedi CLAUDE.md
 """
 import asyncio
 import shutil
+import subprocess
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -17,6 +18,8 @@ from ytdlp.helpers import ydl_opts_base
 router = APIRouter()
 
 _FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
+_FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
+_KEYFRAME_PROBE_TIMEOUT = 3
 
 # Cache degli URL di formato usati da /api/mux e /api/download. Serve al
 # seek: saltare in un altro punto del video significa riavviare ffmpeg, e
@@ -68,6 +71,43 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
         for k in [k for k, v in _mux_fmt_cache.items() if now - v[0] >= _MUX_FMT_CACHE_TTL]:
             _mux_fmt_cache.pop(k, None)
     return urls
+
+
+def _keyframe_before(video_url: str, target: float) -> float:
+    """
+    Timestamp del keyframe video <= target, con un probe minimo (pochissimi
+    fotogrammi, non un'intera finestra come il vecchio `_keyframe_before`
+    rimosso in 43a6d9e). Serve a dare all'audio ricodificato lo STESSO punto
+    di atterraggio del video in sola copia: senza, `-ss` grezzo fa atterrare
+    il video sul keyframe precedente (fino a un GOP prima, misurato 0.6-2.7s
+    su YouTube) mentre l'audio (decodificato) atterra quasi esatto sul
+    target, e i due flussi restano permanentemente sfasati per tutto il
+    resto della riproduzione una volta rimappati a pts 0 dal muxer — non il
+    semplice offset "barra avanti sul fotogramma" già accettato (vedi
+    CLAUDE.md), un vero disallineamento udibile fra audio e video.
+
+    `read_intervals "target%+#3"` fa fare a ffprobe lo stesso salto al
+    keyframe che farebbe ffmpeg con `-ss`, leggendo solo 3 fotogrammi invece
+    di un'intera finestra: costa ~0.7-1s (misurato, contro i 4-5s del probe
+    rimosso, che leggeva secondi di dati indipendentemente dalla richiesta).
+    Fallisce silenziosamente sul valore grezzo: un salto un po' sfasato è
+    sempre meglio di un salto che non parte.
+    """
+    if target <= 0:
+        return target
+    cmd = [_FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
+           "-show_entries", "frame=pts_time,pict_type",
+           "-read_intervals", f"{target:.3f}%+#3", "-of", "csv=p=0", video_url]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=_KEYFRAME_PROBE_TIMEOUT).stdout
+        for line in out.splitlines():
+            pts, _, flag = line.partition(",")
+            if flag.startswith("I"):
+                return float(pts)
+    except Exception:
+        pass
+    return target
 
 
 def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4") -> list:
@@ -138,14 +178,18 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     dal secondo richiesto (ffmpeg `-ss` prima degli input, sul Range degli
     URL googlevideo) e mostra `start + currentTime` come posizione.
 
-    Sul salto lo stesso `-ss` (il secondo grezzo richiesto) va a video e audio
-    prima dei rispettivi input; ffmpeg in `-c:v copy` atterra da sé sul
-    keyframe precedente, quindi si "atterra" fino a ~1 GOP prima del punto
-    cliccato, come lo snap ai segmenti del player di YouTube. Nessun `ffprobe`
-    del keyframe prima del salto: costava 4-5s sul percorso critico e non
-    serviva più. Il buco audio/video che `-c copy` lasciava dopo ogni salto
-    (player a bufferare all'infinito) è risolto in `_build_ffmpeg_cmd`
-    ricodificando la sola traccia audio.
+    Sul salto, `_keyframe_before` trova con un probe minimo il keyframe video
+    <= al secondo richiesto (ffmpeg in `-c:v copy` ci atterrerebbe comunque
+    da sé, ma senza saperlo in anticipo) e lo usa come `-ss` per ENTRAMBI gli
+    input: prima che ci fosse questo passaggio, l'audio ricodificato (vedi
+    `_build_ffmpeg_cmd`) atterrava quasi esatto sul secondo grezzo mentre il
+    video restava sul keyframe precedente, fino a un GOP prima — risultato,
+    audio e video permanentemente sfasati per tutto il resto della
+    riproduzione. Il vecchio probe (finestra intera, 4-5s su un 4K) era stato
+    tolto dal percorso critico in 43a6d9e; questo legge solo pochi fotogrammi
+    e costa ~1s (misurato). Il buco audio/video che `-c copy` lasciava dopo
+    ogni salto (player a bufferare all'infinito) resta risolto in
+    `_build_ffmpeg_cmd` ricodificando la sola traccia audio.
     """
     try:
         urls = await asyncio.get_running_loop().run_in_executor(
@@ -158,7 +202,12 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
 
     video_url, audio_url, container = urls
     start = max(0.0, start)
-    seek = ["-ss", f"{start:.3f}"] if start > 0 else []
+    seek_target = start
+    if start > 0 and audio_url and container == "mp4":
+        seek_target = await asyncio.get_running_loop().run_in_executor(
+            None, _keyframe_before, video_url, start
+        )
+    seek = ["-ss", f"{seek_target:.3f}"] if seek_target > 0 else []
     cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek, container=container)
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
