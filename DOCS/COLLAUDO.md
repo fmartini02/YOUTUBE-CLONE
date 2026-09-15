@@ -115,21 +115,24 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `start=10` sullo stesso video: risponde 200. Il meccanismo di mux funziona; il 403 su
       `dQw4w9WgXcQ` resta segnalato per completezza (non riprodotto su un secondo video, quindi non
       sembra strutturale), non abbassa il voto della voce.
-- [ ] **Il video parte nella UI** — si apre, si vede e si sente, senza errori in console.
-      **non verificabile** — serve un browser reale.
-- [ ] **Seek lungo** — spostare la barra a metà video: riparte da lì (a meno di ~1 GOP: `-ss` grezzo
-      in `-c:v copy` atterra sul keyframe precedente) e il tempo mostrato è circa
-      `start + currentTime`, **non zero**.
-      **non verificabile nella UI** — serve un browser reale. Lato server verificato contro il vero
-      endpoint `/api/mux` (server dal branch, URL googlevideo reali, video AV1 2160p): `start=30`,
-      `start=300`, `start=580` — tutti `http 200`, primo pacchetto video `K` a pts 0, `maxgap` 1.00s
-      (cadenza dei frammenti), audio `codec=aac`, decodifica completa senza warning (2160 frame su
-      2160p). `_keyframe_before` (probe `ffprobe` del keyframe) **rimosso**: costava 4-5s sul
-      percorso critico e ffmpeg allinea da sé.
+- [x] **Il video parte nella UI** — si apre, si vede e si sente, senza errori in console.
+      **OK** (2026-09-14, Chromium bundled pilotato a mano — la MCP Playwright è agganciata al
+      canale `chrome`, non installabile qui senza root): aperto `/watch?v=dQw4w9WgXcQ`, `video`
+      raggiunge `readyState=4` (HAVE_ENOUGH_DATA), nessun `pageerror` in console.
+- [x] **Seek lungo** — spostare la barra a metà video: riparte da lì (a meno di ~1 GOP: `-ss`
+      atterra sul keyframe precedente) e il tempo mostrato è circa `start + currentTime`, **non zero**.
+      **OK** (2026-09-14, live) — click al 70% della barra (`duration=213`) → richiesta
+      `/api/mux/...?quality=720&start=149.10`, risposta 200, primo pacchetto video `K` a pts 0.
+      Lato server, contro il vero endpoint (URL googlevideo reali, AV1): `start=30/90/150/200` — tutti
+      200. `_keyframe_before` era stato **rimosso** (costava 4-5s, finestra `ffprobe` intera) ma senza
+      di lui l'audio ricodificato (vedi voce sotto) atterra quasi esatto sul target mentre il video
+      resta sul keyframe precedente — **reintrodotto** in forma leggera (`read_intervals
+      "target%+#3"`, 3 fotogrammi invece di una finestra): ~0.7-1s misurati su `start=30/90/150/200`
+      (contro i 4-5s del vecchio probe), TTFB end-to-end 0.61s su un seek reale.
 - [ ] **Seek corto** — tasti ← → e doppio tocco su telefono: il video si sposta di pochi secondi e
       **non torna all'inizio**. È la trappola di `seekable` vuoto: qui si vede o non si vede.
       **non verificabile** — serve un browser reale.
-- [ ] **Seek in avanti senza attesa / senza restare a caricare all'infinito** — un salto in avanti
+- [x] **Seek in avanti senza attesa / senza restare a caricare all'infinito** — un salto in avanti
       *singolo* riparte in ~1s (come aprire un video nuovo) e **non "rimane a caricare" per sempre**.
       Tre pezzi: (1) era `-copypriorss 0` che aspettava il keyframe successivo → oggi `-ss` grezzo e
       ffmpeg atterra sul keyframe precedente; (2) **il buco vero**: con `-c copy` su due input HTTP
@@ -138,10 +141,21 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **6/6** con URL reali. Cura: ricodifica della sola traccia audio in AAC sul ramo MP4 con
       salto → stesso test **6/6** pulito. (3) **latenza**: `_keyframe_before` faceva un `ffprobe`
       del keyframe (4-5s sul flusso 4K) prima di lanciare ffmpeg, e per giunta un `-ss` esatto sul
-      keyframe rallenta l'avvio di ffmpeg di ~1.7s vs un valore "largo" (3/3) → rimosso, il salto
-      non aspetta più niente.
-      **non verificabile nella UI** — serve un browser reale; meccanismo verificato contro il vero
-      endpoint `/api/mux` con URL googlevideo reali.
+      keyframe rallenta l'avvio di ffmpeg di ~1.7s vs un valore "largo" (3/3) → rimosso in 43a6d9e,
+      il salto non aspettava più niente — ma (4) **regressione non colta da quel giro**: senza il
+      probe, l'audio ricodificato (accurate-seek, decodifica) atterra quasi esatto sul valore grezzo
+      di `-ss` mentre il video (`-c copy`) resta sul keyframe precedente, fino a un GOP prima; il
+      muxer fMP4 rimappa ciascuno stream a pts 0 indipendentemente (confermato con `-copyts` +
+      `ffprobe` su mkv: NON preserva l'offset relativo su un mp4 frammentato), quindi audio e video
+      restano permanentemente sfasati per tutto il resto della riproduzione — non il semplice offset
+      "barra avanti sul fotogramma", un vero disallineamento udibile (misurato 0.6-2.7s su
+      `start=30/90/150/200`, video AV1 reale). Cura: probe leggero reintrodotto (vedi "Seek lungo"),
+      stesso valore usato per **entrambi** gli input.
+      **OK** (2026-09-14, live + server) — seek dalla UI (click al 70% della barra) produce
+      `/api/mux?...&start=149.10` 200, primo pacchetto video `K` a pts 0, nessun buco nel flusso
+      (325 pacchetti continui su 12s di test). L'allineamento audio/video esatto non è verificabile
+      a orecchio in headless: il meccanismo (stesso keyframe passato a entrambi gli input) è
+      verificato a livello ffmpeg/ffprobe, non nel player.
 - [ ] **Seek vicino alla fine** — spostare la barra o premere → negli ultimi secondi del video:
       l'audio **non sparisce** e il player non si pianta. Era `-copypriorss 0` nell'ultimo GOP (nessun
       keyframe dopo il punto) a produrre un flusso **con 0 pacchetti video** che bloccava anche
@@ -153,15 +167,55 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **da confermare in un browser reale** — il meccanismo esatto del sintomo "perdo l'audio"
       (traccia video vuota che pianta l'elemento, oppure traccia audio più corta del video) non è
       isolabile senza browser; evitare il flusso vuoto è comunque corretto in entrambi i casi.
-- [ ] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
+- [x] **Barra di caricamento (buffer)** — `.player-progress-buffer` deve crescere mentre il video
+      scarica, anche da fermo (video in pausa), non solo mentre scorre.
+      **OK** (2026-09-15, live, Chromium bundled pilotato a mano) — risolto passando a MediaSource:
+      il player scarica da sé con `fetch()` e appende a un `SourceBuffer` invece di affidare tutto a
+      `<video src>` (vedi CLAUDE.md, "Barra di caricamento: risolta con MediaSource Extensions").
+      Verificato: `video.buffered.end` passa da **6s a 20s in 8 secondi di pausa** (`currentTime`
+      fermo a 2.1, quindi il video non stava scorrendo), `seekable.end(0)` popolato a 20 (prima
+      `[0,0]`), la larghezza CSS della barra grigia passa da 0% a 9.4%. `currentSrc` è un
+      `blob:` (MediaSource), non più `/api/mux/...` diretto.
+      **Ripiego verificato**: con `MediaSource` disattivato a mano (`delete window.MediaSource`
+      prima del caricamento della pagina), il player torna a `<video src="/api/mux/...">` come
+      prima di questo lavoro, e un salto nel ripiego funziona (`currentTime` si sposta, nessun
+      `video.error`) — nessuno resta senza riproduzione se il browser non supporta MSE o il codec.
+      **Regressioni controllate, tutte pulite**: velocità 1.5x scelta dal menu **resta 1.5x** dopo
+      un salto lungo che riapre il flusso (il test più delicato: l'ordine "sacro" degli effect
+      caricamento/velocità doveva restare valido anche col nuovo percorso asincrono — vedi
+      `apriStream`/`avviaMse`, che riapplicano `playbackRate` subito dopo ogni `load()`, non solo
+      contando sull'ordine degli effect); cambio qualità a 480p resta su MSE (`currentSrc` ancora
+      `blob:`); un salto corto (ArrowRight) **non genera più nessuna richiesta `/api/mux` nuova**
+      quando il punto è già nel buffer (miglioria: prima ogni salto corto passava comunque dal
+      controllo `isBuffered`/`isSeekable` su un `buffered`/`seekable` nativi meno affidabili). Log
+      server puliti su tutta la sessione di prova, nessun processo `ffmpeg` rimasto orfano dopo i
+      test (incluso il ripiego, dove `reader.cancel()` chiude la fetch e il server nota la
+      disconnessione).
+      Bug incontrato e corretto durante l'implementazione: un effect di cleanup con `useStreamSource()`
+      (che ritorna un oggetto nuovo ad ogni render) fra le sue dipendenze chiudeva il flusso — quindi
+      revocava l'URL del blob — dopo ogni render invece che solo allo smontaggio, causando
+      `DEMUXER_ERROR_COULD_NOT_OPEN` quasi subito dopo l'apertura. Deps vuote, corretto.
+- [x] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
-      **non verificabile** — serve un browser reale.
+      **OK** (2026-09-14, live) — riaperto il menu impostazioni dopo l'avvio: `currentSrc` riflette
+      `quality=720` (gradino scelto da `qualityForScreen` con "Migliore qualità" attiva su un
+      viewport 1280×800).
+- [x] **"Migliore qualità" mostra la definizione reale** — con `quality=best` selezionata, la voce
+      nel menu indica anche il gradino effettivamente in arrivo (come "Automatica (1080p)" di
+      YouTube), non solo "Migliore qualità" senza dettagli. `labelForHeight` in
+      `videoPlayerHelpers.js` arrotonda `video.videoHeight` (evento `resize` del `<video>`) al
+      gradino noto più vicino.
+      **OK** (2026-09-14, live) — menu impostazioni → voce "Qualità": `textContent` concatenato
+      `"Migliore qualità720p"` (nessuno spazio: normale, `textContent` ignora il layout flex — la
+      classe `player-settings-row` è applicata e mette il valore a destra, separato visivamente).
 - [ ] **Qualità fino a 4K** — il menu del player e le Impostazioni offrono `2160p (4K)` e `1440p`;
       `GET /api/mux/<vid>?quality=2160` su un video che ha il 4K restituisce un flusso `ffprobe`
       con `height=2160`, e `quality=best` (default) sale da solo fino a 2160p. `adaptive_format_selector`
       default → 2160. **Il menu 4K compare solo dopo `npm run build`
-      del frontend** (dist versionato). Nota: il seek su un 4K non paga più il probe del keyframe
-      (`_keyframe_before` rimosso, costava 4-5s sul flusso 4K) — riparte in ~1s come un video nuovo.
+      del frontend** (dist versionato). Nota: il seek su un 4K torna a pagare un probe del keyframe,
+      ma nella forma leggera reintrodotta (`read_intervals` a 3 fotogrammi, ~0.7-1s misurati su un
+      video 720p) — non la finestra intera del vecchio `_keyframe_before` (4-5s su un 4K); da
+      confermare il costo esatto su un flusso 2160p reale.
 - [x] **Adatta la qualità allo schermo** — preferenza attiva di default (`GET /api/prefs` include
       `"fitScreen": true`). Con `quality` = `best`, il player chiede a `/api/mux` non `quality=best`
       ma il gradino YouTube più alto che il pannello regge — `qualityForScreen` in
@@ -221,6 +275,10 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **OK** (endpoint) — `curl -m40 http://127.0.0.1:8097/api/subtitles/dQw4w9WgXcQ/en.vtt` → 200,
       inizia con `WEBVTT`, timecode e testo corretti (es. `♪ We're no strangers to love ♪`).
       **non verificabile** (comparsa nella UI) — serve un browser reale.
+      **2026-09-14 — voce "Sottotitoli" tolta dal menu ⚙ del player** (su richiesta; codice
+      commentato, non cancellato, in `MainSettingsPanel.jsx`): il controllo resta raggiungibile dal
+      tasto CC nella barra e dalla scorciatoia "c", non toccati. **OK** (live) — menu ⚙ mostra solo
+      le sezioni "Riproduzione" e "Qualità", niente "Sottotitoli"/"Dimensione sottotitoli".
 
 ## 5. Feed
 
@@ -632,6 +690,12 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       e `fetch('/api/img?u=…i.ytimg.com…')` dal contesto pagina → `200 image/jpeg`.
       `grep googleapis frontend/dist/assets/*.css` → nessun risultato. `curl` diretto:
       `/api/img?u=<ytimg>` → `200 image/jpeg`, `/api/img?u=<host non YouTube>` → `400`.
+      **2026-09-14 — aggiunta cache**: `proxy_immagine` apriva un `httpx.AsyncClient` nuovo (nuovo
+      handshake TLS verso Google) a OGNI miniatura, sospettato fra le cause di "l'app è lenta a
+      caricare" (la home carica decine di miniature in un colpo). Ora un client condiviso
+      (keep-alive) più una cache LRU in memoria (`_cache`, max 300 voci) — verificato: stessa
+      miniatura, prima richiesta 199ms, seconda (cache) 3ms; l'allowlist host (`_HOST_CONSENTITI`)
+      continua a rifiutare un host non YouTube con 400.
 - [x] **Docker** — `make up` (`docker compose -f docker/docker-compose.yml up -d --build`) avvia il
       server, `./data` sull'host resta popolato e sopravvive a `docker compose down`.
       **OK** (riverificato) — `docker compose -f docker/docker-compose.yml config` conferma che

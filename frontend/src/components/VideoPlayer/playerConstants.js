@@ -23,3 +23,23 @@ export const TAP_SLOP_PX = 12;
 // altrimenti un doppio tocco al centro (dove si mira per la pausa) muoverebbe
 // il video invece di fermarlo.
 export const TAP_SIDE_RATIO = 0.35;
+
+// --- MediaSource (vedi mseStream.js/msePump.js) ---
+// Quanto tenersi avanti alla posizione attuale prima di fermare il download:
+// senza un tetto, un video intero (specie un 4K) finirebbe tutto in RAM.
+export const MSE_TARGET_AHEAD_S = 60;
+// Sotto questa distanza dietro al playhead si libera il buffer già visto:
+// tenerlo servirebbe solo per un riavvolgimento indietro, raro rispetto al
+// costo di tenerlo in memoria.
+export const MSE_EVICT_BEHIND_S = 30;
+// Non un `appendBuffer` per ogni chunk di rete (spesso pochi KB): si accumula
+// fino a questa soglia, perché ogni append ha un costo fisso non
+// trascurabile se ripetuto troppo spesso.
+export const MSE_CHUNK_MIN_BYTES = 65536;
+// Intervallo del polling "c'è spazio per scaricare ancora?" in msePump.js.
+export const MSE_POLL_MS = 400;
+// Stesso polling, ma quando il video è in pausa: un utente fermo su un video
+// per ore (proprio il caso che il buffering-mentre-in-pausa doveva risolvere)
+// non ha bisogno di un controllo ogni 400ms — un intervallo più largo evita
+// di tenere un timer JS a girare in continuazione senza motivo.
+export const MSE_POLL_MS_PAUSA = 5000;
