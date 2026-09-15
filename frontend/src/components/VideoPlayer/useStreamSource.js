@@ -40,14 +40,14 @@ function creaLettori(handleRef) {
 // una funzione pura sui ref che riceve, per poter stare fuori dall'hook e
 // non farne lievitare il conteggio di righe.
 async function apriStream(handleRef, retryRef, video, opt) {
-  const { videoId, quality, start, durata, rate, autoplay, muxUrl, onFineAnticipata } = opt;
+  const { videoId, quality, start, durata, rate, autoplay, muxUrl, onBuffer, onFineAnticipata } = opt;
   handleRef.current?.chiudi();
   const url = muxUrl(videoId, quality, start);
   const chiave = `${videoId}:${quality}`;
   if (retryRef.current.chiave !== chiave) retryRef.current = { chiave, tentativi: 0 };
 
   const mse = await creaFlussoMse(video, url, {
-    rawStart: start, durata,
+    rawStart: start, durata, onBuffer,
     onEnd: bufferedEnd => {
       if (handleRef.current?.offset !== start) return;   // superato da un'apertura più recente
       const fineVera = !durata || bufferedEnd >= durata - start - 1;

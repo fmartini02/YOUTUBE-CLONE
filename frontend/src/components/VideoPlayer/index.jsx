@@ -5,6 +5,7 @@ import { useTouchDevice } from "../../hooks/useMediaQuery";
 import { formatTime, isBuffered, isSeekable, qualityForScreen, labelForHeight } from "./videoPlayerHelpers";
 import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
 import { HOLD_SPEED, HOLD_MS } from "./speedMath";
+import { useStreamSource } from "./useStreamSource";
 import PlayerOverlays from "./PlayerOverlays";
 import PlayerButtonsBar from "./PlayerButtonsBar";
 import PlayerSettingsMenu from "./PlayerSettingsMenu";
@@ -73,6 +74,7 @@ export default function VideoPlayer({
   // forzare la riapertura anche quando si torna sullo stesso secondo.
   const [stream, setStream] = useState({ start: 0, n: 0 });
   const [position, setPosition] = useState(0);
+  const [bufferedStart, setBufferedStart] = useState(0);
   const [bufferedEnd, setBufferedEnd] = useState(0);
   // Altezza reale del flusso decodificato (evento `resize` del <video>): con
   // "Migliore qualità" non c'è altro modo di sapere quale definizione sta
@@ -103,6 +105,7 @@ export default function VideoPlayer({
     setPrevId(videoId);
     setStream({ start: 0, n: 0 });
     setPosition(0);
+    setBufferedStart(0);
     setBufferedEnd(0);
     setActualHeight(0);
     setSettingsOpen(false);
@@ -127,6 +130,25 @@ export default function VideoPlayer({
   const autoplayRef = useRef(autoplay);
   useEffect(() => { autoplayRef.current = autoplay; }, [autoplay]);
 
+  // Apre/segue il flusso: MediaSource quando possibile (barra di buffering
+  // vera anche da fermo), <video src> come ripiego — vedi useStreamSource.js.
+  // Alla fine vera (smontaggio, cambio pagina) va chiuso esplicitamente: a
+  // differenza di <video src>, un fetch() nostro non lo annulla da sé il
+  // browser solo perché il <video> è stato rimosso dal DOM.
+  const flusso = useStreamSource();
+  // Deps vuote e non `[flusso]`: l'oggetto ritornato dall'hook cambia
+  // identità ad ogni render (non è memoizzato), quindi con `[flusso]` questo
+  // effect si "pulirebbe" (chiudendo il flusso, revocando l'URL del blob)
+  // dopo OGNI render invece che al vero smontaggio — `chiudi` legge comunque
+  // lo stato più recente da un ref stabile, quindi eseguirlo una volta sola
+  // qui dentro resta corretto.
+  useEffect(() => () => flusso.chiudi(), []);
+
+  // Serve già qui (non solo nell'effetto "Velocità" sotto): l'apertura del
+  // flusso deve impostare la velocità scelta fin da subito, non aspettare un
+  // secondo effetto che nel frattempo un salto potrebbe già aver reso stantio.
+  const rate = holding ? HOLD_SPEED : speed;
+
   // ── Caricamento / riapertura del flusso ────────────────────────────────
   useEffect(() => {
     const v = videoRef.current;
@@ -139,27 +161,45 @@ export default function VideoPlayer({
     const deveAndare = nuovo ? autoplayRef.current : andavaRef.current;
     caricatoRef.current = videoId;
 
-    v.src = api.muxUrl(videoId, qualityForScreen(quality, fitScreen), stream.start);
-    v.load();
     setBuffering(true);
     setPosition(stream.start);
+    setBufferedStart(stream.start);
     setBufferedEnd(stream.start);
     setActualHeight(0);
     // Il primo caricamento di un flusso appena aperto non è uno stallo: lo è
     // solo se il buffering torna DOPO che il video ha già iniziato a scorrere
     // davvero (vedi "Recupero da uno stallo di rete" più sotto).
     hasPlayedRef.current = false;
-    if (deveAndare) {
-      v.play().catch(() => {});   // l'autoplay può essere bloccato: non è un errore
-    } else {
-      // Senza play() il browser non decodifica niente e resterebbe un
-      // rettangolo nero: questo gli chiede il primo fotogramma del nuovo punto.
-      v.preload = "auto";
-      setBuffering(false);
-    }
+
+    // apri() decide da sé MediaSource-o-ripiego, chiama load() nel punto
+    // giusto in entrambi i casi e applica subito `rate`/autoplay/preload —
+    // niente di tutto questo lo fa più index.jsx direttamente (vedi
+    // useStreamSource.js). `onFineAnticipata`: un flusso che finisce prima
+    // della durata attesa (URL scaduto dopo una pausa lunghissima) riapre da
+    // dove si era arrivati, non dall'inizio.
+    flusso.apri(v, {
+      videoId, quality: qualityForScreen(quality, fitScreen), start: stream.start,
+      durata: duration, rate, autoplay: deveAndare, muxUrl: api.muxUrl,
+      // `onProgress` sul <video> (sotto) copre il ripiego <video src>, ma con
+      // MediaSource l'evento nativo "progress" non è garantito ad ogni
+      // append: questa callback, chiamata dalla pompa dopo ogni scrittura
+      // nel SourceBuffer, è l'unica fonte affidabile per quel ramo.
+      onBuffer: () => {
+        const [inizio, fine] = flusso.intervalloBuffer(v);
+        setBufferedStart(inizio);
+        setBufferedEnd(fine);
+      },
+      onFineAnticipata: t => setStream(s => ({ start: t, n: s.n + 1 })),
+    });
+    if (!deveAndare) setBuffering(false);
     // `fitScreen` è tra le dipendenze perché concorre a formare l'URL del
     // flusso al pari di `quality` (di norma non cambia a player montato: le
-    // Impostazioni sono un'altra route e lo smontano).
+    // Impostazioni sono un'altra route e lo smontano). `flusso`/`rate`/
+    // `duration` NON ci sono di proposito: `flusso.apri` è stabile e legge
+    // `rate` al momento dell'apertura (non deve riaprire il flusso quando
+    // cambia la sola velocità, ci pensa l'effetto "Velocità" sotto), e
+    // `duration` arriva da `/api/watch` poco dopo il flusso stesso — se
+    // cambiasse a player già aperto non deve riaprirlo.
   }, [videoId, quality, stream, fitScreen]);
 
   // ── Velocità ───────────────────────────────────────────────────────────
@@ -167,8 +207,9 @@ export default function VideoPlayer({
   // `defaultPlaybackRate`: senza questo, ogni salto (che riapre il flusso)
   // rimetteva il video a velocità normale. Impostiamo entrambe le proprietà e
   // teniamo l'effetto DOPO quello del caricamento, così l'ordine è: nuovo
-  // src → load() → velocità riapplicata.
-  const rate = holding ? HOLD_SPEED : speed;
+  // src → load() → velocità riapplicata. (`rate` è dichiarata più sopra,
+  // prima dell'effetto di caricamento: la usa anche useStreamSource.apri()
+  // per la velocità iniziale di un flusso appena aperto.)
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -219,7 +260,7 @@ export default function VideoPlayer({
     if (!v) return;
     const max = duration ? duration - 0.5 : Infinity;
     const t = Math.max(0, Math.min(max, target));
-    const local = t - stream.start;
+    const local = flusso.tempoLocale(t);
     // Già scaricato *e* dichiarato cercabile: salto istantaneo, il flusso non
     // si tocca. Il risultato si verifica subito rileggendo `currentTime`: se il
     // browser lo ha spostato altrove (di norma a 0) il salto non è avvenuto e
@@ -561,7 +602,10 @@ export default function VideoPlayer({
   const pct = duration ? Math.min(100, (shown / duration) * 100) : 0;
   // Il buffer parte da dove è stato aperto il flusso, non da zero: dopo un
   // salto in avanti la parte prima del punto di ripartenza non è scaricata.
-  const bufFromPct = duration ? Math.min(100, (stream.start / duration) * 100) : 0;
+  // `bufferedStart` (non `stream.start`): con MSE il buffer può iniziare
+  // anche oltre `stream.start` se il flusso ha appena aperto e non ha ancora
+  // ricevuto il primo pezzo — vedi `intervalloBuffer` in useStreamSource.js.
+  const bufFromPct = duration ? Math.min(100, (bufferedStart / duration) * 100) : 0;
   const bufPct = duration ? Math.min(100, (bufferedEnd / duration) * 100) : 0;
   const hoverPct = duration && hover != null ? Math.min(100, (hover / duration) * 100) : 0;
 
@@ -613,12 +657,14 @@ export default function VideoPlayer({
         onTimeUpdate={() => {
           const v = videoRef.current;
           if (!v || scrub != null) return;
-          setPosition(stream.start + v.currentTime);
+          setPosition(flusso.tempo(v));
         }}
         onProgress={() => {
           const v = videoRef.current;
-          if (!v || !v.buffered.length) return;
-          setBufferedEnd(stream.start + v.buffered.end(v.buffered.length - 1));
+          if (!v) return;
+          const [inizio, fine] = flusso.intervalloBuffer(v);
+          setBufferedStart(inizio);
+          setBufferedEnd(fine);
         }}
         onVolumeChange={() => {
           const v = videoRef.current;

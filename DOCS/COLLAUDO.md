@@ -167,17 +167,34 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **da confermare in un browser reale** — il meccanismo esatto del sintomo "perdo l'audio"
       (traccia video vuota che pianta l'elemento, oppure traccia audio più corta del video) non è
       isolabile senza browser; evitare il flusso vuoto è comunque corretto in entrambi i casi.
-- [ ] **Barra di caricamento (buffer)** — `.player-progress-buffer` deve crescere mentre il video
+- [x] **Barra di caricamento (buffer)** — `.player-progress-buffer` deve crescere mentre il video
       scarica, anche da fermo (video in pausa), non solo mentre scorre.
-      **KO, causa isolata, non risolto** (2026-09-14, live) — con `video` in pausa, `video.buffered`
-      resta fermo al valore già scaricato anche dopo 8s di attesa (`[[0, 2.241]]` identico prima e
-      dopo): non un bug nel calcolo JS di `bufferedEnd` (la logica in `VideoPlayer/index.jsx` è
-      corretta), ma una policy del browser — senza `Content-Length` né durata nota nel contenitore
-      (`empty_moov`), Chrome non fa readahead oltre un minimo su una risorsa che tratta come
-      simile a un flusso live mentre è in pausa. Aggiunto `preload="auto"` dichiarativo sul
-      `<video>` (prima era condizionale, solo runtime): **verificato che non basta da solo**, stesso
-      comportamento con e senza. Una cura vera richiede MediaSource Extensions (bufferizzazione
-      gestita da JS invece che dal browser) — cambio di architettura, non incluso in questo giro.
+      **OK** (2026-09-15, live, Chromium bundled pilotato a mano) — risolto passando a MediaSource:
+      il player scarica da sé con `fetch()` e appende a un `SourceBuffer` invece di affidare tutto a
+      `<video src>` (vedi CLAUDE.md, "Barra di caricamento: risolta con MediaSource Extensions").
+      Verificato: `video.buffered.end` passa da **6s a 20s in 8 secondi di pausa** (`currentTime`
+      fermo a 2.1, quindi il video non stava scorrendo), `seekable.end(0)` popolato a 20 (prima
+      `[0,0]`), la larghezza CSS della barra grigia passa da 0% a 9.4%. `currentSrc` è un
+      `blob:` (MediaSource), non più `/api/mux/...` diretto.
+      **Ripiego verificato**: con `MediaSource` disattivato a mano (`delete window.MediaSource`
+      prima del caricamento della pagina), il player torna a `<video src="/api/mux/...">` come
+      prima di questo lavoro, e un salto nel ripiego funziona (`currentTime` si sposta, nessun
+      `video.error`) — nessuno resta senza riproduzione se il browser non supporta MSE o il codec.
+      **Regressioni controllate, tutte pulite**: velocità 1.5x scelta dal menu **resta 1.5x** dopo
+      un salto lungo che riapre il flusso (il test più delicato: l'ordine "sacro" degli effect
+      caricamento/velocità doveva restare valido anche col nuovo percorso asincrono — vedi
+      `apriStream`/`avviaMse`, che riapplicano `playbackRate` subito dopo ogni `load()`, non solo
+      contando sull'ordine degli effect); cambio qualità a 480p resta su MSE (`currentSrc` ancora
+      `blob:`); un salto corto (ArrowRight) **non genera più nessuna richiesta `/api/mux` nuova**
+      quando il punto è già nel buffer (miglioria: prima ogni salto corto passava comunque dal
+      controllo `isBuffered`/`isSeekable` su un `buffered`/`seekable` nativi meno affidabili). Log
+      server puliti su tutta la sessione di prova, nessun processo `ffmpeg` rimasto orfano dopo i
+      test (incluso il ripiego, dove `reader.cancel()` chiude la fetch e il server nota la
+      disconnessione).
+      Bug incontrato e corretto durante l'implementazione: un effect di cleanup con `useStreamSource()`
+      (che ritorna un oggetto nuovo ad ogni render) fra le sue dipendenze chiudeva il flusso — quindi
+      revocava l'URL del blob — dopo ogni render invece che solo allo smontaggio, causando
+      `DEMUXER_ERROR_COULD_NOT_OPEN` quasi subito dopo l'apertura. Deps vuote, corretto.
 - [x] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
       **OK** (2026-09-14, live) — riaperto il menu impostazioni dopo l'avvio: `currentSrc` riflette
