@@ -27,10 +27,14 @@ async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }
   pompa(reader, sb, video, chiuso, cb);
   return {
     offset,
+    keyframeStart,
     finalizza: () => { try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* già chiuso */ } },
     chiudi: () => {
       chiuso.current = true;
-      try { reader.cancel(); } catch { /* ignorato: stiamo comunque chiudendo */ }
+      // reader.cancel() ritorna una Promise: un `try/catch` non intercetta un
+      // suo rifiuto asincrono (solo un'eccezione sincrona, che qui non può
+      // capitare), serve `.catch()`.
+      reader.cancel().catch(() => {});
       URL.revokeObjectURL(objectUrl);
     },
   };
@@ -67,7 +71,10 @@ export async function creaFlussoMse(video, url, { rawStart = 0, durata, onBuffer
   if (!viaLibera) { risposta.body.cancel().catch(() => {}); return null; }
   return avviaMse(video, risposta, { mime, offset: rawStart, keyframeStart, durata }, {
     onBufferChange: () => onBuffer?.(),
-    onEnd: t => onEnd?.(t),
+    // keyframeStart passato anche qui: chi chiama calcola se il flusso è
+    // finito per davvero confrontando la durata reale del contenuto
+    // (durata - keyframeStart), non quella apparente (durata - rawStart).
+    onEnd: t => onEnd?.(t, keyframeStart),
     onError: e => onError?.(e),
   });
 }

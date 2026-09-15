@@ -29,6 +29,11 @@ _KEYFRAME_PROBE_TIMEOUT = 3
 _mux_fmt_cache: dict = {}
 _MUX_FMT_CACHE_TTL = 1800
 
+# Cache di _keyframe_before: stesso TTL di _mux_fmt_cache (entrambe legate
+# alla validità dell'URL googlevideo), tetto più alto perché la chiave include
+# anche il punto del salto, non solo il video.
+_keyframe_cache: dict = {}
+
 
 def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
     """
@@ -98,22 +103,37 @@ def _keyframe_before(video_url: str, target: float) -> float:
     rimosso, che leggeva secondi di dati indipendentemente dalla richiesta).
     Fallisce silenziosamente sul valore grezzo: un salto un po' sfasato è
     sempre meglio di un salto che non parte.
+
+    Cache come `_mux_fmt_cache` qui sopra e per lo stesso motivo: un salto
+    ripetuto sullo stesso punto (tasti freccia premuti in rapida sequenza,
+    verificato dal vivo) ripagherebbe ogni volta un intero processo ffprobe
+    invece di riusare il risultato appena calcolato.
     """
     if target <= 0:
         return target
+    key = (video_url, round(target, 3))
+    hit = _keyframe_cache.get(key)
+    if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
+        return hit[1]
     cmd = [_FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
            "-show_entries", "frame=pts_time,pict_type",
            "-read_intervals", f"{target:.3f}%+#3", "-of", "csv=p=0", video_url]
+    result = target
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=_KEYFRAME_PROBE_TIMEOUT).stdout
         for line in out.splitlines():
             pts, _, flag = line.partition(",")
             if flag.startswith("I"):
-                return float(pts)
+                result = float(pts)
+                break
     except Exception:
         pass
-    return target
+    _keyframe_cache[key] = (time.time(), result)
+    if len(_keyframe_cache) > 256:
+        for k in [k for k, v in _keyframe_cache.items() if time.time() - v[0] >= _MUX_FMT_CACHE_TTL]:
+            _keyframe_cache.pop(k, None)
+    return result
 
 
 def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4", audio_aac=False) -> list:
@@ -226,9 +246,14 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     # creare il SourceBuffer col codec ESATTO e allineare la sua timeline al
     # keyframe vero (non al `start` grezzo richiesto) prima di ricevere byte.
     # `expose_headers` in main.py li rende leggibili anche da un `fetch()`
-    # cross-origin (APK su un'altra origine del server sulla LAN).
-    headers = {"Accept-Ranges": "none", "X-Mux-Start": f"{seek_target:.3f}",
-               "X-Mux-Codecs": f"{vcodec},{'mp4a.40.2' if audio_aac else acodec}"}
+    # cross-origin (APK su un'altra origine del server sulla LAN). Solo sul
+    # ramo mp4: sul ramo webm (Cast 4K) i codec sorgente descriverebbero un
+    # contenitore diverso da quello che il player MSE assume (`video/mp4`) —
+    # oggi quel ramo non passa mai di qui, ma un header assente fa fallire
+    # `creaFlussoMse` in modo pulito invece di dichiarare un mime sbagliato.
+    headers = {"Accept-Ranges": "none"}
+    if container == "mp4":
+        headers.update({"X-Mux-Start": f"{seek_target:.3f}", "X-Mux-Codecs": f"{vcodec},{'mp4a.40.2' if audio_aac else acodec}"})
     return await ffmpeg_pipe_response(
         cmd, f"mux {video_id} (quality={quality}, start={start})",
         headers=headers, media_type=f"video/{container}",

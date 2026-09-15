@@ -4,19 +4,22 @@
 // (il problema opposto a quello che MSE doveva risolvere). Isolato da
 // mseStream.js, che lo avvia, per restare sotto le 5 funzioni per file.
 import { appendiConQuota, liberaDietro } from "./mseBuffer";
-import { MSE_TARGET_AHEAD_S, MSE_CHUNK_MIN_BYTES, MSE_POLL_MS } from "./playerConstants";
+import { MSE_TARGET_AHEAD_S, MSE_CHUNK_MIN_BYTES, MSE_POLL_MS, MSE_POLL_MS_PAUSA } from "./playerConstants";
 
 // Aspetta che ci sia "spazio" per scaricare ancora — il buffer avanti alla
 // posizione attuale è sotto MSE_TARGET_AHEAD_S — o che il flusso sia stato
 // chiuso da fuori (cambio video, salto, smontaggio del player): in quel
-// caso risolve `false`, segnale per pompa() di fermarsi subito.
+// caso risolve `false`, segnale per pompa() di fermarsi subito. Col video in
+// pausa (e quindi già col buffer pieno, il caso comune) il polling rallenta
+// da sé a MSE_POLL_MS_PAUSA: nessuno sta guardando in tempo reale, un
+// controllo ogni 400ms all'infinito sprecherebbe solo batteria.
 function attendiSpazio(video, sb, chiuso) {
   return new Promise(resolve => {
     const tick = () => {
       if (chiuso.current) return resolve(false);
       const fine = sb.buffered.length ? sb.buffered.end(sb.buffered.length - 1) : 0;
       if (fine - video.currentTime < MSE_TARGET_AHEAD_S) return resolve(true);
-      setTimeout(tick, MSE_POLL_MS);
+      setTimeout(tick, video.paused ? MSE_POLL_MS_PAUSA : MSE_POLL_MS);
     };
     tick();
   });

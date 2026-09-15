@@ -38,3 +38,8 @@ export const MSE_EVICT_BEHIND_S = 30;
 export const MSE_CHUNK_MIN_BYTES = 65536;
 // Intervallo del polling "c'è spazio per scaricare ancora?" in msePump.js.
 export const MSE_POLL_MS = 400;
+// Stesso polling, ma quando il video è in pausa: un utente fermo su un video
+// per ore (proprio il caso che il buffering-mentre-in-pausa doveva risolvere)
+// non ha bisogno di un controllo ogni 400ms — un intervallo più largo evita
+// di tenere un timer JS a girare in continuazione senza motivo.
+export const MSE_POLL_MS_PAUSA = 5000;

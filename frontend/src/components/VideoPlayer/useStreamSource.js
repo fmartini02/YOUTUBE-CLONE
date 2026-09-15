@@ -16,7 +16,11 @@ import { creaFlussoMse } from "./mseStream";
 
 // Un taglio prematuro (URL googlevideo scaduto dopo una pausa lunghissima,
 // vedi apriStream) può ripresentarsi: un tetto evita un ciclo di riaperture
-// infinite se il problema persiste, azzerato ad ogni nuovo (video, qualità).
+// infinite se il problema persiste. Si azzera ad ogni apertura che NON sia
+// la diretta continuazione di un retry (`retryRef.current.viaRetry`) — non
+// solo a video/qualità diversi: due tagli prematuri indipendenti su due
+// salti diversi dello stesso video condividevano lo stesso tetto, pensato
+// per UN singolo problema persistente, non per la somma di episodi slegati.
 const MAX_RETRY_FINE_ANTICIPATA = 2;
 
 // Le quattro funzioni di lettura, raggruppate in una sola fabbrica (invece
@@ -58,8 +62,8 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
   const mia = ++genRef.current;
   handleRef.current?.chiudi();
   const url = muxUrl(videoId, quality, start);
-  const chiave = `${videoId}:${quality}`;
-  if (retryRef.current.chiave !== chiave) retryRef.current = { chiave, tentativi: 0 };
+  if (!retryRef.current.viaRetry) retryRef.current.tentativi = 0;
+  retryRef.current.viaRetry = false;
 
   const mse = await creaFlussoMse(video, url, {
     rawStart: start, durata, onBuffer,
@@ -69,16 +73,18 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
     // (verificato dal vivo: riproduzione bloccata in silenzio dopo un salto
     // rapido). Con questa, la scrittura non avviene proprio.
     ancoraValido: () => genRef.current === mia,
-    onEnd: bufferedEnd => {
+    onEnd: (bufferedEnd, keyframeStart) => {
       if (genRef.current !== mia) return;   // superato da un'apertura più recente
       // `durata > 0`, non `!durata ||`: senza metadati (/api/watch non ha
       // ancora risposto, il caso normale nei primi 1-3s di QUALSIASI
       // apertura, non solo un salto) non c'è modo di sapere se il flusso è
       // finito per davvero o si è interrotto prima — trattarlo come "finito"
       // troncava silenziosamente il video su un blip di rete iniziale.
-      const fineVera = durata > 0 && bufferedEnd >= durata - start - 1;
+      // `keyframeStart`, non `start`: il contenuto reale va da lì alla fine
+      // del video, fino a un GOP più lungo di quanto suggerisca `start`.
+      const fineVera = durata > 0 && bufferedEnd >= durata - keyframeStart - 1;
       if (fineVera || retryRef.current.tentativi >= MAX_RETRY_FINE_ANTICIPATA) { handleRef.current.finalizza?.(); return; }
-      retryRef.current.tentativi += 1;
+      retryRef.current.tentativi += 1; retryRef.current.viaRetry = true;
       onFineAnticipata(start + bufferedEnd);
     },
   });
@@ -94,7 +100,7 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
 
 export function useStreamSource() {
   const handleRef = useRef(null);
-  const retryRef = useRef({ chiave: "", tentativi: 0 });
+  const retryRef = useRef({ tentativi: 0, viaRetry: false });
   const genRef = useRef(0);
   const apri = useCallback((video, opt) => apriStream(handleRef, retryRef, genRef, video, opt), []);
   const { tempo, tempoLocale, intervalloBuffer, chiudi } = creaLettori(handleRef, genRef);

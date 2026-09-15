@@ -22,9 +22,20 @@ export function isBuffered(video, t) {
   return false;
 }
 
-// Gradini di qualità che YouTube offre, dal più alto. Usato sia da
-// `qualityForScreen` sia da `labelForHeight` qui sotto.
+// Gradini di qualità che YouTube offre, dal più alto. `qualityForScreen` (la
+// qualità da CHIEDERE al server) si ferma a 480: sotto quella soglia non ha
+// senso adattare lo schermo, "best" prende comunque il minimo disponibile.
+// `labelForHeight` (sola ETICHETTA nel menu, non decide cosa scaricare)
+// aggiunge i gradini più bassi che YouTube offre per i video vecchi o di
+// qualità modesta, altrimenti quelli finivano etichettati "360p" per difetto.
 export const QUALITY_STEPS = [2160, 1440, 1080, 720, 480];
+const QUALITY_STEPS_ETICHETTA = [...QUALITY_STEPS, 360, 240, 144];
+
+// Tolleranza comune a `qualityForScreen` e `labelForHeight`: un pannello o un
+// flusso raramente hanno l'altezza ESATTA di un gradino (es. 1078 invece di
+// 1080). Stessa soglia in entrambe le funzioni, così arrotondano allo stesso
+// modo la stessa altezza invece di poter disallinearsi silenziosamente.
+const TOLLERANZA_GRADINO = 0.95;
 
 // "Migliore qualità" (quality === "best") non deve scaricare più di quanto lo
 // schermo possa davvero mostrare: su un telefono o un monitor 1080p il 4K
@@ -33,14 +44,14 @@ export const QUALITY_STEPS = [2160, 1440, 1080, 720, 480];
 // accesa di default) "best" diventa il gradino più alto che il pannello regge:
 // pixel fisici del lato corto dello schermo (il video a schermo intero è alto
 // così) per il devicePixelRatio, senza tetto — un pannello che regge il 1440p
-// riceve il 1440p. La tolleranza del 5% evita che un 1078 reale scenda a 720.
-// Una scelta numerica esplicita dal menu (2160, 1080...) passa comunque intatta.
+// riceve il 1440p. Una scelta numerica esplicita dal menu (2160, 1080...)
+// passa comunque intatta.
 export function qualityForScreen(quality, fitScreen) {
   if (quality !== "best" || !fitScreen) return quality;
   if (typeof window === "undefined" || !window.screen) return quality;
   const dpr = window.devicePixelRatio || 1;
   const px = Math.min(window.screen.width, window.screen.height) * dpr;
-  const step = QUALITY_STEPS.find(h => px >= h * 0.95);
+  const step = QUALITY_STEPS.find(h => px >= h * TOLLERANZA_GRADINO);
   return step ? String(step) : "360";
 }
 
@@ -64,6 +75,6 @@ export function isSeekable(video, t) {
 // arrotonda al gradino noto più vicino, come fa YouTube ("Automatica (1080p)").
 export function labelForHeight(h) {
   if (!h) return "";
-  const step = QUALITY_STEPS.find(s => h >= s * 0.9) || 360;
+  const step = QUALITY_STEPS_ETICHETTA.find(s => h >= s * TOLLERANZA_GRADINO) || 144;
   return `${step}p`;
 }
