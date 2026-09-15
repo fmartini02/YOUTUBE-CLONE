@@ -41,19 +41,30 @@ async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }
 // accettato altrove — vedi CLAUDE.md); il vero punto di atterraggio arriva
 // dall'header `X-Mux-Start` e serve solo per calcolare `ms.duration`.
 //
-// Ritorna `null` — SENZA aver toccato `video` — se il browser non supporta
+// `ancoraValido()` (opzionale): controllata SUBITO PRIMA di toccare `video`
+// (chiamata sincrona, senza `await` in mezzo — così nessun'altra apertura può
+// intromettersi fra il controllo e la scrittura). Senza, una `apriStream()`
+// superata da una più recente mentre aspettava il fetch (che può durare a
+// lungo: rete lenta, probe del keyframe su un salto) scriveva comunque
+// `video.src`/`video.load()` PRIMA di accorgersi di essere stata scavalcata
+// — il controllo di `useStreamSource.js` arrivava troppo tardi, a mutazione
+// già avvenuta, e lasciava il `<video>` agganciato a un blob poi revocato
+// dalla propria `chiudi()`: riproduzione bloccata in silenzio, verificato dal
+// vivo (`currentTime` fermo, nessun errore). Ritorna `null` — SENZA aver
+// toccato `video` — anche in quel caso, non solo se il browser non supporta
 // MediaSource, il codec dichiarato dal server (header `X-Mux-Codecs`, vedi
 // streaming.py) o se il fetch fallisce: è il segnale per chi chiama di usare
 // il ripiego <video src>, che resta l'unico a decidere src/load()/velocità
-// in quel caso, in un solo posto (vedi useStreamSource.js).
-export async function creaFlussoMse(video, url, { rawStart = 0, durata, onBuffer, onEnd, onError } = {}) {
+// quando davvero serve (vedi useStreamSource.js).
+export async function creaFlussoMse(video, url, { rawStart = 0, durata, onBuffer, onEnd, onError, ancoraValido } = {}) {
   if (typeof MediaSource === "undefined") return null;
   const risposta = await fetch(url).catch(() => null);
   if (!risposta?.ok || !risposta.body) return null;
   const codecs = risposta.headers.get("X-Mux-Codecs");
   const keyframeStart = parseFloat(risposta.headers.get("X-Mux-Start")) || rawStart;
   const mime = codecs ? `video/mp4; codecs="${codecs}"` : "";
-  if (!mime || !MediaSource.isTypeSupported(mime)) { risposta.body.cancel().catch(() => {}); return null; }
+  const viaLibera = mime && MediaSource.isTypeSupported(mime) && (!ancoraValido || ancoraValido());
+  if (!viaLibera) { risposta.body.cancel().catch(() => {}); return null; }
   return avviaMse(video, risposta, { mime, offset: rawStart, keyframeStart, durata }, {
     onBufferChange: () => onBuffer?.(),
     onEnd: t => onEnd?.(t),
