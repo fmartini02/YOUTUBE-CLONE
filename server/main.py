@@ -35,6 +35,10 @@ app.add_middleware(
     allow_origin_regex=ORIGINI_LOCALI_RE,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Senza, un fetch() cross-origin (APK: WebView su un'origine, server su
+    # un'altra della LAN) legge questi due header come vuoti — il player MSE
+    # cadrebbe nel ripiego <video src> in silenzio, senza un errore visibile.
+    expose_headers=["X-Mux-Codecs", "X-Mux-Start"],
 )
 
 for _router_module in (search, status, watch, streaming, comments, comment_replies,

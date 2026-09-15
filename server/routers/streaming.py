@@ -31,7 +31,13 @@ _MUX_FMT_CACHE_TTL = 1800
 
 
 def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
-    """URL video+audio (o singolo URL progressivo) più il contenitore, con cache."""
+    """
+    URL video+audio (o singolo URL progressivo), contenitore e codec sorgente,
+    con cache. I codec (stringhe RFC6381, es. `av01.0.05M.08`/`opus`) li dà
+    già yt-dlp nei dizionari formato: servono al frontend per MediaSource
+    (serve un `SourceBuffer` col codec ESATTO, sennò `appendBuffer` fallisce)
+    — vedi l'header `X-Mux-Codecs` in `mux_stream`.
+    """
     key = (video_id, quality, compat, hq)
     hit = _mux_fmt_cache.get(key)
     if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
@@ -56,12 +62,12 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
         # `empty_moov`, ricodifica audio sui salti). Instradarla su `-f webm`
         # rompeva i salti su ogni video con sorgente webm.
         webm = compat and hq and video_fmt.get("ext") == "webm"
-        urls = (video_fmt["url"], audio_fmt["url"], "webm" if webm else "mp4")
+        urls = (video_fmt["url"], audio_fmt["url"], "webm" if webm else "mp4", video_fmt.get("vcodec") or "", audio_fmt.get("acodec") or "")
     else:
         url = info.get("url")
         if not url:
             return None
-        urls = (url, None, "mp4")
+        urls = (url, None, "mp4", info.get("vcodec") or "", info.get("acodec") or "")
 
     _mux_fmt_cache[key] = (time.time(), urls)
     # Potatura opportunistica: senza, la cache cresce per tutta la vita del
@@ -110,7 +116,7 @@ def _keyframe_before(video_url: str, target: float) -> float:
     return target
 
 
-def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4") -> list:
+def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4", audio_aac=False) -> list:
     """
     Comando ffmpeg che unisce video+audio adattivi (o remuxa il progressivo).
     Video sempre in sola copia; l'audio in copia tranne che sui salti — vedi
@@ -153,8 +159,10 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4") -> li
     stesso avvio rapido di `frag_duration`.
     """
     base = [_FFMPEG_BIN, "-loglevel", "error"]
-    reencode_audio = bool(audio_url and seek and container == "mp4")
-    acodec = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k"] if reencode_audio else ["-c", "copy"]
+    # `audio_aac` arriva già decisa dal chiamante (non ricalcolata qui):
+    # serve anche per l'header `X-Mux-Codecs` di `mux_stream`, che deve
+    # sapere PRIMA di lanciare ffmpeg quale codec sta per uscire.
+    acodec = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k"] if audio_aac else ["-c", "copy"]
     if audio_url:
         cmd = [*base, *seek, "-i", video_url, *seek, "-i", audio_url,
                "-map", "0:v:0", "-map", "1:a:0", *acodec]
@@ -200,7 +208,7 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     if not urls:
         raise HTTPException(404, "Nessun formato disponibile")
 
-    video_url, audio_url, container = urls
+    video_url, audio_url, container, vcodec, acodec = urls
     start = max(0.0, start)
     seek_target = start
     if start > 0 and audio_url and container == "mp4":
@@ -208,14 +216,22 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
             None, _keyframe_before, video_url, start
         )
     seek = ["-ss", f"{seek_target:.3f}"] if seek_target > 0 else []
-    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek, container=container)
+    audio_aac = bool(audio_url and seek and container == "mp4")
+    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek, container=container, audio_aac=audio_aac)
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
     # "Range: bytes=0-" e riceve un 200 invece del 206 che si aspetta,
     # ritardando l'avvio dello streaming progressivo di diversi secondi.
+    # X-Mux-Codecs/X-Mux-Start: per il player MSE (vedi frontend), che deve
+    # creare il SourceBuffer col codec ESATTO e allineare la sua timeline al
+    # keyframe vero (non al `start` grezzo richiesto) prima di ricevere byte.
+    # `expose_headers` in main.py li rende leggibili anche da un `fetch()`
+    # cross-origin (APK su un'altra origine del server sulla LAN).
+    headers = {"Accept-Ranges": "none", "X-Mux-Start": f"{seek_target:.3f}",
+               "X-Mux-Codecs": f"{vcodec},{'mp4a.40.2' if audio_aac else acodec}"}
     return await ffmpeg_pipe_response(
         cmd, f"mux {video_id} (quality={quality}, start={start})",
-        headers={"Accept-Ranges": "none"}, media_type=f"video/{container}",
+        headers=headers, media_type=f"video/{container}",
     )
 
 
@@ -237,7 +253,7 @@ async def download_video(video_id: str, quality: str = "best"):
     if not urls:
         raise HTTPException(404, "Nessun formato disponibile")
 
-    video_url, audio_url, _cont = urls
+    video_url, audio_url, _cont, _vcodec, _acodec = urls
     cmd = _build_ffmpeg_cmd(video_url, audio_url)
 
     # Il nome del file lo mette il frontend con l'attributo `download` del
