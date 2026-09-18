@@ -204,6 +204,35 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       (che ritorna un oggetto nuovo ad ogni render) fra le sue dipendenze chiudeva il flusso — quindi
       revocava l'URL del blob — dopo ogni render invece che solo allo smontaggio, causando
       `DEMUXER_ERROR_COULD_NOT_OPEN` quasi subito dopo l'apertura. Deps vuote, corretto.
+- [x] **Recupero da un errore vero della pompa MSE** — un fetch che cade o un `appendBuffer` che
+      fallisce a metà riproduzione (rete instabile, es. un telefono in Tailscale su rete di casa;
+      tab in background su Android che sospende la pompa) deve far riaprire da solo il flusso dal
+      punto vero, non lasciare lo spinner acceso per sempre in attesa di un tocco dell'utente.
+      Segnalato dall'utente dal vivo: "tengo premuto per il 2x, riproduce per qualche secondo poi
+      si blocca con lo spinner finché non ripremo play" — combacia esattamente col bug già trovato
+      leggendo il codice in un giro precedente: `pompa()` in `msePump.js` chiamava già `cb.onError(e)`
+      su ogni eccezione non dovuta a una chiusura volontaria, ma **`onError` non veniva mai
+      propagato** — `apriStream()` in `useStreamSource.js` non lo estraeva da `opt` né lo passava a
+      `creaFlussoMse()`, e `index.jsx` non lo passava mai a `flusso.apri()`: la chiamata
+      `onError?.(e)` finiva su `undefined`, un no-op silenzioso. Il 2x rende il sintomo più frequente
+      perché raddoppia il ritmo di consumo del buffer, quindi il tempo a disposizione della pompa per
+      tenere il passo si dimezza — ma il bug di fondo non è specifico del 2x, vale per qualunque
+      causa di errore a metà pompa. Corretto collegando `onError` allo stesso meccanismo già usato
+      per la fine anticipata del flusso (`riapriOrinuncia` in `useStreamSource.js`): stesso tetto di
+      `MAX_RETRY_FINE_ANTICIPATA` tentativi, riapertura dal punto vero letto da `video.currentTime`
+      (non da uno stato React che in quel momento può essere stantio); esauriti i tentativi si spegne
+      almeno lo spinner (`onAutoplayFailed`) invece di restare acceso all'infinito.
+      **OK** (2026-09-18, live, Playwright headless su un worktree con server e frontend ribuildati) —
+      la CDN di YouTube ha rifiutato con 403 il download reale dei formati dall'ambiente della sessione
+      (IP non abbinato all'URL firmato da yt-dlp, limite dell'ambiente non del codice), quindi
+      `ffmpeg` non produceva mai byte e il ramo esercitato dal vivo è stato "fine anticipata"
+      (`onEnd`, non `onError`) — stesso `riapriOrinuncia` condiviso dai due percorsi. Osservato in
+      `/api/mux` (log server): tentativo iniziale + esattamente 2 riaperture automatiche (il tetto di
+      `MAX_RETRY_FINE_ANTICIPATA`), poi lo spegnimento pulito senza loop infinito, ripetuto
+      identico su due aperture indipendenti dello stesso video. Il ramo `onError` vero e proprio resta
+      verificato per lettura del codice (il cablaggio è identico, stessa funzione condivisa) ma non
+      forzabile dal vivo in questo ambiente: serve un mid-stream reale (rete che cade a metà byte
+      scaricati), non riproducibile senza che i formati siano davvero raggiungibili.
 - [x] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
       **OK** (2026-09-14, live) — riaperto il menu impostazioni dopo l'avvio: `currentSrc` riflette
