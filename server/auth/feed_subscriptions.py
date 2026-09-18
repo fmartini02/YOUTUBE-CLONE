@@ -24,6 +24,21 @@ async def _fetch_cookie_feed(ydl_opts_base_fn, cookie_path):
         return None
 
 
+async def refresh_cookie_feed(state, ydl_opts_base_fn, cookie_path) -> list:
+    """
+    Rifà l'estrazione del feed cookie e aggiorna la cache in memoria se va a
+    buon fine. Condivisa da get_personalized_feed (on-demand) e dal
+    riscaldamento periodico in sync/scheduler.py, che la tiene calda sotto il
+    TTL così l'apertura della pagina Iscrizioni trova quasi sempre la cache
+    già pronta invece di aspettare un'estrazione intera.
+    """
+    results = await _fetch_cookie_feed(ydl_opts_base_fn, cookie_path)
+    if results:
+        state.cookie_feed_cache = results
+        state.cookie_feed_cache_at = time.time()
+    return results
+
+
 async def get_personalized_feed(state, ydl_opts_base_fn) -> list:
     """
     Feed 'Iscrizioni': cookie → feed reale di YouTube (ordine loro), tenuto in
@@ -36,12 +51,10 @@ async def get_personalized_feed(state, ydl_opts_base_fn) -> list:
     if cookie_path:
         if state.cookie_feed_cache and time.time() - state.cookie_feed_cache_at < COOKIE_FEED_CACHE_TTL:
             return state.cookie_feed_cache
-        results = await _fetch_cookie_feed(ydl_opts_base_fn, cookie_path)
+        results = await refresh_cookie_feed(state, ydl_opts_base_fn, cookie_path)
         if results:
-            state.cookie_feed_cache = results
-            state.cookie_feed_cache_at = time.time()
             return results
-        if results is None and state.cookie_feed_cache:
+        if state.cookie_feed_cache:
             return state.cookie_feed_cache  # stale, ma meglio di niente
 
     if state.subs_feed_cache:
