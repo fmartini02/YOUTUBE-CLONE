@@ -75,11 +75,22 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
   const mia = ++genRef.current;
   handleRef.current?.chiudi();
   const url = muxUrl(videoId, quality, start);
-  if (!retryRef.current.viaRetry) retryRef.current.tentativi = 0;
+  // Catturato PRIMA di azzerare `viaRetry` sotto: serve a `onBuffer` per
+  // sapere se QUESTA apertura è la continuazione di un retry — vedi il
+  // commento sopra `onBuffer` qui sotto sul perché serve.
+  const eraRetry = retryRef.current.viaRetry; if (!eraRetry) retryRef.current.tentativi = 0;
   retryRef.current.viaRetry = false;
 
   const mse = await creaFlussoMse(video, url, {
-    rawStart: start, durata, onBuffer,
+    // Un blocco arrivato con successo su una riapertura nata da un retry
+    // dimostra che quel problema è superato: il tetto torna a zero per il
+    // prossimo episodio scollegato. Senza, due cadute di rete indipendenti a
+    // distanza di mezz'ora condividerebbero lo stesso tetto — pensato per UN
+    // problema persistente, non per la somma di episodi slegati (vedi
+    // commento sopra MAX_RETRY_FINE_ANTICIPATA) — e la terza in un video
+    // lungo smetterebbe di recuperare da sola anche se le prime due si erano
+    // risolte da tempo.
+    rawStart: start, durata, onBuffer: () => { if (eraRetry) retryRef.current.tentativi = 0; onBuffer?.(); },
     // Controllata da creaFlussoMse subito prima di scrivere `video.src`,
     // sincrona: senza, una chiamata scavalcata durante il fetch scriveva
     // comunque sul <video> prima che il controllo qui sotto se ne accorgesse

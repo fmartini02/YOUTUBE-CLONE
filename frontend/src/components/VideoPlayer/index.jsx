@@ -121,10 +121,6 @@ export default function VideoPlayer({
     setSettingsPage("main");
   }
 
-  // Se il video stava andando prima di una riapertura del flusso. Un ref e non
-  // uno stato: serve dentro l'effect di caricamento, che non deve rieseguirsi
-  // quando cambia.
-  const andavaRef = useRef(false);
   // Vero solo dopo un `onPlaying` genuino sul flusso corrente: distingue il
   // buffering del primo caricamento (normale) da un vero stallo a metà
   // riproduzione (vedi "Recupero da uno stallo di rete" più sotto).
@@ -162,12 +158,16 @@ export default function VideoPlayer({
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    // Ogni salto riapre il flusso (vedi seekTo), e prima qui c'era un play()
-    // incondizionato: spostare la barra di un video in pausa lo faceva
-    // ripartire da solo. Un video in pausa deve restare in pausa dove l'utente
-    // lo ha portato; uno in riproduzione deve continuare.
+    // Ogni salto o riapertura per errore di rete riapre il flusso (vedi
+    // seekTo e useStreamSource.js), e prima qui c'era un play() incondizionato,
+    // o un ref che restava vero anche dopo una pausa dell'utente: in entrambi
+    // i casi spostare la barra — o una riapertura automatica — su un video in
+    // pausa lo faceva ripartire da solo. `playing` (aggiornato solo dai veri
+    // eventi `onPlay`/`onPause` del `<video>`, mai da una riapertura) è la
+    // guardia giusta: un video in pausa deve restare in pausa dove l'utente lo
+    // ha portato, uno in riproduzione deve continuare.
     const nuovo = caricatoRef.current !== videoId;
-    const deveAndare = nuovo ? autoplayRef.current : andavaRef.current;
+    const deveAndare = nuovo ? autoplayRef.current : playing;
     caricatoRef.current = videoId;
 
     setBuffering(true);
@@ -210,11 +210,14 @@ export default function VideoPlayer({
     // `fitScreen` è tra le dipendenze perché concorre a formare l'URL del
     // flusso al pari di `quality` (di norma non cambia a player montato: le
     // Impostazioni sono un'altra route e lo smontano). `flusso`/`rate`/
-    // `duration` NON ci sono di proposito: `flusso.apri` è stabile e legge
-    // `rate` al momento dell'apertura (non deve riaprire il flusso quando
-    // cambia la sola velocità, ci pensa l'effetto "Velocità" sotto), e
+    // `duration`/`playing` NON ci sono di proposito: `flusso.apri` è stabile e
+    // legge `rate` al momento dell'apertura (non deve riaprire il flusso
+    // quando cambia la sola velocità, ci pensa l'effetto "Velocità" sotto), e
     // `duration` arriva da `/api/watch` poco dopo il flusso stesso — se
-    // cambiasse a player già aperto non deve riaprirlo.
+    // cambiasse a player già aperto non deve riaprirlo. `playing` si legge
+    // solo per decidere `deveAndare` al momento della riapertura, non deve
+    // farne scattare una nuova quando cambia da sé (altrimenti ogni singolo
+    // play/pausa riaprirebbe il flusso).
   }, [videoId, quality, stream, fitScreen]);
 
   // ── Velocità ───────────────────────────────────────────────────────────
@@ -240,10 +243,10 @@ export default function VideoPlayer({
   // (`onWaiting` mentre `playing` è vero, cioè si stava ancora cercando di
   // andare avanti) si mette in pausa esplicitamente e si aspetta che il
   // buffer sia avanti di `REBUFFER_MARGIN_S` secondi rispetto alla posizione
-  // attuale prima di far ripartire da sé il video. `playing` (non `andavaRef`,
-  // che resta vero anche dopo una pausa dell'utente) è la guardia giusta: se
-  // l'utente ha già messo in pausa lui stesso, un `waiting` residuo non deve
-  // far ripartire nulla da solo.
+  // attuale prima di far ripartire da sé il video. `playing` è la guardia
+  // giusta anche qui, per lo stesso motivo dell'effetto di caricamento sopra:
+  // se l'utente ha già messo in pausa lui stesso, un `waiting` residuo non
+  // deve far ripartire nulla da solo.
   const rebufferingRef = useRef(false);
   const [rebuffering, setRebuffering] = useState(false);
 
@@ -684,7 +687,7 @@ export default function VideoPlayer({
         // Col dito, la pressione lunga su un video fa comparire il menu del
         // browser ("salva video…"), che coprirebbe proprio il gesto del 2x.
         onContextMenu={touch ? e => e.preventDefault() : undefined}
-        onPlay={() => { setPlaying(true); andavaRef.current = true; bumpControls(); }}
+        onPlay={() => { setPlaying(true); bumpControls(); }}
         onPause={() => { setPlaying(false); setControlsVisible(true); }}
         onWaiting={() => setBuffering(true)}
         onPlaying={() => { setBuffering(false); hasPlayedRef.current = true; }}
@@ -708,7 +711,7 @@ export default function VideoPlayer({
           setVolume(v.volume);
           setMuted(v.muted);
         }}
-        onEnded={() => { setPlaying(false); andavaRef.current = false; setControlsVisible(true); }}
+        onEnded={() => { setPlaying(false); setControlsVisible(true); }}
         onError={() => onError?.()}
       >
         {subtitleLang && (

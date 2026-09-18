@@ -224,6 +224,22 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       errore nella pompa (es. `sourceBuffer.abort()` da devtools, o staccare/riattaccare la rete
       qualche secondo mentre il video scarica) e controllare che la riproduzione riparta da sola
       entro un paio di tentativi invece di restare bloccata.
+
+      Due regressioni trovate in revisione (prima del push, non ancora viste dal vivo) e corrette
+      nello stesso commit: (1) `retryRef.current.tentativi` si azzerava solo su un'apertura che non
+      fosse la continuazione di un retry — mai su un retry che aveva RECUPERATO da solo. In un video
+      lungo con più cadute di rete isolate e distanti nel tempo (nessun salto o cambio qualità in
+      mezzo a "resettare" il contatore) la terza smetteva di recuperare anche se le prime due si
+      erano risolte senza problemi da tempo. Corretto: un primo blocco arrivato con successo su
+      un'apertura nata da un retry azzera il contatore (`onBuffer` in `useStreamSource.js`), non
+      solo un'apertura "fresca". (2) L'effetto di caricamento decideva se far ripartire il flusso
+      riaperto leggendo `andavaRef` (vero dopo `onPlay`, mai azzerato da `onPause` — solo da
+      `onEnded`), la stessa guardia che il commento all'effetto di recupero da stallo, tre righe
+      sotto nello stesso file, dice esplicitamente essere quella sbagliata proprio per questo
+      motivo. Prima serviva un salto deliberato dell'utente per notare l'effetto; con `onError`
+      collegato, una semplice caduta di rete su un video in pausa lo faceva ripartire da solo senza
+      alcuna azione dell'utente. Corretto usando `playing` (aggiornato solo da `onPlay`/`onPause`
+      veri) al posto di `andavaRef`, che è stato rimosso.
 - [x] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
       **OK** (2026-09-14, live) — riaperto il menu impostazioni dopo l'avvio: `currentSrc` riflette
