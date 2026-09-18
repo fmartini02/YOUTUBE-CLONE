@@ -53,3 +53,9 @@ export const MSE_POLL_MS = 400;
 // non ha bisogno di un controllo ogni 400ms — un intervallo più largo evita
 // di tenere un timer JS a girare in continuazione senza motivo.
 export const MSE_POLL_MS_PAUSA = 5000;
+// Tetto d'attesa per l'evento `sourceopen` in mseStream.js: in un browser che
+// lo supporta normalmente arriva quasi subito dopo `video.load()`, ma un caso
+// patologico (tab sospesa, bug del browser) potrebbe non farlo arrivare mai —
+// senza un tetto l'apertura del flusso resterebbe appesa per sempre invece di
+// ripiegare su <video src>.
+export const MSE_SOURCEOPEN_TIMEOUT_MS = 5000;

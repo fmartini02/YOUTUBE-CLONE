@@ -22,6 +22,15 @@ import { creaFlussoMse } from "./mseStream";
 // salti diversi dello stesso video condividevano lo stesso tetto, pensato
 // per UN singolo problema persistente, non per la somma di episodi slegati.
 const MAX_RETRY_FINE_ANTICIPATA = 2;
+// Solo per gli errori di rete (onError, non onEnd — vedi riapriOrinuncia):
+// un blip che si risolve da solo in un paio di secondi non deve bruciare il
+// tentativo proprio nell'unico istante in cui la rete non risponde ancora —
+// verificato: senza attesa, il retry immediato falliva a sua volta, faceva
+// cadere anche il ripiego <video src> nello stesso istante, e mostrava un
+// toast d'errore invitando a ricaricare la pagina per un semplice singhiozzo
+// di rete di 3 secondi. Cresce con i tentativi (1s, poi 2s): più a lungo il
+// problema persiste, meno ha senso ritentare alla stessa cadenza.
+const RETRY_BACKOFF_MS = 1000;
 
 // Le quattro funzioni di lettura, raggruppate in una sola fabbrica (invece
 // di quattro funzioni separate) per restare sotto il tetto di 5 funzioni per
@@ -46,13 +55,21 @@ function creaLettori(handleRef, genRef) {
 // pompa (onError, sotto): oltre `MAX_RETRY_FINE_ANTICIPATA` tentativi si
 // rinuncia — `suRinuncia` decide cosa fare (finalizzare come fine vera, o
 // solo spegnere lo spinner) — invece di restare in un ciclo di riaperture
-// che non risolvono nulla se il problema persiste. Estratta qui solo per
-// restare sotto le 25 righe di apriStream(), che già la sfiorava da sola.
-function riapriOrinuncia(valido, retryRef, t, onFineAnticipata, suRinuncia) {
-  if (!valido) return;   // superato da un'apertura più recente
+// che non risolvono nulla se il problema persiste. `opt` (non 5 argomenti
+// posizionali distinti) per restare sotto i 5 parametri della norma:
+// `opt.t` è una FUNZIONE, non un valore già calcolato — con `opt.backoff`
+// (solo onError) il punto vero può essere più avanti di quando l'errore è
+// arrivato, perché il video intanto continua a consumare il buffer già
+// scaricato durante l'attesa. `opt.backoff` cresce con `tentativi`, quindi va
+// letto DOPO l'incremento sotto. Estratta qui solo per restare sotto le 25
+// righe di apriStream(), che già la sfiorava da sola.
+function riapriOrinuncia(validoOra, retryRef, suRinuncia, opt) {
+  if (!validoOra()) return;   // superato da un'apertura più recente
   if (retryRef.current.tentativi >= MAX_RETRY_FINE_ANTICIPATA) { suRinuncia(); return; }
   retryRef.current.tentativi += 1; retryRef.current.viaRetry = true;
-  onFineAnticipata(t);
+  const spara = () => { if (validoOra()) opt.onFineAnticipata(opt.t()); };
+  const attesa = opt.backoff ? retryRef.current.tentativi * RETRY_BACKOFF_MS : 0;
+  attesa ? setTimeout(spara, attesa) : spara();
 }
 
 // Apre il flusso: prova MSE, ripiega su <video src> se non va. `handleRef`,
@@ -108,7 +125,7 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
       // del video, fino a un GOP più lungo di quanto suggerisca `start`.
       const fineVera = durata > 0 && bufferedEnd >= durata - keyframeStart - 1;
       if (fineVera) { handleRef.current.finalizza?.(); return; }
-      riapriOrinuncia(true, retryRef, start + bufferedEnd, onFineAnticipata, () => handleRef.current.finalizza?.());
+      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => start + bufferedEnd, onFineAnticipata });
     },
     // Un fetch o un appendBuffer possono fallire a metà riproduzione (rete che
     // cade, tab in background su Android che sospende la pompa): senza questo
@@ -118,7 +135,7 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
     // riapertura dal punto vero letto da `video` (non da uno stato React che
     // in questo momento può essere stantio) — così un errore transitorio si
     // riprende da solo invece di restare fermo in attesa di un tocco.
-    onError: () => riapriOrinuncia(genRef.current === mia, retryRef, start + video.currentTime, onFineAnticipata, () => onAutoplayFailed?.()),
+    onError: () => riapriOrinuncia(() => genRef.current === mia, retryRef, () => onAutoplayFailed?.(), { t: () => start + video.currentTime, onFineAnticipata, backoff: true }),
   });
   if (genRef.current !== mia) { mse?.chiudi(); return; }   // superato mentre aspettavo il fetch
 

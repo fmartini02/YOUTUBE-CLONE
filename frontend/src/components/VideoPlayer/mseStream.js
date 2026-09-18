@@ -5,39 +5,63 @@
 // player non sa che questo file esiste: lo usa solo useStreamSource.js, che
 // decide se questa strada è disponibile o si ripiega su <video src>.
 import { pompa } from "./msePump";
+import { MSE_SOURCEOPEN_TIMEOUT_MS } from "./playerConstants";
+
+// Aspetta `sourceopen` con un tetto (vedi MSE_SOURCEOPEN_TIMEOUT_MS): senza,
+// un browser che non lo emette mai lascerebbe avviaMse() appesa per sempre.
+function attendiSourceOpen(ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("sourceopen non arrivato")), MSE_SOURCEOPEN_TIMEOUT_MS);
+    ms.addEventListener("sourceopen", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
+}
+
+// Estratta solo per restare sotto le 25 righe del catch sotto in un'unica riga.
+function pulisciMse(objectUrl, risposta) {
+  URL.revokeObjectURL(objectUrl);
+  risposta.body.cancel().catch(() => {});
+}
 
 // Costruisce davvero il MediaSource una volta deciso di procedere: SOLO da
 // qui in poi si tocca `video` (src/load()) — prima di questo punto,
-// `creaFlussoMse` può ancora tirarsi indietro senza aver lasciato tracce.
+// `creaFlussoMse` può ancora tirarsi indietro senza aver lasciato tracce. Da
+// qui in poi invece un fallimento (`addSourceBuffer` che rifiuta il mime pur
+// dopo che `isTypeSupported` ha detto sì, visto su alcune WebView/Android TV
+// con AV1; `sourceopen` mai arrivato) va ripulito esplicitamente — altrimenti
+// il `<video>` restava agganciato a un blob morto, con una rejection mai
+// intercettata né da qui né da chi chiama (vedi il try/catch in
+// creaFlussoMse), spinner fisso senza alcun ripiego su <video src>.
 async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }, cb) {
   const ms = new MediaSource();
   const objectUrl = URL.createObjectURL(ms);
   video.src = objectUrl;
   video.load();
-  await new Promise(r => ms.addEventListener("sourceopen", r, { once: true }));
-  const sb = ms.addSourceBuffer(mime);
-  sb.mode = "sequence";
-  // Durata reale del contenuto in arrivo: da `keyframeStart` (dove ffmpeg è
-  // atterrato per davvero), non da `offset` (il valore grezzo richiesto,
-  // usato solo per la posizione mostrata) — sennò gli ultimi secondi veri
-  // arriverebbero oltre la durata dichiarata al MediaSource.
-  if (durata > keyframeStart) { try { ms.duration = durata - keyframeStart; } catch { /* solo cosmetico */ } }
-  const chiuso = { current: false };
-  const reader = risposta.body.getReader();
-  pompa(reader, sb, video, chiuso, cb);
-  return {
-    offset,
-    keyframeStart,
-    finalizza: () => { try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* già chiuso */ } },
-    chiudi: () => {
-      chiuso.current = true;
-      // reader.cancel() ritorna una Promise: un `try/catch` non intercetta un
-      // suo rifiuto asincrono (solo un'eccezione sincrona, che qui non può
-      // capitare), serve `.catch()`.
-      reader.cancel().catch(() => {});
-      URL.revokeObjectURL(objectUrl);
-    },
-  };
+  try {
+    await attendiSourceOpen(ms);
+    const sb = ms.addSourceBuffer(mime);
+    sb.mode = "sequence";
+    // Durata reale del contenuto in arrivo: da `keyframeStart` (dove ffmpeg è
+    // atterrato per davvero), non da `offset` (il valore grezzo richiesto,
+    // usato solo per la posizione mostrata) — sennò gli ultimi secondi veri
+    // arriverebbero oltre la durata dichiarata al MediaSource.
+    if (durata > keyframeStart) { try { ms.duration = durata - keyframeStart; } catch { /* solo cosmetico */ } }
+    const chiuso = { current: false };
+    const reader = risposta.body.getReader();
+    pompa(reader, sb, video, chiuso, cb);
+    return {
+      offset,
+      keyframeStart,
+      finalizza: () => { try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* già chiuso */ } },
+      chiudi: () => {
+        chiuso.current = true;
+        // reader.cancel() ritorna una Promise: un `try/catch` non intercetta
+        // un suo rifiuto asincrono (solo un'eccezione sincrona, che qui non
+        // può capitare), serve `.catch()`.
+        reader.cancel().catch(() => {});
+        URL.revokeObjectURL(objectUrl);
+      },
+    };
+  } catch (e) { pulisciMse(objectUrl, risposta); throw e; }
 }
 
 // `rawStart` è il secondo grezzo richiesto (quello che il player mostra in
@@ -57,9 +81,14 @@ async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }
 // vivo (`currentTime` fermo, nessun errore). Ritorna `null` — SENZA aver
 // toccato `video` — anche in quel caso, non solo se il browser non supporta
 // MediaSource, il codec dichiarato dal server (header `X-Mux-Codecs`, vedi
-// streaming.py) o se il fetch fallisce: è il segnale per chi chiama di usare
-// il ripiego <video src>, che resta l'unico a decidere src/load()/velocità
-// quando davvero serve (vedi useStreamSource.js).
+// streaming.py), se il fetch fallisce, o se avviaMse() fallisce DOPO aver già
+// toccato `video` (`addSourceBuffer` che rifiuta un mime dichiarato
+// supportato, `sourceopen` mai arrivato): il try/catch sotto intercetta
+// quella rejection, che altrimenti non arrivava a nessuno — né qui né in
+// useStreamSource.js/index.jsx, che non hanno mai avuto un `.catch()` — ed è
+// il segnale per chi chiama di usare il ripiego <video src>, che resta
+// l'unico a decidere src/load()/velocità quando davvero serve (vedi
+// useStreamSource.js).
 export async function creaFlussoMse(video, url, { rawStart = 0, durata, onBuffer, onEnd, onError, ancoraValido } = {}) {
   if (typeof MediaSource === "undefined") return null;
   const risposta = await fetch(url).catch(() => null);
@@ -69,12 +98,14 @@ export async function creaFlussoMse(video, url, { rawStart = 0, durata, onBuffer
   const mime = codecs ? `video/mp4; codecs="${codecs}"` : "";
   const viaLibera = mime && MediaSource.isTypeSupported(mime) && (!ancoraValido || ancoraValido());
   if (!viaLibera) { risposta.body.cancel().catch(() => {}); return null; }
-  return avviaMse(video, risposta, { mime, offset: rawStart, keyframeStart, durata }, {
-    onBufferChange: () => onBuffer?.(),
-    // keyframeStart passato anche qui: chi chiama calcola se il flusso è
-    // finito per davvero confrontando la durata reale del contenuto
-    // (durata - keyframeStart), non quella apparente (durata - rawStart).
-    onEnd: t => onEnd?.(t, keyframeStart),
-    onError: e => onError?.(e),
-  });
+  try {
+    return await avviaMse(video, risposta, { mime, offset: rawStart, keyframeStart, durata }, {
+      onBufferChange: () => onBuffer?.(),
+      // keyframeStart passato anche qui: chi chiama calcola se il flusso è
+      // finito per davvero confrontando la durata reale del contenuto
+      // (durata - keyframeStart), non quella apparente (durata - rawStart).
+      onEnd: t => onEnd?.(t, keyframeStart),
+      onError: e => onError?.(e),
+    });
+  } catch { return null; }
 }

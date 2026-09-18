@@ -240,6 +240,33 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       collegato, una semplice caduta di rete su un video in pausa lo faceva ripartire da solo senza
       alcuna azione dell'utente. Corretto usando `playing` (aggiornato solo da `onPlay`/`onPause`
       veri) al posto di `andavaRef`, che è stato rimosso.
+
+      Altre due trovate nella stessa revisione, corrette in un secondo momento (**da verificare dal
+      vivo**, non ancora viste in un browser): (3) il retry su `onError` era immediato, senza
+      attesa — su una caduta di rete vera (lo scenario dichiarato: Wi-Fi che cade qualche secondo)
+      bruciava il tentativo nell'unico istante in cui la rete non rispondeva ancora, il `fetch` del
+      retry falliva a sua volta, e anche il ripiego `<video src>` (che tenta lo stesso URL) falliva
+      nello stesso istante — risultato un toast «Errore stream — ricarica la pagina» per un
+      singhiozzo di 3 secondi che si sarebbe risolto da sé. Corretto con un'attesa prima del retry,
+      solo per `onError` (non per la fine anticipata da URL scaduto, dove il problema è un altro e
+      il retry immediato è corretto): 1s al primo tentativo, 2s al secondo
+      (`RETRY_BACKOFF_MS`/`opt.backoff` in `useStreamSource.js`). (4) `avviaMse()` in `mseStream.js`
+      non aveva alcun `try/catch`: se `addSourceBuffer()` rifiutava il mime dichiarato — pur dopo
+      che `MediaSource.isTypeSupported()` aveva detto di sì, visto su alcune WebView/Android TV con
+      AV1 — o se l'evento `sourceopen` non arrivava mai, l'eccezione (o la Promise mai risolta)
+      non arrivava a nessuno: `creaFlussoMse()` non aveva un `.catch()` attorno alla chiamata,
+      `apriStream()` neppure, `flusso.apri()` in `index.jsx` neppure — rejection non gestita (o
+      apertura appesa per sempre), `<video>` agganciato a un `MediaSource` morto, nessun ripiego su
+      `<video src>`, spinner fisso. Corretto: `avviaMse()` ora ha un tetto sull'attesa di
+      `sourceopen` (`MSE_SOURCEOPEN_TIMEOUT_MS`, 5s) e un `try/catch` che ripulisce (`URL.
+      revokeObjectURL`, cancella la risposta) e rilancia; `creaFlussoMse()` intercetta quel rilancio
+      e ritorna `null` come per ogni altro caso di "MSE non disponibile per questo video" — lo
+      stesso segnale già gestito che fa scattare il ripiego `<video src>` in `useStreamSource.js`.
+      **Da verificare dal vivo**: (3) forzare una caduta di rete breve (qualche secondo) durante la
+      riproduzione e controllare che non compaia il toast d'errore, solo una breve pausa poi la
+      ripresa da sola; (4) se possibile forzare `addSourceBuffer` a fallire (devtools) o simulare un
+      `sourceopen` che non arriva, e controllare che il player ripieghi su `<video src>` invece di
+      restare con lo spinner fisso.
 - [x] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
       **OK** (2026-09-14, live) — riaperto il menu impostazioni dopo l'avvio: `currentSrc` riflette
