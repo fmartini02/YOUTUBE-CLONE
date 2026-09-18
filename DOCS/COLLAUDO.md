@@ -165,6 +165,21 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       (325 pacchetti continui su 12s di test). L'allineamento audio/video esatto non è verificabile
       a orecchio in headless: il meccanismo (stesso keyframe passato a entrambi gli input) è
       verificato a livello ffmpeg/ffprobe, non nel player.
+      **Regressione trovata il 2026-09-18** (segnalata dall'utente: "mandare avanti il seek
+      desincronizza audio e video"), root cause diversa da tutte quelle sopra: `_keyframe_before`
+      chiedeva a ffprobe il campo `pts_time`, che esiste solo da ffmpeg 5+. Su un ffprobe 4.4.x
+      (quello di default su Ubuntu 22.04 e su Raspberry Pi OS Bullseye, riprodotto in locale) quel
+      campo non esiste affatto: `-show_entries frame=pts_time,pict_type` restituisce per ogni riga
+      il solo `pict_type`, **senza virgola** — `partition(",")` in Python non trova mai il separatore,
+      la condizione `flag.startswith("I")` non è mai vera, e il probe fallisce in silenzio (per
+      design, vedi il docstring) **su ogni salto**, sempre col valore grezzo. Cioè: la regressione
+      esatta che questa funzione esiste per evitare, silenziosamente riattivata su ogni ffprobe <5.
+      Verificato con un file locale generato ad hoc (`libx264`, GOP fisso a 2s): la vecchia query
+      ritornava sempre il target invariato (0.5→0.5, 5.0→5.0, 12.3→12.3 …), la nuova
+      (`best_effort_timestamp_time`, campo stabile su entrambe le versioni) snappa correttamente
+      al keyframe vero (0.5→0.0, 5.0→4.0, 12.3→12.0). **Non ancora riverificato a orecchio in un
+      browser reale** con URL YouTube veri (stesso limite della voce sopra) — resta da confermare
+      sul dispositivo dell'utente dopo il deploy.
 - [ ] **Seek vicino alla fine** — spostare la barra o premere → negli ultimi secondi del video:
       l'audio **non sparisce** e il player non si pianta. Era `-copypriorss 0` nell'ultimo GOP (nessun
       keyframe dopo il punto) a produrre un flusso **con 0 pacchetti video** che bloccava anche

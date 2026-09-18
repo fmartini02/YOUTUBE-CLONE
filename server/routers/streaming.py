@@ -104,6 +104,16 @@ def _keyframe_before(video_url: str, target: float) -> float:
     Fallisce silenziosamente sul valore grezzo: un salto un po' sfasato è
     sempre meglio di un salto che non parte.
 
+    Campo `best_effort_timestamp_time`, non `pts_time`: quest'ultimo esiste
+    solo da ffmpeg 5+, e su un ffprobe più vecchio (4.4, quello di default su
+    Ubuntu 22.04/Raspberry Pi OS Bullseye — verificato in locale) `-show_entries
+    frame=pts_time,...` non produce quel campo affatto, quindi ogni riga CSV
+    perde la colonna del timestamp: `partition(",")` non trova mai una virgola,
+    la condizione sul tipo di frame non scatta MAI e il probe fallisce in
+    silenzio *su ogni salto*, sempre sul valore grezzo — la stessa condizione
+    che questa funzione esiste per evitare (vedi sopra). `best_effort_timestamp_time`
+    è un campo stabile su entrambe le versioni.
+
     Cache come `_mux_fmt_cache` qui sopra e per lo stesso motivo: un salto
     ripetuto sullo stesso punto (tasti freccia premuti in rapida sequenza,
     verificato dal vivo) ripagherebbe ogni volta un intero processo ffprobe
@@ -116,7 +126,7 @@ def _keyframe_before(video_url: str, target: float) -> float:
     if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
         return hit[1]
     cmd = [_FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
-           "-show_entries", "frame=pts_time,pict_type",
+           "-show_entries", "frame=best_effort_timestamp_time,pict_type",
            "-read_intervals", f"{target:.3f}%+#3", "-of", "csv=p=0", video_url]
     result = target
     try:
