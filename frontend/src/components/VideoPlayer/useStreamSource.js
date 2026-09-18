@@ -42,6 +42,19 @@ function creaLettori(handleRef, genRef) {
   };
 }
 
+// Riapertura condivisa fra "fine anticipata" (onEnd) e un errore vero della
+// pompa (onError, sotto): oltre `MAX_RETRY_FINE_ANTICIPATA` tentativi si
+// rinuncia — `suRinuncia` decide cosa fare (finalizzare come fine vera, o
+// solo spegnere lo spinner) — invece di restare in un ciclo di riaperture
+// che non risolvono nulla se il problema persiste. Estratta qui solo per
+// restare sotto le 25 righe di apriStream(), che già la sfiorava da sola.
+function riapriOrinuncia(valido, retryRef, t, onFineAnticipata, suRinuncia) {
+  if (!valido) return;   // superato da un'apertura più recente
+  if (retryRef.current.tentativi >= MAX_RETRY_FINE_ANTICIPATA) { suRinuncia(); return; }
+  retryRef.current.tentativi += 1; retryRef.current.viaRetry = true;
+  onFineAnticipata(t);
+}
+
 // Apre il flusso: prova MSE, ripiega su <video src> se non va. `handleRef`,
 // `retryRef` e `genRef` arrivano dall'hook (lo stato mutabile vive lì):
 // questa resta una funzione pura sui ref che riceve, per poter stare fuori
@@ -83,10 +96,18 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
       // `keyframeStart`, non `start`: il contenuto reale va da lì alla fine
       // del video, fino a un GOP più lungo di quanto suggerisca `start`.
       const fineVera = durata > 0 && bufferedEnd >= durata - keyframeStart - 1;
-      if (fineVera || retryRef.current.tentativi >= MAX_RETRY_FINE_ANTICIPATA) { handleRef.current.finalizza?.(); return; }
-      retryRef.current.tentativi += 1; retryRef.current.viaRetry = true;
-      onFineAnticipata(start + bufferedEnd);
+      if (fineVera) { handleRef.current.finalizza?.(); return; }
+      riapriOrinuncia(true, retryRef, start + bufferedEnd, onFineAnticipata, () => handleRef.current.finalizza?.());
     },
+    // Un fetch o un appendBuffer possono fallire a metà riproduzione (rete che
+    // cade, tab in background su Android che sospende la pompa): senza questo
+    // la pompa si fermava e basta, il buffer smetteva di crescere e lo
+    // spinner restava acceso per sempre, perché nessuno lo sapeva. Stesso
+    // trattamento della fine anticipata qui sopra — stesso tetto di tentativi,
+    // riapertura dal punto vero letto da `video` (non da uno stato React che
+    // in questo momento può essere stantio) — così un errore transitorio si
+    // riprende da solo invece di restare fermo in attesa di un tocco.
+    onError: () => riapriOrinuncia(genRef.current === mia, retryRef, start + video.currentTime, onFineAnticipata, () => onAutoplayFailed?.()),
   });
   if (genRef.current !== mia) { mse?.chiudi(); return; }   // superato mentre aspettavo il fetch
 

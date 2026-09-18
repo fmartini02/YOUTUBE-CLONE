@@ -204,6 +204,26 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       (che ritorna un oggetto nuovo ad ogni render) fra le sue dipendenze chiudeva il flusso — quindi
       revocava l'URL del blob — dopo ogni render invece che solo allo smontaggio, causando
       `DEMUXER_ERROR_COULD_NOT_OPEN` quasi subito dopo l'apertura. Deps vuote, corretto.
+- [ ] **Recupero da un errore vero della pompa MSE** — un fetch che cade o un `appendBuffer` che
+      fallisce a metà riproduzione (rete instabile, es. un telefono in Tailscale su rete di casa;
+      tab in background su Android che sospende la pompa) deve far riaprire da solo il flusso dal
+      punto vero, non lasciare lo spinner acceso per sempre in attesa di un tocco dell'utente.
+      Bug trovato leggendo il codice (non ancora riprodotto dal vivo in questa sessione, manca un
+      browser): `pompa()` in `msePump.js` chiamava già `cb.onError(e)` su ogni eccezione non dovuta
+      a una chiusura volontaria, ma **`onError` non veniva mai propagato** — `apriStream()` in
+      `useStreamSource.js` non lo estraeva da `opt` né lo passava a `creaFlussoMse()`, e
+      `index.jsx` non lo passava mai a `flusso.apri()`: la chiamata `onError?.(e)` finiva su
+      `undefined`, un no-op silenzioso. Risultato: il buffer smetteva di crescere, `buffering`
+      restava vero, e nessun evento successivo lo spegneva — combacia con "il video si blocca da
+      solo e resta con lo spinner finché non premo di nuovo play". Corretto collegando `onError`
+      allo stesso meccanismo già usato per la fine anticipata del flusso (`riapriOrinuncia` in
+      `useStreamSource.js`): stesso tetto di `MAX_RETRY_FINE_ANTICIPATA` tentativi, riapertura dal
+      punto vero letto da `video.currentTime` (non da uno stato React che in quel momento può
+      essere stantio); esauriti i tentativi si spegne almeno lo spinner (`onAutoplayFailed`) invece
+      di restare acceso all'infinito. **Da verificare dal vivo**: aprire un video, forzare un
+      errore nella pompa (es. `sourceBuffer.abort()` da devtools, o staccare/riattaccare la rete
+      qualche secondo mentre il video scarica) e controllare che la riproduzione riparta da sola
+      entro un paio di tentativi invece di restare bloccata.
 - [x] **Cambio qualità** — dal menu del player: il flusso si riapre alla stessa posizione e la
       scelta a mano ha la precedenza sulla preferenza fino a fine sessione.
       **OK** (2026-09-14, live) — riaperto il menu impostazioni dopo l'avvio: `currentSrc` riflette
