@@ -83,6 +83,15 @@ export default function VideoPlayer({
   // forzare la riapertura anche quando si torna sullo stesso secondo.
   const [stream, setStream] = useState({ start: 0, n: 0 });
   const [position, setPosition] = useState(0);
+  // Rispecchia `position` ma si aggiorna SUBITO, non al prossimo render: un
+  // doppio tocco che ne segue un altro entro pochi millisecondi (skip in
+  // sequenza, vedi onVideoPointerUp) chiamava `skip()` due volte di fila
+  // prima che React avesse il tempo di rimettere `position` al passo con il
+  // primo salto già richiesto — il secondo skip ripartiva dallo stesso punto
+  // di partenza del primo invece che sommarsi, e la somma dei tocchi si
+  // fermava al primo salto registrato.
+  const positionRef = useRef(0);
+  useEffect(() => { positionRef.current = position; }, [position]);
   const [bufferedStart, setBufferedStart] = useState(0);
   const [bufferedEnd, setBufferedEnd] = useState(0);
   // Altezza reale del flusso decodificato (evento `resize` del <video>): con
@@ -275,6 +284,10 @@ export default function VideoPlayer({
     if (!v) return;
     const max = duration ? duration - 0.5 : Infinity;
     const t = Math.max(0, Math.min(max, target));
+    // Subito, non solo dentro i due rami sotto: un secondo skip chiamato prima
+    // che React abbia rimesso `position` al passo (vedi positionRef sopra)
+    // deve comunque vedere qui il punto a cui questo salto sta per portare.
+    positionRef.current = t;
     const local = flusso.tempoLocale(t);
     // Già scaricato *e* dichiarato cercabile: salto istantaneo, il flusso non
     // si tocca. Il risultato si verifica subito rileggendo `currentTime`: se il
@@ -293,7 +306,10 @@ export default function VideoPlayer({
     setStream(s => ({ start: t, n: s.n + 1 }));
   }, [duration, stream.start]);
 
-  const skip = useCallback((delta) => seekTo(position + delta), [seekTo, position]);
+  // positionRef, non `position`: due skip ravvicinati (doppio tocco ripetuto,
+  // freccia tenuta premuta) devono sommarsi sul punto appena richiesto dal
+  // primo, non ripartire entrambi dalla stessa posizione ferma nello stato.
+  const skip = useCallback((delta) => seekTo(positionRef.current + delta), [seekTo]);
 
   // Salto chiesto da fuori (capitoli/trascrizione nel pannello descrizione).
   // Deps SOLO [seekRequest]: seekTo cambia identità ad ogni duration/
