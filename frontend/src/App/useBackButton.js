@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { handleBack } from "./backHandlers";
 
 /**
  * Tasto Indietro / gesture di Android. Capacitor 8 non gestisce più il tasto
@@ -16,6 +17,11 @@ export function useBackButton(sidebarOpen, setSidebarOpen, depthRef) {
     window.ytproxyHandleBack = () => {
       if (sidebarOpen) { setSidebarOpen(false); return true; }
       if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return true; }
+      // Pannelli a comparsa (descrizione del video, e chi verrà dopo): si
+      // registrano in backHandlers.js mentre sono aperti. Vanno consultati
+      // PRIMA di navigare, altrimenti il tasto Indietro porterebbe via dalla
+      // pagina lasciando credere che il pannello non si chiuda affatto.
+      if (handleBack()) return true;
       if (depthRef.current > 0) { window.history.back(); return true; }
       return false;
     };

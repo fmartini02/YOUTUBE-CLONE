@@ -16,7 +16,7 @@ from typing import Optional
 
 from auth.storage import (
     TOKEN_FILE, SUBS_FILE, PREFS_FILE, HISTORY_FILE,
-    AVATAR_CACHE_FILE, SUBS_FEED_CACHE_FILE, _leggi_json,
+    AVATAR_CACHE_FILE, SUBS_FEED_CACHE_FILE, CHANNEL_SEEN_FILE, _leggi_json,
 )
 
 
@@ -31,6 +31,9 @@ class AuthState:
     # "commenta come"): None = mai letto, {} = account senza canale.
     me: Optional[dict] = None
     subs_feed_cache: list = field(default_factory=list)
+    # {channel_id: {"video_id": <ultimo id visto>, "at": <unix>}} — serve alle
+    # bollicine dei canali in home per sapere chi ha un video ancora da vedere.
+    channel_seen: dict = field(default_factory=dict)
     cookie_feed_cache: list = field(default_factory=list)
     cookie_feed_cache_at: float = 0
     # Estrattori pigri tenuti vivi fra una richiesta e l'altra per poter
@@ -51,6 +54,7 @@ def load_state() -> AuthState:
         history=_leggi_json(HISTORY_FILE, []),
         avatar_cache=_leggi_json(AVATAR_CACHE_FILE, {}),
         subs_feed_cache=_leggi_json(SUBS_FEED_CACHE_FILE, []),
+        channel_seen=_leggi_json(CHANNEL_SEEN_FILE, {}),
     )
 
 

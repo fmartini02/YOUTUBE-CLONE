@@ -15,6 +15,16 @@ export const REBUFFER_MARGIN_S = 5;
 // il ritardo con cui il tocco singolo mette in pausa: sotto i ~250ms i doppi
 // tocchi veri sfuggono, sopra i ~400ms il player sembra lento a rispondere.
 export const DOUBLE_TAP_MS = 300;
+// Una volta che il primo doppio tocco ha già avviato un salto (vedi
+// `onVideoPointerUp` in index.jsx), i tocchi SUCCESSIVI dello stesso gesto
+// hanno più margine: chi ha appena fatto un doppio tocco veloce e prova a
+// continuare con un terzo/quarto tocco non lo ripete quasi mai alla stessa
+// cadenza — misurato: senza margine in più, la somma si fermava ai primi due
+// tocchi (20s) perché il terzo arrivava oltre i 300ms e veniva scambiato per
+// l'inizio di un tocco singolo nuovo, subito annullato dal quarto. Vale SOLO
+// per continuare un salto già iniziato, non per la prima coppia (quella resta
+// su DOUBLE_TAP_MS, il compromesso sopra spiegato non cambia).
+export const SEEK_BURST_MS = 500;
 // Oltre questa distanza il dito stava scorrendo la pagina, non toccando il
 // video: senza il controllo, ogni scorrimento partito dal player lo metteva
 // in pausa.

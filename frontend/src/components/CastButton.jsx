@@ -2,9 +2,11 @@ import { useState } from "react";
 import { resolveCastBase } from "../api";
 import { CAST_UNAVAILABLE_MESSAGE, CAST_ERROR_MESSAGE } from "../hooks/useCast.jsx";
 
-function CastIcon({ casting }) {
+// `inline`: dentro una pillola l'icona precede l'etichetta e ha bisogno dello
+// stacco; nella barra del player è sola e il margine la scentrerebbe.
+function CastIcon({ casting, inline = true }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 6 }}>
+    <svg width={inline ? 16 : 22} height={inline ? 16 : 22} viewBox="0 0 24 24" fill="currentColor" style={inline ? { marginRight: 6 } : undefined}>
       {casting ? (
         <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm18-3H5c-1.1 0-2 .9-2 2v1.17c3.55 1.03 6.35 3.83 7.38 7.38H19V9h-9V7h9v10h2V9c0-1.1-.9-2-2-2z" />
       ) : (
@@ -46,21 +48,29 @@ async function handleCastClick(cast, media, onNotice, busy, setBusy) {
 }
 
 /**
- * CastButton — l'UNICO comando Chromecast dell'app.
+ * CastButton — il comando Chromecast dell'app.
  *
  * Un solo bottone con quattro stati: trasmetti / connessione in corso /
  * interrompi / non disponibile. Non si nasconde mai quando il cast non è
  * disponibile: cliccandolo spiega il motivo, che è più utile di un bottone
  * che sparisce senza dire niente.
  *
+ * `variant`:
+ *   "pill"   (predefinito) pillola con icona ed etichetta, per una riga di azioni;
+ *   "player" sola icona nella barra dei comandi del player, accanto a CC e alla
+ *            rotellina — dov'è su YouTube. Stesso click, stesso tooltip: cambia
+ *            solo l'aspetto. Durante una trasmissione il player non è montato,
+ *            quindi l'interruzione la offre la pillola in VideoActions.jsx.
+ *
  * `media` è il video da mandare in TV: { streamUrl, title, channel,
  * thumbnail, duration, videoId }.
  */
-export default function CastButton({ cast, media, onNotice }) {
+export default function CastButton({ cast, media, onNotice, variant = "pill" }) {
   const [busy, setBusy] = useState(false);
 
   const casting = !!cast?.connected && cast.castingVideoId === media?.videoId;
   const connecting = !!cast?.connecting || busy;
+  const player = variant === "player";
 
   const label = !cast?.available ? "Trasmetti sulla TV"
     : connecting ? "Connessione…"
@@ -69,13 +79,13 @@ export default function CastButton({ cast, media, onNotice }) {
 
   return (
     <button
-      className={`action-btn${casting || !cast?.available ? "" : " primary"}`}
+      className={player ? `player-btn${casting ? " on" : ""}` : `action-btn${casting || !cast?.available ? "" : " primary"}`}
       style={cast?.available ? undefined : { opacity: 0.6 }}
       onClick={() => handleCastClick(cast, media, onNotice, busy, setBusy)}
       title={casting ? `In riproduzione su ${cast.deviceName}` : "Trasmetti su Chromecast"}
     >
-      <CastIcon casting={casting} />
-      {label}
+      <CastIcon casting={casting} inline={!player} />
+      {!player && label}
     </button>
   );
 }

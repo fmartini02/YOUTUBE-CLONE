@@ -30,6 +30,7 @@ Mappa dei moduli:
   history.py                  cronologia locale
   prefs.py                    preferenze utente
   channel_avatars.py          loghi canale in batch, con cache
+  channel_bubbles.py          canali attivi per la home + stato "canale visto"
 
 Il singleton "auth_manager" di prima è ora `from auth.state import state`.
 """

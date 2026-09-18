@@ -22,12 +22,13 @@ function VideoMain({ s, videoId, navigate, onSubsChange }) {
         info={s.info} subtitleLang={s.subtitleLang} setSubtitleLang={s.setSubtitleLang} subtitleLangs={s.subtitleLangs}
         subtitleSize={s.subtitleSize} setSubtitleSize={s.setSubtitleSize} theater={s.theater} toggleTheater={s.toggleTheater}
         addToast={s.addToast} autoplay={s.prefs.autoplay !== false} fitScreen={s.prefs.fitScreen !== false}
-        castMedia={s.castMedia}
+        castMedia={s.castMedia} seekRequest={s.seekRequest}
       />
       <VideoInfoSection
         info={s.info} descExpanded={s.descExpanded} setDescExpanded={s.setDescExpanded} channelAvatar={s.channelAvatar}
-        navigate={navigate} addToast={s.addToast} onSubsChange={onSubsChange} cast={s.cast} castMedia={s.castMedia}
+        navigate={navigate} addToast={s.addToast} onSubsChange={onSubsChange} cast={s.cast} isCasting={s.isCasting}
         onDownload={() => downloadVideo(videoId, s.quality, s.info, s.addToast)} videoId={videoId} canRate={s.canRate}
+        richiediSeek={s.richiediSeek} subtitleLangs={s.subtitleLangs} subtitleLang={s.subtitleLang}
       />
     </div>
   );

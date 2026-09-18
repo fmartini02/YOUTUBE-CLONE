@@ -58,7 +58,7 @@ function creaLettori(handleRef, genRef) {
 // frattempo), questa chiamata si tira indietro da sola invece di scrivere su
 // `video`/`handleRef`, e chiude subito quello che aveva appena aperto.
 async function apriStream(handleRef, retryRef, genRef, video, opt) {
-  const { videoId, quality, start, durata, rate, autoplay, muxUrl, onBuffer, onFineAnticipata } = opt;
+  const { videoId, quality, start, durata, rate, autoplay, muxUrl, onBuffer, onFineAnticipata, onAutoplayFailed } = opt;
   const mia = ++genRef.current;
   handleRef.current?.chiudi();
   const url = muxUrl(videoId, quality, start);
@@ -94,7 +94,13 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
   if (!mse) { video.src = url; video.load(); }
 
   video.defaultPlaybackRate = rate; video.playbackRate = rate;
-  if (autoplay) video.play().catch(() => {});
+  // `play()` può rifiutarsi (un load() più recente lo interrompe, o il
+  // browser nega l'autoplay): ignorarlo in silenzio come prima lasciava lo
+  // spinner acceso per sempre, perché nulla poi chiamava `onPlaying`. Solo se
+  // questa è ancora l'apertura più recente: una scavalcata rifiuta sempre
+  // (chiusa da `handleRef.current?.chiudi()` sopra), ma quella non è colpa
+  // sua e non deve spegnere il buffering della NUOVA apertura in corso.
+  if (autoplay) video.play().catch(() => { if (genRef.current === mia) onAutoplayFailed?.(); });
   else video.preload = "auto";
 }
 

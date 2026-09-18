@@ -56,6 +56,10 @@ export function useChannelData(channelId) {
 
   useEffect(() => {
     const cancelledRef = { current: false };
+    // Aprire un canale spegne il suo pallino fra le bollicine della home.
+    // Fire-and-forget di proposito: non deve né ritardare né far fallire il
+    // caricamento della pagina (l'esito non cambia nulla di ciò che si vede qui).
+    api.markChannelSeen(channelId).catch(() => {});
     loadChannel(channelId, cancelledRef, setters);
     return () => { cancelledRef.current = true; };
   }, [channelId]); // eslint-disable-line react-hooks/exhaustive-deps

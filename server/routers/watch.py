@@ -38,7 +38,10 @@ async def watch(video_id: str):
         return {
             "id": info.get("id"),
             "title": info.get("title"),
-            "description": (info.get("description") or "")[:500],
+            # Il troncamento resta (certe descrizioni sono crediti chilometrici
+            # che non ha senso spedire al frontend), ma 500 caratteri tagliavano
+            # via anche le descrizioni normali con capitoli e link.
+            "description": (info.get("description") or "")[:5000],
             "channel": info.get("uploader"),
             "channel_id": info.get("channel_id"),
             "duration": info.get("duration"),
@@ -47,11 +50,22 @@ async def watch(video_id: str):
             "thumbnail": f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg",
             "published": info.get("upload_date"),
             "tags": info.get("tags", [])[:10],
+            "subscribers": info.get("channel_follower_count"),
+            "chapters": _capitoli(info),
         }
     except HTTPException:
         raise
     except Exception as ex:
         raise HTTPException(500, str(ex))
+
+
+def _capitoli(info: dict) -> list:
+    """Capitoli del video, se YouTube li espone. Arrivano gratis dalla stessa
+    estrazione (yt-dlp li mette in info['chapters'] da initial_data): niente
+    richieste in più. Lista vuota per i video che non ne hanno."""
+    voci = info.get("chapters") or []
+    return [{"start": int(c.get("start_time") or 0), "title": (c.get("title") or "").strip()}
+            for c in voci[:100] if c.get("title")]
 
 
 def _subtitle_tracks(info: dict) -> dict:

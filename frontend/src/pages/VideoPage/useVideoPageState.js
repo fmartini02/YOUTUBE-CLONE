@@ -25,6 +25,16 @@ function useCastMedia(videoId, quality, info) {
   }), [videoId, quality, info, webm]);
 }
 
+// Salto chiesto da fuori dal player: un capitolo o una riga della trascrizione
+// nel pannello descrizione. Il contatore `n` serve perché due tocchi sullo
+// stesso capitolo sono due richieste distinte — senza, il secondo oggetto
+// sarebbe identico al primo e l'effect nel player non scatterebbe.
+function useSeekRequest() {
+  const [seekRequest, setSeekRequest] = useState(null);
+  const richiediSeek = t => setSeekRequest(r => ({ t, n: (r?.n || 0) + 1 }));
+  return { seekRequest, richiediSeek };
+}
+
 /** Raccoglie tutto lo stato della pagina video, così index.jsx resta solo markup. */
 export function useVideoPageState(videoId, authStatus) {
   const { prefs, pronte: prefsPronte } = usePrefs();
@@ -38,6 +48,7 @@ export function useVideoPageState(videoId, authStatus) {
   const [subtitleSize, setSubtitleSize] = useState("normal");
   const [descExpanded, setDescExpanded] = useState(false);
   const [theater, toggleTheater] = useTheaterMode();
+  const { seekRequest, richiediSeek } = useSeekRequest();
 
   useEffect(() => setSubtitleLang(""), [videoId]);
 
@@ -55,7 +66,7 @@ export function useVideoPageState(videoId, authStatus) {
   return {
     prefs, quality, cambiaQualita, addToast, ToastContainer, cast, info, related,
     subtitleLangs, subtitleLang, setSubtitleLang, subtitleSize, setSubtitleSize,
-    descExpanded, setDescExpanded, theater, toggleTheater, isCasting, channelAvatar, castMedia,
+    descExpanded, setDescExpanded, theater, toggleTheater, isCasting, channelAvatar, castMedia, seekRequest, richiediSeek,
     // "mi piace": lo stesso scope di scrittura di commenti/iscrizioni.
     canRate: !!authStatus?.can_comment,
   };

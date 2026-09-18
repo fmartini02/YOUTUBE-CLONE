@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from auth import channel_bubbles
 from auth import history as auth_history
 from auth.state import state
 
@@ -22,6 +23,10 @@ class HistoryEntry(BaseModel):
 @router.post("/api/history")
 async def add_history(entry: HistoryEntry):
     auth_history.add_to_history(state, entry.dict())
+    # Aprire un video spegne l'indicatore "nuovo" del suo canale, ma solo se è
+    # davvero l'ultimo video noto: la regola sta in auth/channel_bubbles.py,
+    # qui c'è solo il cablaggio (channel_id può mancare, lo tollera da sé).
+    channel_bubbles.mark_seen(state, entry.channel_id, entry.id)
     return {"ok": True}
 
 

@@ -3,7 +3,7 @@ import { api } from "../../api";
 import { isCapacitor } from "../../api/device";
 import { useTouchDevice } from "../../hooks/useMediaQuery";
 import { formatTime, isBuffered, isSeekable, qualityForScreen, labelForHeight } from "./videoPlayerHelpers";
-import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
+import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, SEEK_BURST_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
 import { HOLD_SPEED, HOLD_MS } from "./speedMath";
 import { useStreamSource } from "./useStreamSource";
 import PlayerOverlays from "./PlayerOverlays";
@@ -54,6 +54,15 @@ export default function VideoPlayer({
   onToggleTheater,
   onError,
   onNotice,
+  // Solo per l'icona Chromecast nella barra dei comandi: il player non
+  // trasmette nulla da sé, li inoltra a CastButton (vedi PlayerButtonsBar).
+  cast,
+  castMedia,
+  // Salto chiesto da fuori: un capitolo o una riga della trascrizione nel
+  // pannello descrizione. `{ t, n }` — il contatore serve perché due tocchi
+  // sullo stesso capitolo devono valere come due richieste (vedi
+  // useSeekRequest in pages/VideoPage/useVideoPageState.js).
+  seekRequest,
   // Preferenza "Autoplay video" (Impostazioni): decide solo se un video appena
   // aperto parte da solo. Le riaperture del flusso dovute a un salto o a un
   // cambio di qualità mantengono invece lo stato di prima.
@@ -190,6 +199,12 @@ export default function VideoPlayer({
         setBufferedEnd(fine);
       },
       onFineAnticipata: t => setStream(s => ({ start: t, n: s.n + 1 })),
+      // Se play() si rifiuta (vedi useStreamSource.js) lo spinner restava
+      // acceso all'infinito: nessun evento successivo lo spegneva perché il
+      // video non aveva mai davvero cominciato a scorrere. Qui si spegne a
+      // mano, così resta il grande tasto play al posto dello spinner — un
+      // tocco dell'utente è un gesto genuino e ha più probabilità di riuscire.
+      onAutoplayFailed: () => setBuffering(false),
     });
     if (!deveAndare) setBuffering(false);
     // `fitScreen` è tra le dipendenze perché concorre a formare l'URL del
@@ -279,6 +294,12 @@ export default function VideoPlayer({
   }, [duration, stream.start]);
 
   const skip = useCallback((delta) => seekTo(position + delta), [seekTo, position]);
+
+  // Salto chiesto da fuori (capitoli/trascrizione nel pannello descrizione).
+  // Deps SOLO [seekRequest]: seekTo cambia identità ad ogni duration/
+  // stream.start, e includerlo rieseguirebbe l'ULTIMA richiesta ad ogni
+  // riapertura del flusso — un salto che si ripete da solo all'infinito.
+  useEffect(() => { if (seekRequest) seekTo(seekRequest.t); }, [seekRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Play / pausa, volume, schermo intero ───────────────────────────────
   const togglePlay = useCallback(() => {
@@ -460,6 +481,14 @@ export default function VideoPlayer({
   function onVideoPointerDown(e) {
     if (e.pointerType === "mouse" && e.button !== 0) return;   // solo tasto sinistro
     if (touch) tapRef.current.start = { x: e.clientX, y: e.clientY };
+    // Senza cattura, un dito che scivola sotto la barra dei controlli (o, a
+    // schermo intero, sulle bande nere del letterboxing) cambia bersaglio:
+    // pointermove/pointerup smettono di arrivare qui e pointerleave scatta,
+    // interrompendo il "tieni premuto" come se il dito fosse stato sollevato.
+    // Con la cattura, questo elemento resta il bersaglio di tutto il gesto
+    // indipendentemente da cosa c'è visivamente sopra nel punto in cui si trova
+    // il dito ora.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     startHold(e);
   }
 
@@ -480,13 +509,20 @@ export default function VideoPlayer({
       : "center";
 
     const now = Date.now();
-    const doubleTap = side !== "center" && side === t.side && now - t.time < DOUBLE_TAP_MS;
+    const burst = seekBurstRef.current;
+    // La prima coppia deve essere un doppio tocco vero e proprio (finestra
+    // stretta, DOUBLE_TAP_MS): altrimenti un tocco singolo lento verrebbe
+    // scambiato per l'inizio di un salto. Ma se un salto è già in corso
+    // (`burst.delta` non a zero: il primo doppio tocco è già scattato), i
+    // tocchi che lo continuano hanno la finestra più larga SEEK_BURST_MS —
+    // vedi il commento in playerConstants.js sul perché serve.
+    const finestra = burst.delta !== 0 ? SEEK_BURST_MS : DOUBLE_TAP_MS;
+    const doubleTap = side !== "center" && side === t.side && now - t.time < finestra;
     t.time = now;
     t.side = side;
 
     if (doubleTap) {
       clearTimeout(t.timer);            // il tocco singolo in attesa non vale più
-      const burst = seekBurstRef.current;
       burst.delta += side === "left" ? -SKIP_SECONDS : SKIP_SECONDS;
       flashSeek(side, Math.abs(burst.delta));
       clearTimeout(burst.timer);
@@ -494,7 +530,7 @@ export default function VideoPlayer({
         const delta = burst.delta;
         burst.delta = 0;
         skip(delta);
-      }, DOUBLE_TAP_MS);
+      }, SEEK_BURST_MS);
       bumpControls();
       return;
     }
@@ -687,6 +723,27 @@ export default function VideoPlayer({
         )}
       </video>
 
+      {/* Strato dei gesti col dito: copre TUTTA l'area del player (video +
+          eventuali bande nere del letterboxing a schermo intero), non solo il
+          rettangolo del <video> — su YouTube il doppio tocco e il "tieni
+          premuto" valgono ovunque sullo schermo, non solo sull'immagine.
+          Sta sotto la barra dei controlli e il menu impostazioni (z-index),
+          quindi un tocco che parte davvero su un bottone li raggiunge intatto;
+          la cattura del puntatore (vedi onVideoPointerDown) fa sì che un gesto
+          iniziato qui resti suo anche se il dito finisce sotto di loro. Solo
+          col dito: col mouse i gesti restano sul <video>, invariati. */}
+      {touch && (
+        <div
+          className="player-touch-layer"
+          onPointerDown={onVideoPointerDown}
+          onPointerMove={onVideoPointerMove}
+          onPointerUp={onVideoPointerUp}
+          onPointerCancel={() => { tapRef.current.start = null; endHold(); }}
+          onPointerLeave={() => endHold()}
+          onContextMenu={e => e.preventDefault()}
+        />
+      )}
+
       <PlayerOverlays buffering={buffering} rebuffering={rebuffering} seekFlash={seekFlash} holding={holding} playing={playing} togglePlay={togglePlay} />
 
       {/* ── Barra dei controlli ──────────────────────────────────────── */}
@@ -735,6 +792,9 @@ export default function VideoPlayer({
           onToggleTheater={onToggleTheater}
           fullscreen={fullscreen}
           toggleFullscreen={toggleFullscreen}
+          cast={cast}
+          castMedia={castMedia}
+          onNotice={onNotice}
         />
       </div>
 

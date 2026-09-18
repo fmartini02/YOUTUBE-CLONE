@@ -2,6 +2,7 @@ import { formatTime } from "./videoPlayerHelpers";
 import { formatSpeed } from "./speedMath";
 import { SKIP_SECONDS } from "./playerConstants";
 import { isCapacitor } from "../../api/device";
+import CastButton from "../CastButton";
 
 function VolumeControl({ muted, volume, toggleMute, changeVolume }) {
   return (
@@ -45,7 +46,7 @@ function SettingsButton({ settingsOpen, onOpenSettings, speed }) {
 function TheaterButton({ theater, onToggleTheater }) {
   if (isCapacitor()) return null;
   return (
-    <button className="player-btn" onClick={() => onToggleTheater?.()} title={theater ? "Modalità predefinita (t)" : "Modalità cinema (t)"}>
+    <button className="player-btn player-theater-btn" onClick={() => onToggleTheater?.()} title={theater ? "Modalità predefinita (t)" : "Modalità cinema (t)"}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         {theater ? <rect x="6" y="7" width="12" height="10" rx="1.5" /> : <rect x="2.5" y="6" width="19" height="12" rx="1.5" />}
       </svg>
@@ -57,6 +58,10 @@ function RightControls(props) {
   const { subtitleLang, toggleSubtitles, fullscreen, toggleFullscreen } = props;
   return (
     <div className="player-buttons-right">
+      {/* Accanto a CC e alla rotellina, dov'è su YouTube. Durante una
+          trasmissione questo player non è montato: l'interruzione sta nella
+          striscia di azioni sotto il titolo (VideoActions.jsx). */}
+      {props.cast && <CastButton cast={props.cast} media={props.castMedia} onNotice={props.onNotice} variant="player" />}
       <button
         className={`player-btn${subtitleLang ? " on" : ""}`}
         onClick={toggleSubtitles}
@@ -79,7 +84,8 @@ export default function PlayerButtonsBar(props) {
   const { playing, togglePlay, skip, shown, duration } = props;
   const { muted, volume, toggleMute, changeVolume } = props;
   const { subtitleLang, toggleSubtitles, settingsOpen, onOpenSettings, speed, theater, onToggleTheater, fullscreen, toggleFullscreen } = props;
-  const rightProps = { subtitleLang, toggleSubtitles, settingsOpen, onOpenSettings, speed, theater, onToggleTheater, fullscreen, toggleFullscreen };
+  const { cast, castMedia, onNotice } = props;
+  const rightProps = { subtitleLang, toggleSubtitles, settingsOpen, onOpenSettings, speed, theater, onToggleTheater, fullscreen, toggleFullscreen, cast, castMedia, onNotice };
   return (
     <div className="player-buttons">
       <button className="player-btn" onClick={togglePlay} title={playing ? "Pausa (k)" : "Riproduci (k)"}>

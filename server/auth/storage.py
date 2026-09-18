@@ -17,6 +17,10 @@ HISTORY_FILE = DATA_DIR / "history.json"
 AVATAR_CACHE_FILE = DATA_DIR / "channel_avatars.json"
 SUBS_FEED_CACHE_FILE = DATA_DIR / "subscriptions_feed_cache.json"
 OAUTH_SETUP_FILE = DATA_DIR / "oauth_setup.json"
+# Ultimo video "visto" per ogni canale iscritto, per l'indicatore delle
+# bollicine in home (vedi auth/channel_bubbles.py). Solo id di canale e di
+# video: nessuna credenziale, quindi NON va in FILE_RISERVATI.
+CHANNEL_SEEN_FILE = DATA_DIR / "channel_seen.json"
 
 # File che contengono credenziali: refresh token Google, client secret e la
 # sessione YouTube. Vanno scritti a 0600 — con i permessi di default (0644)

@@ -32,6 +32,7 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
       theater={player.theater} onToggleTheater={player.toggleTheater}
       onError={() => player.addToast("Errore stream — ricarica la pagina")} onNotice={player.addToast}
       autoplay={player.autoplay} fitScreen={player.fitScreen}
+      cast={cast} castMedia={player.castMedia} seekRequest={player.seekRequest}
     />
   );
 }
@@ -44,10 +45,10 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
  */
 export default function VideoMainPlayer({
   isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang, subtitleLangs,
-  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia,
+  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia, seekRequest,
 }) {
   const player = {
-    videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs, castMedia,
+    videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs, castMedia, seekRequest,
     subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen,
   };
   return (

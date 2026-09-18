@@ -15,7 +15,8 @@ export { CAST_UNAVAILABLE_MESSAGE, CAST_ERROR_MESSAGE } from "./castConstants";
  *   basta", si comanda dal telecomando della TV; `remote` è null.
  *
  * Consumato una volta sola in App/index.jsx e riesposto via CastContext
- * all'unico CastButton (pagina video), a CastRemote e alla diagnostica.
+ * al CastButton (nella barra dei comandi del player), a CastRemote e alla
+ * diagnostica.
  */
 const NATIVE = typeof window !== "undefined" && !!window.Capacitor?.isNativePlatform?.();
 

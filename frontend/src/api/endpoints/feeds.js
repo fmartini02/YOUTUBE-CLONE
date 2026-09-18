@@ -9,4 +9,11 @@ export const feedsEndpoints = {
   channelVideos: (id, limit = 30, offset = 0) =>
     apiFetch(`/api/channel/${id}/videos?limit=${limit}&offset=${offset}`),
   subsFeed: (limit = 30, offset = 0) => apiFetch(`/api/feed/subscriptions?limit=${limit}&offset=${offset}`),
+  // Riga delle "bollicine" in cima alla home: i canali a cui si è iscritti,
+  // ordinati per data dell'ultimo video, con `nuovo` per quelli che hanno
+  // pubblicato qualcosa dall'ultima visita.
+  channelBubbles: () => apiFetch("/api/feed/channel-bubbles"),
+  // Spegne il pallino di quel canale (scrittura: passa dalla guardia
+  // sull'Origin come tutte le altre, vedi CLAUDE.md).
+  markChannelSeen: (channelId) => apiFetch(`/api/channels/${channelId}/seen`, { method: "POST" }),
 };

@@ -99,6 +99,15 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       http://127.0.0.1:8097/api/watch/WRVsOCh907o` → **404**, `{"detail":"Video non trovato o non
       disponibile"}` (log: `[youtube] WRVsOCh907o: This video is not available`); un video valido
       (`dQw4w9WgXcQ`) continua a rispondere 200 coi campi giusti (nessuna regressione).
+- [x] **Capitoli, iscritti, descrizione intera** — `GET /api/watch/<vid>` torna anche `chapters`
+      (lista `{start, title}`, **vuota** e mai un errore per i video che non ne hanno),
+      `subscribers` (intero) e una `description` troncata a 5000 caratteri invece di 500.
+      **OK** — `curl -m90 http://127.0.0.1:8097/api/watch/rfscVS0vtbw` (freeCodeCamp, "Learn Python -
+      Full Course for Beginners") → **35 capitoli** (`{"start":0,"title":"Introduction"}`,
+      `{"start":105,"title":"Installing Python & PyCharm"}`, ...), `subscribers: 11900000`,
+      descrizione di 2211 caratteri (con il vecchio limite ne sarebbe arrivata meno di un quarto).
+      Video senza capitoli: `curl .../api/watch/dQw4w9WgXcQ` → `chapters: []`, `subscribers:
+      4540000`, descrizione 2375 caratteri.
 - [x] **Flusso video** — `GET /api/mux/<vid>?quality=720` restituisce byte MP4 in streaming
       (`curl -m 15 ... -o /tmp/p.mp4` produce un file non vuoto che `ffprobe` legge come frammentato).
       **OK** — su `dQw4w9WgXcQ?quality=720` il flusso ha dato ripetutamente 200 ma **0 byte**, con
@@ -256,6 +265,54 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       e barra di navigazione (`FullscreenWebChromeClient`).
       **non verificabile** — serve un browser reale (desktop) e un telefono Android con l'APK
       installato.
+- [x] **Striscia di azioni della pagina video** — sotto il titolo: pillola «mi piace» a sinistra,
+      poi le icone in cerchio con l'etichetta sotto (Condividi, Scarica), su una riga che scorre in
+      orizzontale invece di andare a capo. Funzionante quando **non** c'è nessun comando Cast qui
+      mentre non si sta trasmettendo (è nella barra del player) e quando invece, a trasmissione
+      attiva, compare la pillola «Interrompi» — senza la quale, col player non montato, non ci
+      sarebbe più modo di fermare la TV.
+      **OK** (browser headless, 390px e 1280px, `localhost:8099/watch?v=dQw4w9WgXcQ`) — la riga
+      mostra `👍 19,4 Mln`, `Condividi`, `Scarica` e nessuna icona Cast; la barra del player mostra
+      l'icona Cast fra il tempo e il CC. La pillola «Interrompi» (`isCasting`) **non verificabile**:
+      serve un Chromecast reale, assente qui.
+- [x] **Fila dei comandi del player sul telefono** — a 390-393px di larghezza tutti i pulsanti
+      stanno nella barra, compreso lo schermo intero in fondo a destra.
+      **OK** — aggiungendo l'icona Cast la fila sbordava di ~35px e il tasto schermo intero restava
+      tagliato a metà (`.player-buttons` `scrollWidth` 388 contro `clientWidth` 353 su Pixel 5).
+      Sotto i 900px il tasto «modalità cinema» ora è nascosto via CSS (`.player-theater-btn`): a
+      quella larghezza i correlati stanno già sotto al player, quindi non ha niente da allargare —
+      stesso motivo per cui non compare nell'APK. Rimisurato dopo la modifica: `scrollWidth` 353 =
+      `clientWidth` 353, nessun taglio.
+- [x] **Descrizione: card chiusa + pannello a comparsa** — sotto il titolo una card con tre pillole
+      (Mi piace / Visualizzazioni / Data) e due righe di descrizione con "...altro"; il tocco apre
+      un pannello che sale da sotto, alto al massimo il 75% dello schermo, con le linguette
+      Descrizione / Capitoli / Trascrizione. Funzionante quando: le ultime due linguette compaiono
+      **solo** se il video ha rispettivamente capitoli e sottotitoli; il player resta visibile sopra
+      il pannello; toccare un capitolo sposta il video **senza** chiudere il pannello; lo stesso
+      capitolo toccato due volte vale due volte; il tasto Indietro chiude il pannello invece di
+      lasciare la pagina; la trascrizione si scarica solo quando si apre quella linguetta.
+      **OK** (Chromium headless pilotato a mano, 1280x900 e 390x844, server su :8090) —
+      `/watch?v=a3IGUH9PUBw` (7 capitoli + 33 lingue di sottotitoli): card con `511 / Mi piace`,
+      `40,9 Mila / Visualizzazioni`, `17 ago 2026 / Data` e descrizione tagliata a 2 righe; il click
+      apre il pannello (675px su 900px di viewport = 75vh, `top=225`, player sopra); le tre
+      linguette ci sono tutte. Su `/watch?v=_68gGKI83LE` (9 capitoli, **zero** sottotitoli) le
+      linguette sono solo `Descrizione` e `Capitoli`, come deve essere. Capitolo "Display,
+      temperature e dissipazione" → il tempo del player passa da `0:01` a `2:19` e il pannello
+      resta aperto; `→` da tastiera porta a `2:29` e **lo stesso** capitolo ricliccato riporta a
+      `2:19` (il contatore `n` di `seekRequest` fa passare due richieste identiche). Linguetta
+      Trascrizione: prima "Caricamento trascrizione…", poi **366 righe** cliccabili (riga 40 →
+      `2:21`), **0** duplicati consecutivi. `window.ytproxyHandleBack()` → `true` e il pannello
+      sparisce dal DOM con l'URL invariato; senza pannello aperto → `false` (il tasto torna alla
+      navigazione normale). Click sullo sfondo: chiude. Tema chiaro (`data-theme="light"`):
+      pannello `rgb(255,255,255)` su testo `rgb(15,15,15)`, leggibile come lo scuro.
+- [x] **Lettura del .vtt per la trascrizione** — i sottotitoli automatici di YouTube ripetono ogni
+      riga nelle cue successive (effetto "riga che scorre") e portano un tag inline per parola:
+      la trascrizione mostrata non deve avere righe doppie né tag.
+      **OK** (provato sul file vero, non a mente: `curl -s localhost:8090/api/subtitles/-KxJVh3VcU8/it.vtt`,
+      recensione italiana di ~22 minuti, sottotitoli **auto-generati**) — 955 cue, 954 non vuote →
+      **478 righe** dopo la deduplica, **0** duplicati consecutivi e nessun `<c>`/`<00:00:01.234>`
+      nel testo. Controllo di non-regressione su sottotitoli **caricati a mano** (`5MgBikgcWnY`,
+      TED, inglese): 329 cue → **329 righe**, cioè la deduplica non tocca niente dove non serve.
 
 ## 4. Download e sottotitoli
 
@@ -313,6 +370,43 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       qui non ne restituisce: 0 risultati non è un successo del fallback, è l'assenza delle due fonti
       che dovrebbero alimentarlo. Nessun errore né 500 — l'endpoint non si rompe — ma questo non
       basta a dichiararlo funzionante secondo la definizione data.
+
+- [x] **Bollicine dei canali attivi** (server) — `GET /api/feed/channel-bubbles` elenca i canali
+      iscritti ordinati per ultimo video noto, con `nuovo` acceso finché quell'id non è stato visto,
+      e dichiara `source` (`cookie` / `cache` / `subs` / `nessuna`). Non fa mai partire
+      un'estrazione: legge solo le cache già presenti. `POST /api/channels/<cid>/seen` spegne
+      l'indicatore. Funzionante quando aprire un video **vecchio** di un canale **non** spegne
+      l'indicatore di uno nuovo.
+      **OK** (endpoint; la riga di avatar in home è lato frontend, ancora da fare) — con la `data/`
+      reale (niente cookie né OAuth): `curl http://127.0.0.1:8097/api/feed/channel-bubbles` →
+      `{"channels":[],"source":"nessuna"}`, 200, nessun 500. Con un `YTPROXY_DATA` di prova
+      (3 canali iscritti, cache feed con 3 video): i canali escono ordinati per data
+      (`UC_B` 20260915, `UC_A` 20260910, il canale senza video in coda con `nuovo:false`),
+      `source: "cache"`; `POST /api/channels/UC_B/seen` → `{"ok":true}`, ripetuto → `{"ok":false}`
+      (non riscrive il file); `POST /api/history` con il video **vecchio** di `UC_A` lascia
+      `nuovo:true`, con l'**ultimo** video lo porta a `false`; una voce di cronologia **senza**
+      `channel_id` risponde 200 senza eccezioni; dopo riavvio del server lo stato è ancora spento
+      (letto da `data/channel_seen.json`). Origine esterna:
+      `curl -X POST -H 'Origin: https://evil.example' .../api/channels/<cid>/seen` → **403**.
+
+- [x] **Bollicine dei canali attivi** (UI) — riga scorrevole di avatar in cima alla home, **sopra**
+      le chip e solo nella categoria "Tutti", con il pallino blu sui canali che hanno pubblicato
+      qualcosa di non ancora aperto. Funzionante quando: senza canali la striscia **non** compare
+      affatto (nessun errore in home, è decorativa), il tocco porta alla pagina del canale e spegne
+      il pallino **subito**, senza aspettare la risposta del server.
+      **OK** (browser headless a 390px, `/api/feed/channel-bubbles` simulato con 3 canali di cui 2
+      `nuovo` — sul server di prova non c'è né cookie né OAuth, quindi la risposta vera è
+      `{"channels":[],"source":"nessuna"}` e la riga sparisce come previsto): 3 bollicine, 2
+      pallini, nomi troncati su 2 righe; il click sulla prima porta a `/channel?id=UC1` e manda
+      `POST /api/channels/UC1/seen` (due volte: una dalla bollicina, una dalla pagina canale, che
+      la ripete fire-and-forget — è idempotente). Avatar via `proxyImg()` e senza `loading="lazy"`,
+      come le altre immagini YouTube.
+
+- [x] **Griglia video a colonna singola sul telefono** — sotto i 600px `.video-grid` passa a una
+      colonna sola e canale + statistiche stanno sulla **stessa** riga, separati da un "•".
+      **OK** (browser headless a 390px, pagina canale `UCPb7HS_gEFJYV-1IOrKIUKw`):
+      `grid-template-columns` calcolato `366px` (una colonna), meta su una riga
+      (`W I N D • 2 visualizzazioni • 17 set 2026`).
 
 ## 6. Canale e iscrizioni
 
@@ -565,6 +659,13 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
 
 ## 11. Cast
 
+- [x] **Posizione del comando Cast** — l'icona sta nella barra dei comandi del player, fra il tempo
+      e il CC (`variant="player"`, sola icona, stesso click e stesso tooltip della pillola); nella
+      striscia di azioni sotto il titolo resta **solo** la pillola «Interrompi», e solo mentre si
+      trasmette. È l'unico modo di fermare la TV quando il player non è montato.
+      **OK** (browser headless, desktop 1280px e Pixel 5) — icona Cast presente nella barra del
+      player in entrambi i casi, nessun comando Cast nella striscia di azioni. Il comportamento a
+      trasmissione attiva **non verificabile** senza un Chromecast reale.
 - [ ] **Disponibilità** — su Chrome/Edge/Brave desktop il `CastButton` è attivo; **nell'APK Android
       è attivo** (plugin nativo `YtCast`, Cast SDK di Android); su Electron e browser non Chromium
       resta **visibile e spiega il motivo** invece di sparire. Non c'è più il messaggio
