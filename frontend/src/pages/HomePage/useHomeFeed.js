@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../../api";
 import { PAGE_SIZE } from "./homeMessages";
 
+// Le categorie sono ricerche, ma la griglia della home sa mostrare solo video:
+// senza tipo=video la ricerca mescolerebbe canali e playlist, come su YouTube.
 function fetchPage(kind, page, category) {
-  if (kind === "search") return api.search(category, page);
+  if (kind === "search") return api.search(category, page, { tipo: "video" });
   return api.homeFeed(PAGE_SIZE, (page - 1) * PAGE_SIZE);
 }
 

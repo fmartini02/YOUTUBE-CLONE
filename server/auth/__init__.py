@@ -13,6 +13,7 @@ Mappa dei moduli:
   errors.py                 YouTubeAPIError
   state.py                  AuthState (stato in memoria) + load_state()
   mapping.py                voce grezza di yt-dlp -> formato frontend
+  mapping_search.py         voce di una ricerca -> card video/canale/playlist
   cookie_session.py         sessione cookie YouTube, crea_ydl()
   lazy_feed.py               LazyFeed: estrazione pigra a blocchi
   feed_cache.py              cache LRU dei LazyFeed aperti + lock

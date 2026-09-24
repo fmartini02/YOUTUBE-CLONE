@@ -81,8 +81,44 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       music`, `lofi study`, `lofi jazz`, `lofi asmr`, `lofi study music`, `lofi chill`); `q=how+to`
       → 8 suggerimenti diversi e attinenti (`how to save a life`, `how to fish`, ...). Nessun
       traceback nel log.
-- [ ] **Pagina Ricerca** — la UI mostra i risultati e lo scroll infinito carica la pagina successiva.
-      **non verificabile** — serve un browser reale (nessuna UI visiva in questo ambiente headless).
+- [x] **Risultati misti** — senza `tipo`, `/api/search` restituisce come YouTube video, canali e
+      playlist mescolati, ognuno con `kind` (`video` / `channel` / `playlist`); i Mix (`RD…`, tranne
+      le `RDCLAK…` di YouTube Music) sono scartati. Funzionante quando `q=notizie` contiene sia
+      `video` sia `channel`, e ogni canale ha `id` `UC…`, `name`, `avatar` con schema `https:`.
+      **OK** (2026-09-24) — `q=notizie` → 16 video + 4 canali (Sky News, 9,37 Mln iscritti, `@SkyNews`).
+- [x] **Filtro tipo** — `tipo=video|canale|playlist` restituisce solo quel `kind`; le playlist hanno
+      `video_id` (video in copertina). **OK** — `q=lofi&tipo=canale` → 20 `channel`;
+      `tipo=playlist` → 20 `playlist` (anche `page=2`), `video_id` presente; `tipo=video` → 20 `video`.
+- [x] **Filtro durata** — `durata=breve` (<4 min) / `media` (4-20) / `lunga` (>20) rispettato.
+      **OK** — `q=gatti&durata=breve` → durate 10-232s; `q=lofi&durata=media` → 0 fuori da 240-1200s;
+      `durata=lunga` → 0 sotto i 1200s. Nota: YouTube conta fra le "brevi" anche le dirette
+      (`q=lofi&durata=breve` dà solo live con durata nulla) — è il suo risultato, non un nostro errore.
+- [x] **Filtro data** — `data=ora|oggi|settimana|mese|anno`. **OK** — `q=cucina&data=settimana` →
+      date 18-24/09 (oggi 24/09); `data=ora` (prova sull'`sp` grezzo) → solo video del giorno.
+- [x] **Ordinamento** — `ordina=visualizzazioni` dà visualizzazioni decrescenti. **OK** — `q=gatti`:
+      709M, 350M, 150M, 133M, 93M… contro 150M, 2,3M, 16M… per pertinenza. L'ordinamento per data
+      **non c'è di proposito**: YouTube non lo rispetta più (`sp=CAI=` restituisce date fuori ordine),
+      vedi `server/ytdlp/search_filters.py`.
+- [x] **Filtri non validi o non applicabili** — ignorati, non errori; `filtri` nella risposta dice
+      quelli applicati. **OK** — `tipo=boh&ordina=data&durata=lunga&data=xx` → `filtri: {durata: lunga}`,
+      20 risultati; `tipo=canale&durata=lunga&data=oggi` → `filtri: {tipo: canale}`, solo canali.
+- [x] **Categorie della home** — restano solo video (`tipo=video`), perché la griglia usa `VideoCard`.
+      **OK** — `q=Musica&tipo=video` → 20 `video`.
+- [x] **Pagina Ricerca** — la UI mostra i risultati e lo scroll infinito carica la pagina successiva.
+      **OK** (Chromium headless di Playwright via script, porta 8099) — `q=lofi&tipo=video`: 20 → 40 card
+      scorrendo in fondo, nessun errore JS.
+- [x] **Barra Filtri** — il pulsante "Filtri" apre il pannello a 4 colonne; una scelta aggiorna l'URL
+      (`/search?q=…&tipo=…`), i filtri attivi compaiono come chip (un tocco li toglie); con tipo
+      canale/playlist durata e data sono disattivate; ricaricare e Indietro conservano i filtri.
+      **OK** — dopo Video + Più di 20 minuti + Visualizzazioni l'URL è
+      `?q=notizie&tipo=video&durata=lunga&ordina=visualizzazioni`, la ricarica mantiene i 3 chip e
+      le durate sono tutte >20 min; Indietro → `?q=notizie&tipo=video&durata=lunga`; con Canale 8
+      opzioni disattivate. A 390px pannello su 2 colonne, `scrollWidth` 390 (nessuno scroll orizzontale).
+- [x] **Card canale e playlist** — il canale ha logo tondo, handle, iscritti, descrizione e Iscriviti,
+      e il tocco apre `/channel?id=…`; la playlist ha la fascia "Playlist" e, finché non c'è una
+      pagina playlist (issue #12), apre il video in copertina. **OK** — clic su canale →
+      `/channel?id=UCSJ4gkVC6NrvII8umztf0Ow`; clic su playlist → `/watch?v=YOJsKatW-Ts`. Una copertina
+      può mancare perché YouTube stesso dà 404 (video in copertina rimosso): resta il riquadro grigio.
 
 ## 3. Riproduzione — è il cuore del progetto
 
