@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Query
 
 from auth import channel_avatars, feed_channel, feed_home, feed_related, feed_subscriptions
+from auth.feed_subscriptions_cookie import in_caricamento
 from auth.cookies import get_cookie_path
 from auth.state import state
 from ytdlp.helpers import ydl_opts_base
@@ -12,11 +13,17 @@ router = APIRouter()
 @router.get("/api/feed/subscriptions")
 async def subscription_feed(limit: int = 30, offset: int = 0):
     """Feed 'Iscrizioni': ultimi video di tutti i canali a cui sei iscritto, paginato."""
-    results = await feed_subscriptions.get_personalized_feed(state, ydl_opts_base)
+    # La prima pagina si accontenta del primo blocco (è il punto di scaricare
+    # a blocchi: vedere subito qualcosa); le successive aspettano quello che
+    # le copre.
+    needed = offset + limit if offset else 0
+    results = await feed_subscriptions.get_personalized_feed(state, ydl_opts_base, needed)
     return {
         "results": results[offset:offset + limit],
         "total": len(results),
-        "has_more": offset + limit < len(results),
+        # Col feed cookie ancora in arrivo a blocchi, "carica altri" va
+        # lasciato acceso anche se la lista finora non basta a riempirlo.
+        "has_more": offset + limit < len(results) or in_caricamento(state),
         "source": "cookies" if get_cookie_path() else "local",
     }
 

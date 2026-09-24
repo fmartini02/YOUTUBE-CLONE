@@ -5,6 +5,12 @@ config.py — costanti di tuning: feed pigri, OAuth, cache dei loghi canale.
 # 5 minuti: evita di ri-scaricare da YouTube ad ogni "carica altri" il feed
 # iscrizioni letto dai cookie.
 COOKIE_FEED_CACHE_TTL = 300
+# Il feed iscrizioni coi cookie si scarica a blocchi (vedi
+# feed_subscriptions_cookie): la pagina aspetta solo i primi SUBS_FEED_FIRST
+# video, gli altri fino a SUBS_FEED_MAX arrivano in background a blocchi da
+# FEED_CHUNK.
+SUBS_FEED_FIRST = 20
+SUBS_FEED_MAX = 100
 
 # Il feed home viene estratto PIGRAMENTE, un blocco alla volta, man mano che
 # l'utente scorre (vedi lazy_feed.LazyFeed): scaricarlo tutto in anticipo

@@ -43,6 +43,9 @@ class AuthState:
     # Cresce ad ogni invalidazione (iscrizione, cookie nuovi): un aggiornamento
     # partito PRIMA non deve rimettere in cache la lista di prima.
     cookie_feed_gen: int = 0
+    # True mentre cookie_feed_cache contiene solo i primi blocchi e gli altri
+    # stanno ancora arrivando (vedi feed_subscriptions_cookie).
+    cookie_feed_parziale: bool = False
     # Estrattori pigri tenuti vivi fra una richiesta e l'altra per poter
     # continuare ogni feed da dove era arrivato (vedi lazy_feed.LazyFeed): la
     # home e il mix dei video aperti di recente. Dict ordinato = cache LRU.

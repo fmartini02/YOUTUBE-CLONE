@@ -31,6 +31,7 @@ def scade_feed_cookie(state):
     state.cookie_feed_cache = []
     state.cookie_feed_cache_at = 0
     state.cookie_feed_gen += 1
+    state.cookie_feed_parziale = False
     _scrivi_json(COOKIE_FEED_CACHE_FILE, {})
 
 

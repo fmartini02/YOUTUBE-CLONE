@@ -18,7 +18,7 @@ AVATAR_CACHE_FILE = DATA_DIR / "channel_avatars.json"
 SUBS_FEED_CACHE_FILE = DATA_DIR / "subscriptions_feed_cache.json"
 # Ultima copia del feed 'Iscrizioni' letto coi cookie ({"at", "results"}): la
 # pagina la mostra subito anche dopo un riavvio, mentre si aggiorna in
-# background (vedi feed_subscriptions.get_personalized_feed). Solo metadati
+# background (vedi feed_subscriptions_cookie.get_cookie_feed). Solo metadati
 # dei video: nessuna credenziale, quindi NON va in FILE_RISERVATI.
 COOKIE_FEED_CACHE_FILE = DATA_DIR / "subscriptions_cookie_feed_cache.json"
 OAUTH_SETUP_FILE = DATA_DIR / "oauth_setup.json"
