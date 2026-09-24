@@ -1,5 +1,6 @@
 """feed_cache.py — cache LRU dei LazyFeed aperti e dei lock per feed."""
 from auth.config import MAX_OPEN_FEEDS
+from auth.subscriptions_state import scade_feed_cookie
 
 
 def drop_feed(state, key: str):
@@ -41,10 +42,15 @@ def invalidate_feeds(state):
     chiudere un feed fa salvare a yt-dlp la sua copia dei cookie, che
     sovrascriverebbe quelli appena importati con quelli della sessione
     vecchia.
+
+    Scade anche il feed 'Iscrizioni' letto coi cookie: ora sopravvive ai
+    riavvii (è su disco), e con cookie di un altro account mostrerebbe le
+    iscrizioni di quello vecchio.
     """
     for key in list(state.feeds):
         drop_feed(state, key)
         pota_lock(state, key)
+    scade_feed_cookie(state)
 
 
 def _libero(state, key):

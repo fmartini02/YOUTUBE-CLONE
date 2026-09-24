@@ -16,7 +16,8 @@ from typing import Optional
 
 from auth.storage import (
     TOKEN_FILE, SUBS_FILE, PREFS_FILE, HISTORY_FILE,
-    AVATAR_CACHE_FILE, SUBS_FEED_CACHE_FILE, CHANNEL_SEEN_FILE, _leggi_json,
+    AVATAR_CACHE_FILE, SUBS_FEED_CACHE_FILE, CHANNEL_SEEN_FILE, COOKIE_FEED_CACHE_FILE,
+    _leggi_json,
 )
 
 
@@ -36,6 +37,12 @@ class AuthState:
     channel_seen: dict = field(default_factory=dict)
     cookie_feed_cache: list = field(default_factory=list)
     cookie_feed_cache_at: float = 0
+    # Aggiornamento in background del feed cookie in corso (un asyncio.Task),
+    # così dieci visite di fila alla pagina non ne lanciano dieci.
+    cookie_feed_task: Optional[object] = None
+    # Cresce ad ogni invalidazione (iscrizione, cookie nuovi): un aggiornamento
+    # partito PRIMA non deve rimettere in cache la lista di prima.
+    cookie_feed_gen: int = 0
     # Estrattori pigri tenuti vivi fra una richiesta e l'altra per poter
     # continuare ogni feed da dove era arrivato (vedi lazy_feed.LazyFeed): la
     # home e il mix dei video aperti di recente. Dict ordinato = cache LRU.
@@ -47,6 +54,9 @@ class AuthState:
 
 def load_state() -> AuthState:
     """Carica tutto lo stato persistito su disco (vedi storage._leggi_json)."""
+    cookie_feed = _leggi_json(COOKIE_FEED_CACHE_FILE, {})
+    if not isinstance(cookie_feed, dict):
+        cookie_feed = {}
     return AuthState(
         token=_leggi_json(TOKEN_FILE, {}),
         subs=_leggi_json(SUBS_FILE, []),
@@ -55,6 +65,8 @@ def load_state() -> AuthState:
         avatar_cache=_leggi_json(AVATAR_CACHE_FILE, {}),
         subs_feed_cache=_leggi_json(SUBS_FEED_CACHE_FILE, []),
         channel_seen=_leggi_json(CHANNEL_SEEN_FILE, {}),
+        cookie_feed_cache=cookie_feed.get("results") or [],
+        cookie_feed_cache_at=cookie_feed.get("at") or 0,
     )
 
 

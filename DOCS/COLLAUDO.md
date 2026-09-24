@@ -434,6 +434,17 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       che dovrebbero alimentarlo. Nessun errore né 500 — l'endpoint non si rompe — ma questo non
       basta a dichiararlo funzionante secondo la definizione data.
 
+- [ ] **Feed iscrizioni veloce (cookie)** — con i cookie, una volta che una copia del feed esiste
+      (`data/subscriptions_cookie_feed_cache.json`), `GET /api/feed/subscriptions` risponde in
+      pochi ms anche a cache scaduta (>5 min) e dopo un riavvio del server: la copia vecchia esce
+      subito e l'aggiornamento gira in background (log `[auth] Cookie feed error` solo se fallisce),
+      visibile alla visita successiva. Iscriversi/disiscriversi o reimportare i cookie svuota la
+      copia (file a `{}`), e la visita dopo aspetta un'estrazione nuova.
+      **non verificabile qui con YouTube reale — manca il cookie**; logica provata con
+      un'estrazione finta da 1s: senza copia 1.01s, a copia scaduta 0.0s con un solo aggiornamento
+      in background anche su due visite, copia ricaricata dopo il riavvio, invalidazione durante
+      un aggiornamento in corso rispettata (cache e file restano vuoti).
+
 - [x] **Bollicine dei canali attivi** (server) — `GET /api/feed/channel-bubbles` elenca i canali
       iscritti ordinati per ultimo video noto, con `nuovo` acceso finché quell'id non è stato visto,
       e dichiara `source` (`cookie` / `cache` / `subs` / `nessuna`). Non fa mai partire

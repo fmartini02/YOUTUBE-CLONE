@@ -6,7 +6,7 @@ from auth.config import COOKIE_FEED_CACHE_TTL
 from auth.cookie_session import crea_ydl
 from auth.cookies import get_cookie_path
 from auth.mapping import is_video_entry, map_video_entry
-from auth.storage import SUBS_FEED_CACHE_FILE, _scrivi_json
+from auth.storage import COOKIE_FEED_CACHE_FILE, SUBS_FEED_CACHE_FILE, _scrivi_json
 
 
 async def _fetch_cookie_feed(ydl_opts_base_fn, cookie_path):
@@ -24,25 +24,51 @@ async def _fetch_cookie_feed(ydl_opts_base_fn, cookie_path):
         return None
 
 
+async def _aggiorna_feed_cookie(state, ydl_opts_base_fn, cookie_path, gen):
+    """
+    Riscarica il feed cookie e lo mette in cache (memoria + disco).
+
+    Se nel frattempo la cache è stata invalidata (iscrizione, cookie nuovi:
+    `cookie_feed_gen` è cambiato) il risultato si butta: è la lista di prima.
+    None = estrazione fallita, la copia vecchia resta; [] = YouTube non dà
+    niente (sessione scaduta), la copia vecchia sparisce e la pagina ripiega.
+    `gen` lo legge chi CREA il task: letto qui dentro, un'invalidazione fra
+    la creazione e il primo passo del task passerebbe inosservata.
+    """
+    results = await _fetch_cookie_feed(ydl_opts_base_fn, cookie_path)
+    if results is None or gen != state.cookie_feed_gen:
+        return None
+    state.cookie_feed_cache = results
+    state.cookie_feed_cache_at = time.time() if results else 0
+    _scrivi_json(COOKIE_FEED_CACHE_FILE, {"at": state.cookie_feed_cache_at, "results": results})
+    return results
+
+
 async def get_personalized_feed(state, ydl_opts_base_fn) -> list:
     """
-    Feed 'Iscrizioni': cookie → feed reale di YouTube (ordine loro), tenuto in
-    cache in memoria per qualche minuto; altrimenti la cache su disco
-    aggiornata in background da tutti i canali iscritti (vedi
-    refresh_subscriptions_feed), o un fetch a caldo ridotto se la cache è
-    ancora vuota (es. subito dopo il primo login).
+    Feed 'Iscrizioni': cookie → feed reale di YouTube (ordine loro);
+    altrimenti la cache su disco aggiornata in background da tutti i canali
+    iscritti (vedi refresh_subscriptions_feed), o un fetch a caldo ridotto se
+    la cache è ancora vuota (es. subito dopo il primo login).
+
+    Il feed cookie costa un'estrazione yt-dlp di qualche secondo (100 video,
+    più continuazioni in sequenza): se una copia c'è — anche scaduta, anche
+    di prima di un riavvio — si risponde con quella SUBITO e l'aggiornamento
+    parte in background (stale-while-revalidate, uno alla volta). Si aspetta
+    l'estrazione solo quando una copia non esiste proprio.
     """
     cookie_path = get_cookie_path()
     if cookie_path:
-        if state.cookie_feed_cache and time.time() - state.cookie_feed_cache_at < COOKIE_FEED_CACHE_TTL:
+        if state.cookie_feed_cache:
+            scaduta = time.time() - state.cookie_feed_cache_at >= COOKIE_FEED_CACHE_TTL
+            task = state.cookie_feed_task
+            if scaduta and (task is None or task.done()):
+                state.cookie_feed_task = asyncio.create_task(
+                    _aggiorna_feed_cookie(state, ydl_opts_base_fn, cookie_path, state.cookie_feed_gen))
             return state.cookie_feed_cache
-        results = await _fetch_cookie_feed(ydl_opts_base_fn, cookie_path)
+        results = await _aggiorna_feed_cookie(state, ydl_opts_base_fn, cookie_path, state.cookie_feed_gen)
         if results:
-            state.cookie_feed_cache = results
-            state.cookie_feed_cache_at = time.time()
             return results
-        if results is None and state.cookie_feed_cache:
-            return state.cookie_feed_cache  # stale, ma meglio di niente
 
     if state.subs_feed_cache:
         return state.subs_feed_cache

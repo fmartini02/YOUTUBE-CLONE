@@ -8,7 +8,7 @@ costo è accettabile — ma è il motivo per cui lo stato "sono iscritto?" si
 legge dalla copia locale e non chiedendolo a YouTube ad ogni pagina canale
 aperta.
 """
-from auth.storage import SUBS_FEED_CACHE_FILE, SUBS_FILE, _scrivi_json
+from auth.storage import COOKIE_FEED_CACHE_FILE, SUBS_FEED_CACHE_FILE, SUBS_FILE, _scrivi_json
 
 
 def is_subscribed(state, channel_id: str) -> bool:
@@ -24,9 +24,14 @@ def scade_feed_cookie(state):
     scaderla, per qualche minuto le Iscrizioni continuerebbero a mostrare i
     video di un canale appena lasciato — o a non mostrare quelli di uno
     appena aggiunto.
+
+    Vale anche per la copia su disco e per un aggiornamento in background
+    già partito: `cookie_feed_gen` gli impedisce di rimettere la lista vecchia.
     """
     state.cookie_feed_cache = []
     state.cookie_feed_cache_at = 0
+    state.cookie_feed_gen += 1
+    _scrivi_json(COOKIE_FEED_CACHE_FILE, {})
 
 
 def remember_sub(state, entry: dict):

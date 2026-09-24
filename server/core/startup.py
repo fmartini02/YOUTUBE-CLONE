@@ -1,7 +1,10 @@
 """startup.py — pulizia una tantum e avvio dello scheduler di sync all'avvio del server."""
+import asyncio
 import tempfile
 from pathlib import Path
 
+from auth import feed_subscriptions
+from auth.cookies import get_cookie_path
 from auth.state import state
 from auth.storage import proteggi_file_riservati
 from sync.scheduler import scheduler
@@ -11,6 +14,10 @@ from ytdlp.helpers import ydl_opts_base
 # (vedi il suo docstring), ma le installazioni già in giro hanno qui dentro
 # video interi che nessuno cancellerà mai. Si svuota all'avvio.
 VECCHIA_DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "ytproxy_cache"
+
+# Riferimento al preriscaldamento del feed iscrizioni: asyncio tiene solo
+# riferimenti deboli ai task, senza questo potrebbe sparire a metà.
+_preriscaldamento = None
 
 
 def _pulisci_cache_download():
@@ -41,3 +48,9 @@ async def on_startup():
     # sync/scheduler.py), quindi non serve un altro force_sync qui:
     # raddoppierebbe le richieste.
     scheduler.start(state, ydl_opts_base)
+    # Feed 'Iscrizioni' coi cookie: se la copia su disco è vecchia la si
+    # rinfresca subito, così la prima visita trova già la lista nuova.
+    global _preriscaldamento
+    if get_cookie_path():
+        _preriscaldamento = asyncio.create_task(
+            feed_subscriptions.get_personalized_feed(state, ydl_opts_base))
