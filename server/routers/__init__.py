@@ -17,6 +17,7 @@ nell'app da main.py.
   feeds.py                    home, iscrizioni, correlati, canale, loghi
   channel_bubbles.py          bollicine dei canali attivi + "canale visto"
   images.py                   proxy miniature/avatar di YouTube (LAN senza DNS)
+  sponsorblock.py             segmenti SponsorBlock (sponsor, intro…) con cache
   cookies.py                   cookies.txt manuale + import dal browser
   history.py                    cronologia locale
   prefs.py                      preferenze utente

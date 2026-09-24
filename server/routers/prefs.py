@@ -1,5 +1,5 @@
-"""prefs.py — preferenze utente (qualità, autoplay, tema, adatta allo schermo)."""
-from typing import Optional
+"""prefs.py — preferenze utente (qualità, autoplay, tema, adatta allo schermo, SponsorBlock)."""
+from typing import Dict, Literal, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -15,6 +15,11 @@ class PrefsUpdate(BaseModel):
     autoplay: Optional[bool] = None
     theme: Optional[str] = None
     fitScreen: Optional[bool] = None
+    sponsorBlock: Optional[bool] = None
+    # Categoria SponsorBlock → cosa fa il player. Validato qui: un valore
+    # sconosciuto salvato in prefs.json il player lo tratterebbe come "ignora"
+    # senza che nessuno se ne accorga.
+    sponsorCategories: Optional[Dict[str, Literal["salta", "mostra", "ignora"]]] = None
 
 
 @router.get("/api/prefs")

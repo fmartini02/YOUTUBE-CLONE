@@ -11,6 +11,8 @@ import PlayerButtonsBar from "./PlayerButtonsBar";
 import PlayerSettingsMenu from "./PlayerSettingsMenu";
 import MiniPlayerOverlay from "./MiniPlayerOverlay";
 import { usePipBridge } from "./usePipBridge";
+import { useSponsorBlock } from "./useSponsorBlock";
+import SponsorOverlay, { SponsorBarSegments } from "./SponsorOverlay";
 
 /**
  * Player con controlli propri, al posto di quelli nativi del browser.
@@ -188,6 +190,15 @@ export default function VideoPlayer({
   // dopo il flusso, e l'effetto di caricamento sotto non si riesegue per lei.
   const durataRef = useRef(duration);
   durataRef.current = duration;
+  // Riapertura del flusso chiesta e non ancora conclusa (da seekTo a quando
+  // `flusso.apri()` ha finito): in quel tempo il <video> ha ancora il buffer
+  // del flusso VECCHIO, che sta per essere sostituito. Un salto che lo
+  // trovasse "già scaricato" sposterebbe solo `currentTime` e la riapertura
+  // in coda lo cancellerebbe subito dopo — visto con "Annulla" di
+  // SponsorBlock premuto appena dopo un salto automatico: il video tornava a
+  // 0 per un istante e poi finiva di nuovo a fine sponsor. `riaperture` conta
+  // le aperture, così solo l'ultima può dichiarare concluso il volo.
+  const inVoloRef = useRef({ attivo: false, riaperture: 0 });
 
   // Serve già qui (non solo nell'effetto "Velocità" sotto): l'apertura del
   // flusso deve impostare la velocità scelta fin da subito, non aspettare un
@@ -219,6 +230,9 @@ export default function VideoPlayer({
     // solo se il buffering torna DOPO che il video ha già iniziato a scorrere
     // davvero (vedi "Recupero da uno stallo di rete" più sotto).
     hasPlayedRef.current = false;
+    const volo = inVoloRef.current;
+    const mia = ++volo.riaperture;
+    volo.attivo = true;
 
     // apri() decide da sé MediaSource-o-ripiego, chiama load() nel punto
     // giusto in entrambi i casi e applica subito `rate`/autoplay/preload —
@@ -245,7 +259,7 @@ export default function VideoPlayer({
       // mano, così resta il grande tasto play al posto dello spinner — un
       // tocco dell'utente è un gesto genuino e ha più probabilità di riuscire.
       onAutoplayFailed: () => setBuffering(false),
-    });
+    }).finally(() => { if (volo.riaperture === mia) volo.attivo = false; });
     if (!deveAndare) setBuffering(false);
     // `sorgente` e non `quality`/`fitScreen`: è l'unica parte della qualità
     // che entra nell'URL, e cambia solo nei punti visti in cima — un cambio di
@@ -340,7 +354,7 @@ export default function VideoPlayer({
     // browser lo ha spostato altrove (di norma a 0) il salto non è avvenuto e
     // si passa alla riapertura, invece di lasciare il video all'inizio con la
     // barra che dice un'altra cosa.
-    if (local >= 0 && isBuffered(v, local) && isSeekable(v, local)) {
+    if (!inVoloRef.current.attivo && local >= 0 && isBuffered(v, local) && isSeekable(v, local)) {
       v.currentTime = local;
       if (Math.abs(v.currentTime - local) < 0.5) {
         setPosition(t);
@@ -348,11 +362,20 @@ export default function VideoPlayer({
       }
     }
     // Altrimenti si riapre il flusso dal secondo richiesto: è l'unico modo di
-    // spostarsi davvero su uno stream generato al volo.
+    // spostarsi davvero su uno stream generato al volo. In volo da subito, non
+    // dall'effetto di caricamento: un secondo salto nello stesso istante
+    // (prima del render) non deve trovare la scorciatoia del buffer.
+    inVoloRef.current.attivo = true;
     setStream(s => ({ start: t, n: s.n + 1 }));
   }, [duration, stream.start]);
 
   const skip = useCallback((delta) => seekTo(position + delta), [seekTo, position]);
+
+  // ── SponsorBlock ───────────────────────────────────────────────────────
+  // Salta da sé i segmenti delle categorie scelte passando da seekTo (salto
+  // nel buffer o riapertura, come un salto dell'utente) e li colora sulla
+  // barra. Le guardie contro i salti doppi e i cicli sono in useSponsorBlock.js.
+  const sponsor = useSponsorBlock({ videoRef, videoId, position, duration, seekTo });
 
   // Salto chiesto da fuori (capitoli/trascrizione nel pannello descrizione).
   // Deps SOLO [seekRequest]: seekTo cambia identità ad ogni duration/
@@ -846,6 +869,11 @@ export default function VideoPlayer({
 
       <PlayerOverlays buffering={buffering} rebuffering={rebuffering} seekFlash={seekFlash} holding={holding} playing={playing} togglePlay={togglePlay} />
 
+      <SponsorOverlay
+        avviso={sponsor.avviso} onAnnulla={sponsor.annulla} onChiudi={sponsor.chiudiAvviso}
+        daMostrare={scrub == null ? sponsor.daMostrare : null} onSalta={sponsor.saltaOra}
+      />
+
       {/* ── Barra dei controlli ──────────────────────────────────────── */}
       <div className="player-bar" onPointerMove={e => { if (e.pointerType === "mouse") bumpControls(); }}>
         <div
@@ -864,6 +892,7 @@ export default function VideoPlayer({
           <div className="player-progress-track">
             <div className="player-progress-buffer" style={{ left: `${bufFromPct}%`, width: `${Math.max(0, bufPct - bufFromPct)}%` }} />
             <div className="player-progress-played" style={{ width: `${pct}%` }} />
+            <SponsorBarSegments segmenti={sponsor.segmenti} azioni={sponsor.azioni} duration={duration} />
             <div className="player-progress-handle" style={{ left: `${pct}%` }} />
           </div>
           {hover != null && duration > 0 && (

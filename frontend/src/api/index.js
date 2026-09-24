@@ -18,6 +18,7 @@ import { feedsEndpoints } from "./endpoints/feeds";
 import { historyEndpoints } from "./endpoints/history";
 import { prefsEndpoints } from "./endpoints/prefs";
 import { searchEndpoints } from "./endpoints/search";
+import { sponsorblockEndpoints } from "./endpoints/sponsorblock";
 import { streamingEndpoints } from "./endpoints/streaming";
 import { subscriptionsEndpoints } from "./endpoints/subscriptions";
 import { videosEndpoints } from "./endpoints/videos";
@@ -35,4 +36,5 @@ export const api = {
   ...cookiesEndpoints,
   ...historyEndpoints,
   ...prefsEndpoints,
+  ...sponsorblockEndpoints,
 };
