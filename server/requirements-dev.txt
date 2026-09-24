@@ -1,0 +1,4 @@
+# Solo per i test (server/tests, vedi CLAUDE.md): il server non ne ha bisogno.
+# httpx, usato da fastapi.testclient, è già in requirements.txt.
+-r requirements.txt
+pytest>=8.0

@@ -13,7 +13,7 @@ norm_check.py — verifica che il codice Python del server rispetti le regole
   - non più di 5 argomenti per funzione (self escluso)
 
 Uso:
-    python3 scripts/norm_check.py [percorsi...]   # default: server/ frontend/src/ electron/ scripts/
+    python3 scripts/norm_check.py [percorsi...]   # default: server/ frontend/src/ frontend/e2e/ electron/ scripts/
 Esce con codice 1 se trova violazioni, elencandole; 0 se tutto conforme.
 
 Il lato Python usa l'AST vero (preciso). Il lato JS/JSX (norm_check_js.py)
@@ -102,7 +102,7 @@ def controlla_file(path: Path) -> list:
 
 
 def main():
-    target_args = sys.argv[1:] or ["server", "frontend/src", "electron", "scripts"]
+    target_args = sys.argv[1:] or ["server", "frontend/src", "frontend/e2e", "electron", "scripts"]
     root = Path(__file__).parent.parent
     file_python, file_js = raccogli_file(target_args, root)
 

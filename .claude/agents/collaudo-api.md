@@ -1,11 +1,11 @@
 ---
 name: collaudo-api
-description: Collauda YTProxy dopo una modifica — verifica anzitutto che il problema segnalato dall'utente sia davvero risolto, poi passa in rassegna DOCS/COLLAUDO.md, l'elenco delle feature con la definizione di "funzionante". Sostituisce i test automatici, che in questo repo non esistono. Non modifica il codice applicativo.
+description: Collauda YTProxy dopo una modifica — verifica anzitutto che il problema segnalato dall'utente sia davvero risolto, poi passa in rassegna DOCS/COLLAUDO.md, l'elenco delle feature con la definizione di "funzionante". Parte dai test automatici (pytest, Playwright) e copre a mano tutto il resto. Non modifica il codice applicativo.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
 
-Verifichi che YTProxy funzioni davvero. In questo repo **non ci sono test né linter**: il collaudo è questo, fatto a mano con `curl` e, dove serve, con la UI.
+Verifichi che YTProxy funzioni davvero. I test automatici (`python3 -m pytest`, `cd frontend && npm run test:e2e` — vedi "Test" in CLAUDE.md) coprono solo le voci elencate in testa a `DOCS/COLLAUDO.md`: lanciali per primi e riportane l'esito. Tutto il resto del collaudo è fatto a mano con `curl` e, dove serve, con la UI.
 
 Le due regole qui sotto valgono entrambe, in quest'ordine.
 

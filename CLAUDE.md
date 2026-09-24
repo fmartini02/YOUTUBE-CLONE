@@ -32,6 +32,12 @@ npm run build                          # electron-builder → dist-electron/
 # a mano:
 cd frontend && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug
 
+# Test (vedi sezione "Test" più sotto)
+python3 -m pip install -r server/requirements-dev.txt   # una volta: pytest
+python3 -m pytest                      # backend, offline (~20s); le prove su YouTube vero: -m rete
+cd frontend && npm run test:e2e        # smoke test Playwright su un server offline :8098 (usa dist/)
+cd frontend && npm run test:e2e:rete   # comprese le prove @rete con un video vero
+
 # Docker (alternativa a scripts/start_server.sh — vedi sezione "Docker" più sotto; usa `make` o -f)
 make up                                # build immagine + avvio, dati persistiti in ./data
 make logs                              # output del server (al posto del terminale aperto)
@@ -40,13 +46,24 @@ make down                              # ferma; ./data resta sul disco
 docker compose -f docker/docker-compose.yml up -d --build
 ```
 
-Non ci sono test né linter configurati. Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s localhost:8090/api/watch/<id>`. Al posto della suite di test c'è **`DOCS/COLLAUDO.md`**: l'elenco di tutte le feature con, per ognuna, la condizione osservabile che deve valere perché si possa dire che funziona. Il progetto non si dichiara collaudato finché quelle voci non hanno tutte un esito (OK / KO / non verificabile), e chi aggiunge o cambia una feature aggiorna il file nello stesso passaggio.
+Non c'è un linter. I test automatici (`server/tests/` con pytest, `frontend/e2e/` con Playwright — vedi la sezione "Test") coprono le regressioni più costose: guardia sulle scritture, salvataggio JSON, selettori di formato, comando ffmpeg e sincronia sui salti, `LazyFeed`, `crea_ydl`, seek, mini-player, tema. Per il resto resta **`DOCS/COLLAUDO.md`**: l'elenco di tutte le feature con, per ognuna, la condizione osservabile che deve valere perché si possa dire che funziona, e in testa la tabella di quali voci sono coperte dai test. Il progetto non si dichiara collaudato finché quelle voci non hanno tutte un esito (OK / KO / non verificabile), e chi aggiunge o cambia una feature aggiorna il file nello stesso passaggio (e, se la voce è automatizzabile, il test). Per verificare a mano: `curl -s localhost:8090/api/health`, `curl -s localhost:8090/api/watch/<id>`.
 
 ## Stile: 5 funzioni per file, 25 righe per funzione, 5 argomenti
 
-Regola del progetto (ispirata alla norma 42): **nessun file Python o JS/JSX ha più di 5 funzioni/metodi/componenti**, **nessuna funzione supera le 25 righe di codice** (docstring, righe vuote e commenti non contano: la documentazione estesa in italiano è voluta, tagliarla per stare sotto soglia sarebbe peggio della violazione) **né i 5 argomenti** (`self` escluso). Eccezione dichiarata: i file di puro stile (CSS). `python3 scripts/norm_check.py` (senza argomenti verifica sia `server` che `frontend/src`, oppure si passa un percorso specifico) controlla entrambi: il backend Python con l'AST (`ast`, conteggio esatto), il frontend JS/JSX con un tokenizzatore euristico dedicato (`scripts/norm_check_js.py`, nessun vero parser disponibile) che si appoggia sulla formattazione a 2 spazi di Prettier per trovare le dichiarazioni di funzione a livello di modulo — è una rete, non una prova: due bug del tokenizzatore (un letterale regex scambiato per un commento, un apostrofo italiano scambiato per l'apertura di una stringa) sono stati trovati e corretti solo rileggendo a mano i falsi positivi che produceva.
+Regola del progetto (ispirata alla norma 42): **nessun file Python o JS/JSX ha più di 5 funzioni/metodi/componenti**, **nessuna funzione supera le 25 righe di codice** (docstring, righe vuote e commenti non contano: la documentazione estesa in italiano è voluta, tagliarla per stare sotto soglia sarebbe peggio della violazione) **né i 5 argomenti** (`self` escluso). Eccezione dichiarata: i file di puro stile (CSS). `python3 scripts/norm_check.py` (senza argomenti verifica `server` — test compresi —, `frontend/src`, `frontend/e2e`, `electron` e `scripts`, oppure si passa un percorso specifico) controlla entrambi: il backend Python con l'AST (`ast`, conteggio esatto), il frontend JS/JSX con un tokenizzatore euristico dedicato (`scripts/norm_check_js.py`, nessun vero parser disponibile) che si appoggia sulla formattazione a 2 spazi di Prettier per trovare le dichiarazioni di funzione a livello di modulo — è una rete, non una prova: due bug del tokenizzatore (un letterale regex scambiato per un commento, un apostrofo italiano scambiato per l'apertura di una stringa) sono stati trovati e corretti solo rileggendo a mano i falsi positivi che produceva.
 
 Conseguenza diretta sulla struttura: `server/auth.py` e `server/main.py` di una volta (66 e 55 funzioni) sono oggi due pacchetti, `server/auth/` e `server/routers/` — vedi sotto. Lo stesso vale lato frontend per i file grossi: `api.js`, `App.jsx` e i componenti/pagine più corposi (`Comments.jsx`, `VideoPlayer.jsx`, `HomePage.jsx`, `ChannelPage.jsx`, `VideoPage.jsx`, `SettingsPage.jsx`, `SubscriptionsPage.jsx`...) sono oggi pacchetti (`api/`, `App/`, `components/VideoPlayer/`, `pages/VideoPage/`...), grazie alla risoluzione delle directory di Vite (`import ... from "./Foo"` continua a funzionare se `Foo.jsx` diventa `Foo/index.jsx`). Quando una funzione supera i limiti, la correttezza vince sempre sul conteggio: se un vincolo documentato confligge con lo stile, si lascia il file fuori norma con un commento che lo spiega, non si forza la modularizzazione a costo di romperlo — è il caso di `VideoPlayer` (`components/VideoPlayer/index.jsx`): l'ordine degli effect "caricamento" e "velocità" (vedi sotto) deve restare adiacente e nello stesso ordine nello stesso file, quindi il componente resta volutamente sopra le 25 righe mentre tutto il resto (helper puri, barra della velocità, menu impostazioni, barra pulsanti, overlay) vive negli altri file dello stesso pacchetto.
+
+## Test
+
+Due suite, entrambe **senza rete di default**: le prove che parlano con YouTube vero sono marcate (`@pytest.mark.rete` / `@rete` nel titolo Playwright) ed escluse, perché lente e dipendenti da YouTube — un loro fallimento può essere YouTube che cambia, non una regressione.
+
+- **Backend** — `server/tests/`, `python3 -m pytest` dalla radice (`pytest.ini`: `pythonpath = server`, `-m "not rete"`). `conftest.py` imposta `YTPROXY_DATA` su una cartella temporanea **prima di qualunque import del server**: `auth/storage.py` legge `DATA_DIR` all'import e `auth/state.py` carica lo stato all'import, quindi importare prima vorrebbe dire leggere e riscrivere cookie, token e preferenze veri. Per lo stesso motivo le prove sui permessi e su `crea_ydl` usano i `COOKIE_FILE`/`TOKEN_FILE` del modulo, mai percorsi in `data/`. I selettori di formato girano sul vero motore di yt-dlp (`build_format_selector` su dizionari finti, nessuna rete); `test_ffmpeg_reale.py` esegue il comando di `_build_ffmpeg_cmd` su due file sintetici e controlla la sincronia **sul contenuto** (ogni pacchetto in uscita ha tempo e dimensione del pacchetto sorgente a quel tempo), come il collaudo manuale; `LazyFeed` usa il yt-dlp finto di `ydl_finto.py`.
+- **Frontend** — `frontend/e2e/`, `npm run test:e2e`. Playwright avvia da sé `server/tests/server_offline.py`: il server vero su `127.0.0.1:8098` con una `data/` temporanea, in cui l'unica cosa sostituita è `_mux_formats` (l'estrazione degli URL googlevideo) per l'id finto `ytproxyTEST`; tutto il resto della catena — `/api/mux`, ffmpeg, `X-Mux-*`, MSE — è quello vero. I metadati di quell'id e le chiamate che andrebbero comunque su YouTube (correlati, commenti, miniature) li finge il test con `page.route` (`e2e/aiuti.js`). Usa `frontend/dist`, come in produzione: dopo aver toccato `src/` serve `npm run build` prima dei test.
+- **I media finti** (`server/tests/media_finti.py`, generati una volta con ffmpeg in `/tmp/ytproxy-media-finti`) sono **VP9 + Opus**, non H.264/AAC: il Chromium di Playwright non ha i codec proprietari, e con H.264 MSE rifiuterebbe il flusso. E durano **10 minuti**: il player MSE scarica 60s avanti (`MSE_TARGET_AHEAD_S`), quindi con un video corto ogni salto cadrebbe nel buffer e nessuno passerebbe dal server con `start=`.
+- `@playwright/test` è fissato a `1.63.0`, la stessa versione di Playwright del Chromium già installato (`npx playwright install chromium` se manca).
+
+La norma dei 5/25/5 vale anche per i test. Il checker JS vede solo le dichiarazioni a colonna 0, quindi **non conta i callback di `test()`**: lì il limite (al massimo 5 test per file, 25 righe ciascuno) si rispetta a occhio. `frontend/e2e/` è nei percorsi di `norm_check.py` e dell'hook.
 
 ## Subagent
 
@@ -64,7 +81,7 @@ Dentro `.claude/` sono versionati (le uniche eccezioni alla riga `.claude/*` del
 
 | Comando | Cosa fa |
 |---|---|
-| `/commit-ready` | controlla che le modifiche pendenti siano pronte: rebuild `dist/`, `norm_check`, porta 8090 allineata, tre modifiche per una pagina nuova, `crea_ydl`, `COLLAUDO.md` aggiornato. Non committa. |
+| `/commit-ready` | controlla che le modifiche pendenti siano pronte: rebuild `dist/`, `norm_check`, porta 8090 allineata, tre modifiche per una pagina nuova, `crea_ydl`, `COLLAUDO.md` aggiornato, `pytest` / `test:e2e` verdi. Non committa. |
 | `/nuova-pagina <Nome> [/url]` | promemoria e passi per le tre modifiche coerenti di una pagina SPA (`App/routing.js`, `App/AppRoutes.jsx`, `spa_routes()`). |
 | `/collaudo [problema]` | invoca il subagent `collaudo-api` sul problema indicato (o dedotto dal diff), poi su `DOCS/COLLAUDO.md`. |
 
@@ -75,7 +92,7 @@ Dentro `.claude/` sono versionati (le uniche eccezioni alla riga `.claude/*` del
 **Hook** (`.claude/settings.json`, ora versionato):
 
 - `Stop` / `SubagentStop` → `scripts/rebuild_frontend.sh` (versionato): ricostruisce `dist/` se e solo se i sorgenti sotto `frontend/` sono più recenti del build — no-op veloce altrimenti, silenzioso se Node non c'è. Non fa mai commit: `git add frontend/dist` resta manuale. Così `dist/` non resta mai indietro rispetto ai `.jsx`.
-- `PostToolUse` (Edit/Write/MultiEdit) → `scripts/norm_check_hook.py` (versionato): dopo ogni scrittura lancia `norm_check.py` sul **solo** file toccato, se è un `.py`/`.js`/`.jsx` sotto `server/`, `frontend/src/`, `electron/` o `scripts/`. Se ci sono violazioni della regola "stile 42" le rimette nel contesto (exit 2); non annulla la modifica né blocca — è un promemoria, come il rebuild.
+- `PostToolUse` (Edit/Write/MultiEdit) → `scripts/norm_check_hook.py` (versionato): dopo ogni scrittura lancia `norm_check.py` sul **solo** file toccato, se è un `.py`/`.js`/`.jsx` sotto `server/`, `frontend/src/`, `frontend/e2e/`, `electron/` o `scripts/`. Se ci sono violazioni della regola "stile 42" le rimette nel contesto (exit 2); non annulla la modifica né blocca — è un promemoria, come il rebuild.
 
 Chi clona il repo eredita gli hook così come sono. Chi non usa Claude Code lancia `rebuild_frontend.sh` / `norm_check.py` a mano (o il solito `npm run build`).
 

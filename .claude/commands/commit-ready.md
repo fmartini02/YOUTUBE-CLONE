@@ -1,6 +1,6 @@
 ---
 description: Verifica che le modifiche pendenti siano pronte per il commit (rebuild dist/, norm_check, controlli del repo)
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(python3 scripts/norm_check.py:*), Bash(bash scripts/rebuild_frontend.sh), Read, Grep, Glob
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(python3 scripts/norm_check.py:*), Bash(bash scripts/rebuild_frontend.sh), Bash(python3 -m pytest:*), Bash(npm run test:e2e:*), Read, Grep, Glob
 ---
 
 Controlla se le modifiche pendenti sono pronte per il commit. **Non committare**, riporta solo l'esito.
@@ -19,6 +19,7 @@ Controlla se le modifiche pendenti sono pronte per il commit. **Non committare**
 5. **crea_ydl**: se il diff istanzia `yt_dlp.YoutubeDL(` direttamente invece di `crea_ydl()`, segnalalo.
 6. **Segreti**: nessun contenuto di `data/cookies.txt`, token OAuth o client secret nel diff.
 7. **COLLAUDO.md**: se la modifica aggiunge/cambia/rimuove una feature, `DOCS/COLLAUDO.md` va aggiornato nello stesso commit.
+8. **Test**: `python3 -m pytest` dalla radice se il diff tocca `server/`; `cd frontend && npm run test:e2e` se tocca `frontend/` (dopo il rebuild del passo 1: i test usano `dist/`). Un comportamento coperto che cambia deve cambiare anche il suo test; una feature nuova automatizzabile porta il suo test e la riga nella tabella in testa a `DOCS/COLLAUDO.md`.
 
 ## Resoconto
 
