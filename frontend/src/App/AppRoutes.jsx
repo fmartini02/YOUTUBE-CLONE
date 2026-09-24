@@ -23,7 +23,7 @@ export default function AppRoutes({ nav }) {
   return (
     <>
       {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
-      {page === "search"        && <SearchPage query={pageParams.query} navigate={navigate} />}
+      {page === "search"        && <SearchPage params={pageParams} navigate={navigate} />}
       {page === "subscriptions" && <SubscriptionsPage navigate={navigate} onSubsChange={loadAuthStatus} authStatus={authStatus} />}
       {page === "channel"       && <ChannelPage channelId={pageParams.channelId} channelName={pageParams.channelName} navigate={navigate} onSubsChange={loadAuthStatus} />}
       {page === "settings"      && <SettingsPage navigate={navigate} />}
