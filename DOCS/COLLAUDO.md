@@ -199,6 +199,20 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **OK** (2026-09-24, Chromium bundled): `O8Yu1E8Blxs` (84s), salto a 40 → prima (anche su
       `main`) riapertura a `start=84.08` e fine immediata; dopo, playhead 42, buffer fino a 84.12,
       nessuna riapertura. Salto a 67.2 → barra 84/84 insieme a `ended=true`.
+- [x] **Dopo un salto corto (→, ←, doppio tocco) il video non resta in pausa** — un salto dentro
+      al buffer, a video in riproduzione, continua a scorrere da solo: nessun evento `pause`, e
+      nessuna richiesta `/api/mux` nuova. Causa: con MSE il salto sposta solo `currentTime`, il
+      browser emette `waiting` mentre `seeking` è vero, e il recupero da stallo di rete lo
+      prendeva per uno stallo — pausa, poi ripresa solo al cambiare di `bufferedEnd`/`position`,
+      che a download finito non cambiano più. Ora un `waiting` a `seeking` vero non è uno stallo
+      (`attesaSaltoRef` in `components/VideoPlayer/index.jsx`). Il recupero da uno stallo vero
+      deve restare invariato: pausa, poi ripresa da sola con `REBUFFER_MARGIN_S` di buffer.
+      **OK** (2026-09-24, Chromium bundled + server reale): `O8Yu1E8Blxs` (84s, tutto scaricato),
+      → a 66 → prima (build su questo ramo senza la correzione) `waiting,pause`, fermo a 76 per
+      sempre 2/2; dopo, `waiting,playing`, arriva a 83.8 senza pause 3/3. `dQw4w9WgXcQ`, 6 salti
+      → nel buffer: prima un `pause` spurio su ogni salto, dopo nessuno, 0/6 fermi. Stallo vero
+      (ffmpeg sospeso con `SIGSTOP`): `waiting` a `seeking` falso → pausa → ripresa da sola con
+      6.9s di buffer dopo `SIGCONT`.
 - [x] **Sincronia audio/video dopo un salto (labiale)** — dopo qualunque salto (barra, ←/→,
       capitoli) la voce resta sul movimento delle labbra per tutto il resto del video, su ogni
       punto e ogni codec. Condizione osservabile: su `/api/mux?...&start=X&tempi=sorgente`

@@ -252,12 +252,26 @@ export default function VideoPlayer({
   // giusta anche qui, per lo stesso motivo dell'effetto di caricamento sopra:
   // se l'utente ha già messo in pausa lui stesso, un `waiting` residuo non
   // deve far ripartire nulla da solo.
+  //
+  // Non è uno stallo nemmeno il `waiting` di un salto dentro al buffer (→, ←,
+  // doppio tocco: con MSE `seekable` copre tutto il video e seekTo sposta solo
+  // `currentTime`): il browser lo emette mentre `seeking` è vero, con
+  // `playing` e `hasPlayedRef` ancora veri. Preso per uno stallo, metteva in
+  // pausa il video, e la ripresa qui sotto — che riparte solo quando cambiano
+  // `bufferedEnd`/`position` — poteva non scattare più: `position` era già
+  // stata portata al punto chiesto da seekTo, e a download finito (o in pausa)
+  // il buffer non cresce. Il video restava fermo dopo un salto corto. Per
+  // questo `attesaSaltoRef` si legge al momento dell'evento, non dopo: a
+  // effect eseguito il salto potrebbe già essere concluso. Un vero stallo
+  // successivo al salto emette un `waiting` nuovo, a `seeking` falso.
   const rebufferingRef = useRef(false);
+  const attesaSaltoRef = useRef(false);
   const [rebuffering, setRebuffering] = useState(false);
 
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !buffering || !hasPlayedRef.current || !playing || rebufferingRef.current) return;
+    if (attesaSaltoRef.current) return;
     rebufferingRef.current = true;
     setRebuffering(true);
     v.pause();
@@ -694,7 +708,11 @@ export default function VideoPlayer({
         onContextMenu={touch ? e => e.preventDefault() : undefined}
         onPlay={() => { setPlaying(true); bumpControls(); }}
         onPause={() => { setPlaying(false); setControlsVisible(true); }}
-        onWaiting={() => setBuffering(true)}
+        onWaiting={() => {
+          // Letto qui e non nell'effect: vedi "Recupero da uno stallo di rete".
+          attesaSaltoRef.current = !!videoRef.current?.seeking;
+          setBuffering(true);
+        }}
         onPlaying={() => { setBuffering(false); hasPlayedRef.current = true; }}
         onCanPlay={() => setBuffering(false)}
         onLoadedMetadata={applyTextTrack}
