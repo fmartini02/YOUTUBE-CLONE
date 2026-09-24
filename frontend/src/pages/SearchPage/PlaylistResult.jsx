@@ -16,33 +16,23 @@ function PlaylistCover({ p }) {
 
 /**
  * Risultato di tipo playlist: copertina con la fascia "Playlist", titolo e
- * canale.
- *
- * Una pagina playlist non c'è ancora (issue #12): per ora la card apre il
- * video che la playlist ha in copertina (`video_id`, ricavato dal server
- * dall'URL della miniatura), che di solito è il primo. Quando la pagina
- * arriverà, basterà cambiare `apri`. Senza `video_id` la card non porta da
- * nessuna parte e lo dice, invece di sembrare rotta.
+ * canale. Porta alla pagina della playlist (/playlist?list=…), da cui c'è
+ * "Riproduci tutto" — come la card della scheda Playlist del canale, non al
+ * primo video.
  */
 export default function PlaylistResult({ p, navigate }) {
-  const apri = p.video_id ? () => navigate("video", { videoId: p.video_id }) : null;
+  const apri = () => navigate("playlist", { listId: p.id });
   return (
-    <div
-      className={`search-card${apri ? "" : " disabled"}`}
-      title={apri ? "Apre il video in copertina della playlist" : "Playlist non apribile"}
-      onClick={e => { if (!daLinkCanale(e)) apri?.(); }}
-    >
+    <div className="search-card" onClick={e => { if (!daLinkCanale(e)) apri(); }}>
       <PlaylistCover p={p} />
       <div className="search-meta">
         <div className="search-title">{p.title}</div>
         <div className="search-channel">
           <ChannelLink channelId={p.channel_id} name={p.channel} navigate={navigate} />
         </div>
-        {apri && (
-          <div className="search-actions" onClick={e => e.stopPropagation()}>
-            <button className="action-btn primary" onClick={apri}>▶ Guarda</button>
-          </div>
-        )}
+        <div className="search-actions" onClick={e => e.stopPropagation()}>
+          <button className="action-btn primary" onClick={apri}>▶ Visualizza la playlist</button>
+        </div>
       </div>
     </div>
   );

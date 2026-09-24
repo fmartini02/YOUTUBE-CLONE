@@ -26,6 +26,14 @@ RELATED_MAX = 2000             # nessuno scorre così tanto la sidebar dei corre
 RELATED_SEARCH_MAX = 60
 CHANNEL_CHUNK = 30             # la scheda "Video" di un canale pagina a ~30
 CHANNEL_MAX = 600              # 600 video sono già anni di caricamenti per un canale
+# Una playlist arriva a pagine di 100 da YouTube: blocchi da 50 tengono ogni
+# richiesta a mezza continuazione. 5000 è il massimo di video che YouTube
+# ammette in una playlist.
+PLAYLIST_CHUNK = 50
+PLAYLIST_MAX = 5000
+# La scheda "Playlist" di un canale si legge tutta in una volta (niente
+# LazyFeed: le sue voci non sono video, vedi auth/channel_playlists.py).
+CHANNEL_PLAYLISTS_MAX = 200
 # Ogni feed aperto tiene viva un'istanza di yt-dlp: la home più i mix degli
 # ultimi video guardati bastano, gli altri si chiudono.
 MAX_OPEN_FEEDS = 6
@@ -66,3 +74,7 @@ AVATAR_MISS_TTL = 86400
 # Quanti video tenere nella cronologia. È il taglio applicato sia in memoria
 # sia sul file, sulla lista ordinata dal più recente al più vecchio.
 HISTORY_MAX = 500
+
+# Quanti video può tenere la coda "Guarda più tardi" (auth/watch_later.py).
+# Oltre, aggiungere un video toglie il più vecchio: è una coda, non un archivio.
+WATCH_LATER_MAX = 500

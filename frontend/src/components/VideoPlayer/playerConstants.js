@@ -59,3 +59,7 @@ export const MSE_POLL_MS_PAUSA = 5000;
 // senza un tetto l'apertura del flusso resterebbe appesa per sempre invece di
 // ripiegare su <video src>.
 export const MSE_SOURCEOPEN_TIMEOUT_MS = 5000;
+// Quanto vicino alla durata deve stare la posizione perché un `ended` valga
+// come fine vera (onEnded del player → video successivo della playlist). Un
+// flusso chiuso per rinuncia dopo gli errori di rete finisce a metà.
+export const FINE_VERA_S = 3;

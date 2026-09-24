@@ -52,8 +52,8 @@ def _map_playlist(e: dict) -> dict:
     """
     Card di una playlist. yt-dlp nella ricerca non dà il numero di video;
     dà però la copertina, e con lei `video_id`: il video che la playlist
-    mostra in copertina, che il frontend apre finché non c'è una pagina
-    playlist (issue #12).
+    mostra in copertina. La card del frontend apre la pagina playlist
+    (`id`); `video_id` resta come informazione in più.
     """
     thumb = _miniatura_grande(e)
     trovato = _VIDEO_IN_MINIATURA.search(thumb or "")

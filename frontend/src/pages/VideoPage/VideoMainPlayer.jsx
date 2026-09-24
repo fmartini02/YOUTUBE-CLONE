@@ -34,6 +34,7 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
       autoplay={player.autoplay} fitScreen={player.fitScreen}
       cast={cast} castMedia={player.castMedia} seekRequest={player.seekRequest}
       mini={player.widget?.mini} onExpand={player.widget?.onExpand} onClose={player.widget?.onClose}
+      onEnded={player.onEnded}
     />
   );
 }
@@ -46,11 +47,11 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
  */
 export default function VideoMainPlayer({
   isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang, subtitleLangs,
-  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia, seekRequest, widget,
+  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia, seekRequest, widget, onEnded,
 }) {
   const player = {
     videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs, castMedia, seekRequest,
-    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, widget,
+    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, widget, onEnded,
   };
   return (
     <>

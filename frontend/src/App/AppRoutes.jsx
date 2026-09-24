@@ -5,6 +5,8 @@ import SubscriptionsPage from "../pages/SubscriptionsPage";
 import ChannelPage from "../pages/ChannelPage";
 import SettingsPage from "../pages/SettingsPage";
 import HistoryPage from "../pages/HistoryPage";
+import PlaylistPage from "../pages/PlaylistPage";
+import { paramsVideo } from "./navHistory";
 
 /**
  * Route "finte" a mano (vedi routing.js): una sola pagina montata alla volta —
@@ -19,7 +21,7 @@ import HistoryPage from "../pages/HistoryPage";
  * condizionali attorno.
  */
 export default function AppRoutes({ nav }) {
-  const { page, pageParams, navigate, authStatus, loadAuthStatus, widget } = nav;
+  const { page, pageParams, navigate, authStatus, loadAuthStatus, widget, lista } = nav;
   return (
     <>
       {page === "home"          && <HomePage navigate={navigate} authStatus={authStatus} />}
@@ -28,10 +30,12 @@ export default function AppRoutes({ nav }) {
       {page === "channel"       && <ChannelPage channelId={pageParams.channelId} channelName={pageParams.channelName} navigate={navigate} onSubsChange={loadAuthStatus} />}
       {page === "settings"      && <SettingsPage navigate={navigate} />}
       {page === "history"       && <HistoryPage navigate={navigate} />}
+      {page === "playlist"      && <PlaylistPage listId={pageParams.listId} navigate={navigate} />}
       {widget && (
         <VideoPage
-          videoId={widget} navigate={navigate} authStatus={authStatus} onSubsChange={loadAuthStatus}
-          mini={page !== "video"} onExpand={() => navigate("video", { videoId: widget })} onClose={nav.chiudiWidget}
+          videoId={widget} listId={lista} navigate={navigate} authStatus={authStatus} onSubsChange={loadAuthStatus}
+          mini={page !== "video"} onExpand={() => navigate("video", paramsVideo(widget, lista))} onClose={nav.chiudiWidget}
+          onAdvanceMini={nav.cambiaWidget}
         />
       )}
     </>

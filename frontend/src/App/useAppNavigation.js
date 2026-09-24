@@ -47,7 +47,8 @@ function usePopStateSync(setNav, depthRef, castRef) {
 export function useAppNavigation(mobileLayout, setSidebarOpen, castRef) {
   const [nav, setNav] = useState(() => {
     const { page, params } = urlToPage();
-    return { page, params, widget: page === "video" ? params.videoId || null : null };
+    const video = page === "video";
+    return { page, params, widget: video ? params.videoId || null : null, lista: video ? params.listId || null : null };
   });
   // Quante pagine sono state aperte da dentro l'app: serve al tasto Indietro
   // di Android per sapere se c'è ancora dove tornare.
@@ -77,7 +78,13 @@ export function useAppNavigation(mobileLayout, setSidebarOpen, castRef) {
   }, [mobileLayout, setSidebarOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // X del widget: il video si ferma e la pagina video si smonta (chiude il flusso).
-  const chiudiWidget = useCallback(() => setNav(n => ({ ...n, widget: null })), []);
+  const chiudiWidget = useCallback(() => setNav(n => ({ ...n, widget: null, lista: null })), []);
 
-  return { page: nav.page, pageParams: nav.params, widget: nav.widget, navigate, chiudiWidget, depthRef };
+  // Video successivo di una playlist mentre il video è nel widget: cambia solo
+  // il widget. Niente cronologia da toccare — la voce in cima è la pagina
+  // sotto il widget, non il video (vedi navHistory.js) — e niente navigate,
+  // che riporterebbe il video a pagina intera.
+  const cambiaWidget = useCallback((videoId, listId) => setNav(n => ({ ...n, widget: videoId, lista: listId || null })), []);
+
+  return { page: nav.page, pageParams: nav.params, widget: nav.widget, lista: nav.lista, navigate, chiudiWidget, cambiaWidget, depthRef };
 }

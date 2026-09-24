@@ -27,6 +27,8 @@ function ChannelEmpty({ emptyReason, navigate }) {
   );
 }
 
+export { SkeletonGrid };
+
 export default function ChannelBody({ loading, videos, emptyReason, navigate, avatar, sentinelRef, loadingMore }) {
   if (loading) return <SkeletonGrid count={12} />;
   if (videos.length === 0) return <ChannelEmpty emptyReason={emptyReason} navigate={navigate} />;
