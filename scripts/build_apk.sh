@@ -31,6 +31,130 @@ for arg in "$@"; do
   esac
 done
 
+# ── Barra di avanzamento ──────────────────────────────────────
+# I passi lunghi (npm, vite, cap sync, Gradle) girano in background con
+# l'output in un log, e intanto l'ultima riga del terminale mostra una barra
+# complessiva: ogni passo ha un peso (Gradle è di gran lunga il più lungo),
+# e dentro Gradle l'avanzamento è reale — si contano le righe "> Task" del
+# log contro il totale della build precedente, salvato in .gradle/ (che
+# sopravvive a --clean). Alla prima build il totale è una stima.
+# Se l'output non è un terminale (CI, redirect su file) niente barra:
+# i comandi stampano come prima.
+LOG_DIR="$DIR/dist-android"
+LOG="$LOG_DIR/build.log"
+mkdir -p "$LOG_DIR"
+: > "$LOG"
+TASK_COUNT_FILE="$ANDROID_DIR/.gradle/ytproxy-task-count"
+GRADLE_TASKS_STIMA=120
+
+BAR_TTY=0
+[ -t 1 ] && BAR_TTY=1
+STEP_N=0
+STEP_COUNT=0      # impostati prima del primo passo
+PESO_TOTALE=0
+PESO_FATTO=0
+BAR_PID=""
+
+# Il cursore torna visibile e il passo in corso si ferma anche con Ctrl-C.
+bar_cleanup() {
+  [ -n "$BAR_PID" ] && kill "$BAR_PID" 2>/dev/null
+  [ $BAR_TTY -eq 1 ] && tput cnorm 2>/dev/null
+  return 0
+}
+trap bar_cleanup EXIT
+trap 'echo ""; echo "  ✋ Interrotto."; exit 130' INT TERM
+
+# Una riga: spinner, passo, barra, percentuale complessiva, tempo del passo.
+bar_draw() {
+  local pct=$1 label=$2 info=$3 secs=$4 spin=$5
+  local width=28 filled fill empty
+  filled=$((pct * width / 100))
+  printf -v fill '%*s' "$filled" ''
+  printf -v empty '%*s' "$((width - filled))" ''
+  fill=${fill// /█}
+  empty=${empty// /░}
+  printf '\r\033[K  %s [%d/%d] %-26.26s %s%s %3d%%  %02d:%02d%s' \
+    "$spin" "$STEP_N" "$STEP_COUNT" "$label" "$fill" "$empty" "$pct" \
+    $((secs / 60)) $((secs % 60)) "$info"
+}
+
+# Frazione (per mille) del passo Gradle in corso, dai task già stampati.
+gradle_permille() {
+  local log=$1 fatti totale
+  fatti=$(grep -c '^> Task ' "$log" 2>/dev/null || true)
+  totale=$(cat "$TASK_COUNT_FILE" 2>/dev/null || echo $GRADLE_TASKS_STIMA)
+  [ "$totale" -gt 0 ] 2>/dev/null || totale=$GRADLE_TASKS_STIMA
+  local pm=$((fatti * 1000 / totale))
+  [ $pm -gt 990 ] && pm=990
+  echo "$pm $fatti"
+}
+
+# run_step PESO "Etichetta" [--gradle] comando args...
+# Esegue il comando: in un terminale con la barra e l'output nel log,
+# altrimenti in chiaro. Se fallisce mostra la coda del log ed esce.
+run_step() {
+  local peso=$1 label=$2 gradle=0
+  shift 2
+  [ "$1" = "--gradle" ] && { gradle=1; shift; }
+  STEP_N=$((STEP_N + 1))
+  echo "━━ [$STEP_N/$STEP_COUNT] $label ━━" >> "$LOG"
+
+  if [ $BAR_TTY -eq 0 ]; then
+    echo "[$STEP_N/$STEP_COUNT] $label"
+    "$@" 2>&1 | tee -a "$LOG"
+    local rc=${PIPESTATUS[0]}
+    [ "$rc" -eq 0 ] || exit "$rc"
+    PESO_FATTO=$((PESO_FATTO + peso))
+    return 0
+  fi
+
+  local step_log="$LOG_DIR/.step.log"
+  : > "$step_log"
+  tput civis 2>/dev/null
+  "$@" > "$step_log" 2>&1 &
+  BAR_PID=$!
+  local start=$SECONDS i=0 pm info fatti
+  local spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  while kill -0 "$BAR_PID" 2>/dev/null; do
+    pm=0 info=""
+    if [ $gradle -eq 1 ]; then
+      read -r pm fatti < <(gradle_permille "$step_log")
+      info="  ($fatti task)"
+    fi
+    bar_draw $(( (PESO_FATTO * 1000 + peso * pm) / (PESO_TOTALE * 10) )) \
+      "$label" "$info" $((SECONDS - start)) "${spin[i % 10]}"
+    i=$((i + 1))
+    sleep 0.2
+  done
+  local rc=0
+  wait "$BAR_PID" || rc=$?
+  BAR_PID=""
+  tput cnorm 2>/dev/null
+  cat "$step_log" >> "$LOG"
+  local secs=$((SECONDS - start))
+
+  if [ $rc -ne 0 ]; then
+    printf '\r\033[K  ❌ %s fallito (%ds). Ultime righe del log:\n\n' "$label" "$secs"
+    tail -n 30 "$step_log" | sed 's/^/     /'
+    printf '\n  Log completo: %s\n' "$LOG"
+    exit "$rc"
+  fi
+  if [ $gradle -eq 1 ]; then
+    fatti=$(grep -c '^> Task ' "$step_log" || true)
+    [ "$fatti" -gt 0 ] && echo "$fatti" > "$TASK_COUNT_FILE"
+  fi
+  rm -f "$step_log"
+  PESO_FATTO=$((PESO_FATTO + peso))
+  printf '\r\033[K  ✓  %s (%ds)\n' "$label" "$secs"
+}
+
+# Registra un passo nel conteggio prima di partire, così [i/N] e le
+# percentuali sono giuste fin dal primo.
+plan_step() {
+  STEP_COUNT=$((STEP_COUNT + 1))
+  PESO_TOTALE=$((PESO_TOTALE + $1))
+}
+
 echo ""
 echo "  ▶  YTProxy — build APK"
 echo ""
@@ -210,31 +334,38 @@ if [ -f .env ]; then
   set +a
 fi
 
+# ── Piano dei passi (per la barra) ────────────────────────────
+NPM_INSTALL=0
+[ -d node_modules ] || NPM_INSTALL=1
+[ $NPM_INSTALL -eq 1 ] && plan_step 20
+plan_step 10                       # build frontend
+plan_step 5                        # cap sync
+[ $CLEAN -eq 1 ] && plan_step 5
+plan_step 60                       # gradle
+[ $INSTALL -eq 1 ] && plan_step 5  # adb install
+echo ""
+
 # ── Dipendenze npm ────────────────────────────────────────────
-if [ ! -d node_modules ]; then
-  echo "📦 Installazione dipendenze npm (prima volta, ~1 minuto)..."
-  npm install --silent
+if [ $NPM_INSTALL -eq 1 ]; then
+  run_step 20 "Dipendenze npm" npm install --silent
 else
   echo "✓  Dipendenze npm già installate"
 fi
 
 # ── Build frontend ────────────────────────────────────────────
-echo "🔨 Build del frontend..."
-npm run build --silent
+run_step 10 "Build del frontend" npm run build --silent
 
 # ── Copia del web build dentro il progetto Android ────────────
-echo "🔄 Sincronizzazione Capacitor..."
-npx cap sync android
+run_step 5 "Sincronizzazione Capacitor" npx cap sync android
 
 # ── Compilazione APK ──────────────────────────────────────────
+# La prima volta Gradle scarica parecchia roba: il passo può durare minuti.
 cd "$ANDROID_DIR"
 chmod +x gradlew
 if [ $CLEAN -eq 1 ]; then
-  echo "🧹 Pulizia build precedente..."
-  ./gradlew clean --console=plain -q
+  run_step 5 "Pulizia build precedente" ./gradlew clean --console=plain -q
 fi
-echo "🔨 Compilazione APK (la prima volta Gradle scarica parecchia roba)..."
-./gradlew assembleDebug --console=plain
+run_step 60 "Compilazione APK (Gradle)" --gradle ./gradlew assembleDebug --console=plain
 
 APK="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 if [ ! -f "$APK" ]; then
@@ -270,8 +401,7 @@ if [ $INSTALL -eq 1 ]; then
   elif [ -z "$("$ADB" devices | sed 1d | grep -w device || true)" ]; then
     echo "  ⚠️  Nessun telefono collegato (serve il debug USB attivo)."
   else
-    echo "📲 Installazione sul telefono..."
-    "$ADB" install -r "$OUT"
+    run_step 5 "Installazione sul telefono" "$ADB" install -r "$OUT"
   fi
 fi
 
