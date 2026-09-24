@@ -9,7 +9,7 @@ subito, non al commit o dalla rilettura del `revisore`.
 
 Legge su stdin il JSON dell'hook, isola `tool_input.file_path`, e agisce solo
 se è un `.py`/`.js`/`.jsx` sotto i percorsi che la norma copre
-(`server/`, `frontend/src/`, `electron/`, `scripts/`). In ogni altro caso
+(`server/`, `frontend/src/`, `frontend/e2e/`, `electron/`, `scripts/`). In ogni altro caso
 esce 0 in silenzio.
 
 Un file che contiene il marcatore `norm-check: ignora-file` in un commento è
@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-COPERTI = ("server/", "frontend/src/", "electron/", "scripts/")
+COPERTI = ("server/", "frontend/src/", "frontend/e2e/", "electron/", "scripts/")
 
 
 def _file_da_controllare(data: dict) -> Path | None:

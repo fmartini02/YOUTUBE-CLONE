@@ -23,6 +23,6 @@ Leggi `CLAUDE.md` prima di modificare: la sezione "Frontend" e quella sulla ripr
 
 ## Verifica
 
-Non ci sono test. Verifica con il dev server (`cd frontend && npm run dev`, proxy `/api` → :8090, quindi il server Python deve girare a parte) oppure con la build servita da FastAPI. Il server di casa è headless su un Raspberry Pi: non dare per scontato di poter aprire un browser sulla stessa macchina del server.
+Dopo `npm run build`, lancia `npm run test:e2e` (smoke test Playwright offline su :8098: seek, mini-player, tema — vedi "Test" in CLAUDE.md); se cambi un comportamento coperto, aggiorna lo spec in `frontend/e2e/`. Per il resto verifica con il dev server (`cd frontend && npm run dev`, proxy `/api` → :8090, quindi il server Python deve girare a parte) oppure con la build servita da FastAPI. Il server di casa è headless su un Raspberry Pi: non dare per scontato di poter aprire un browser sulla stessa macchina del server.
 
 Chiudi sempre dicendo se hai eseguito `npm run build` e se `dist/` è aggiornato.

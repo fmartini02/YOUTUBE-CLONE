@@ -23,7 +23,7 @@ Leggi `CLAUDE.md` prima di modificare: la sezione "Architettura" spiega perché 
 
 ## Verifica
 
-Non ci sono test né linter. Dopo una modifica, controlla almeno che il server importi e risponda, su una porta libera per non disturbare quello in esecuzione:
+Non c'è un linter. Dopo una modifica lancia `python3 -m pytest` dalla radice (offline, ~20s: vedi "Test" in CLAUDE.md) e, se hai cambiato un comportamento coperto, aggiorna il test nello stesso passaggio. Poi controlla che il server importi e risponda, su una porta libera per non disturbare quello in esecuzione:
 
 ```bash
 cd server && YTPROXY_PORT=8097 python3 -m uvicorn main:app --host 127.0.0.1 --port 8097

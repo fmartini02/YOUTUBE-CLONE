@@ -37,6 +37,11 @@ dist-android/
 # ── Build Electron — rigenerabile con npm run build ─────────────────────────
 dist-electron/
 
+# ── Test — artefatti di Playwright (tracce, screenshot dei fallimenti) ───────
+frontend/test-results/
+frontend/playwright-report/
+.pytest_cache/
+
 # ── Claude Code — configurazione locale e worktree ─────────────────────────
 # I worktree sotto .claude/worktrees/ sono checkout completi del repo stesso:
 # versionarli significherebbe infilare il repo dentro sé stesso.

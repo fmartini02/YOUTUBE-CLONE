@@ -1,8 +1,9 @@
 # Collaudo di YTProxy
 
 Elenco di **tutte** le feature del progetto, ognuna con la sua **definizione di funzionante**: la
-condizione osservabile che deve valere perché quella voce si possa dichiarare a posto. Non ci sono
-test automatici in questo repo — questo file è il loro sostituto, e va percorso a mano.
+condizione osservabile che deve valere perché quella voce si possa dichiarare a posto. Una parte
+delle voci è coperta dai test automatici (tabella qui sotto); tutto il resto — Cast, APK, hardware,
+account veri — si percorre a mano.
 
 Lo usa il subagent `collaudo-api` (`.claude/agents/collaudo-api.md`), ma vale per chiunque:
 **il progetto non si dichiara "collaudato e funzionante" finché tutte le voci non hanno un esito.**
@@ -18,6 +19,39 @@ Ogni voce chiude con uno di tre esiti, mai altro:
   OAuth). Si dichiara quale. Non è un fallimento: le due autenticazioni sono facoltative per progetto.
 
 Un collaudo che non arriva in fondo si chiama **parziale** e dice quali voci restano.
+
+## Copertura automatica
+
+```bash
+python3 -m pytest                        # server/tests, offline (~20s)
+python3 -m pytest -m rete                # le prove contro YouTube vero
+cd frontend && npm run test:e2e          # frontend/e2e, Playwright su un server offline :8098
+cd frontend && npm run test:e2e:rete     # comprese le prove @rete
+```
+
+Le voci qui sotto si possono chiudere con **OK (automatico)** citando l'esito della suite, **per la
+parte indicata e non oltre**: il resto della voce, se c'è, va ancora provato a mano. Le voci coperte
+lo dicono anche nel proprio testo, con 🧪. Chi automatizza una voce nuova aggiunge qui la sua riga.
+
+| Voce (sezione) | Test | Cosa copre — e cosa no |
+|---|---|---|
+| Il video parte nella UI (§3) | `e2e/player.spec.js`, `e2e/rete.spec.js` (@rete) | MSE (`blob:`), `tempi=sorgente`, barra = `currentTime`. Offline su un video sintetico VP9+Opus; con @rete su un video vero. L'audio non si ascolta. |
+| Seek lungo (§3) | `e2e/player.spec.js`, `test_mux_stream.py`, `test_ffmpeg_cmd.py` | Salto al 70% e poi al 20%: nuova `/api/mux` con `start=` e `tempi=sorgente`, `currentTime` sul secondo chiesto (±3s dell'atterraggio sul keyframe), barra coerente. |
+| Seek corto (§3) | `e2e/player.spec.js` | Tasto →: +10s dentro il buffer, nessuna nuova `/api/mux`, non torna all'inizio. Il doppio tocco sul telefono no. |
+| Dopo un salto corto il video non resta in pausa (§3) | `e2e/player.spec.js` | Dopo → il video continua a scorrere da solo. Lo stallo di rete vero no. |
+| Sincronia audio/video dopo un salto (§3) | `test_ffmpeg_reale.py`, `test_ffmpeg_cmd.py`, `test_mux_stream.py` | Sul contenuto, con ffmpeg vero: sulla timeline sorgente ogni pacchetto video e audio in uscita ha tempo e dimensione del pacchetto sorgente a quel tempo; sulla relativa le due tracce partono insieme da 0 sul keyframe. Opzioni (`-copyts`, `frag_discont`, `-use_editlist 0`, dts heuristic, AAC solo sui salti relativi) e scelta probe/header. Solo VP9+Opus: l'H.264 coi B-frame resta da provare a mano (o con `-m rete`). |
+| Seek vicino alla fine: la barra non scatta alla fine (§3) | `test_keyframe.py` | Solo la causa (1): keyframe arrotondato per eccesso. La (2), la barra nel player, no. |
+| Qualità fino a 4K (§3), `/api/download` (§4), 4K sul Cast (§3) | `test_format_selectors.py`, `test_ffmpeg_cmd.py`, `test_mux_stream.py` | Lato server: il selettore adattivo sale a 2160 (AV1+Opus), il Cast resta H.264+AAC a ogni qualità e passa al VP9+Opus in WebM solo in 4K con `hq`; ramo `webm` senza header MSE. Nessun ricevitore reale. |
+| Indietro dal video → widget; Tocco sul widget → pagina intera; Apertura diretta di `/watch` poi Indietro; Pulsanti del widget (solo X) (§3, mini-player) | `e2e/miniplayer.spec.js` | Nessuna nuova `/api/mux` né `/api/watch` fra pagina intera e widget, il video continua, URL giusti. Trascinamento, tastiera, schermo intero, PiP no. |
+| Home, scroll lungo (§5) | `test_lazy_feed.py` | Logica di `LazyFeed` con un yt-dlp finto: paginazione pigra, Mix che non contano, riapertura che salta i doppioni, freni alle riaperture. Il feed vero coi cookie no. |
+| Correlati (§5) | `test_lazy_feed.py` | Solo `escludi` (il video aperto non toglie un posto alla pagina). |
+| Preferenze (§8) | `test_security_app.py` | `PATCH /api/prefs` da origine locale e senza Origin. La persistenza al riavvio no. |
+| Tema (§8) | `e2e/tema.spec.js` | `data-theme` su `<html>` per chiaro/scuro/auto, anche dopo un ricaricamento; testo dei comandi del player bianco col tema chiaro. |
+| Stato cookie (§9) | `test_crea_ydl.py` | Un profilo solo-Google è anonimo (`youtube_auth_cookies`). |
+| Sessione non invalidata (§9) | `test_crea_ydl.py` | Col vero yt-dlp: il logout nel jar non riscrive `cookies.txt`, la rotazione sì (a 0600). |
+| Sicurezza: scritture ostili bloccate, locali ammesse, Origin assente, GET aperte, endpoint nuovi protetti (§10) | `test_security.py`, `test_security_app.py` | Matrice Origin/Host (reti private, same-origin, `YTPROXY_ALLOWED_ORIGINS`, travestimenti tipo `192.168.1.11.evil.com`), middleware su tutti i metodi, cablaggio in `main.py`, `expose_headers` per `X-Mux-*`. |
+| Permessi delle credenziali (§10) | `test_storage.py`, `test_crea_ydl.py` | `scrivi_privato`, `_scrivi_json(privato=True)` e `proteggi_file_riservati` a 0600, anche su file già a 0644. |
+| Salvataggio a prova di interruzione (§10) | `test_storage.py` | Scrittura atomica senza residui, file vecchio intatto se il salvataggio fallisce, JSON rotto messo da parte come `.corrotto`. |
 
 ## Prerequisiti
 
@@ -128,6 +162,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **OK** (2026-09-14, Chromium bundled pilotato a mano — la MCP Playwright è agganciata al
       canale `chrome`, non installabile qui senza root): aperto `/watch?v=dQw4w9WgXcQ`, `video`
       raggiunge `readyState=4` (HAVE_ENOUGH_DATA), nessun `pageerror` in console.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/player.spec.js` (offline), `e2e/rete.spec.js` (@rete) — vedi «Copertura automatica».
 - [x] **Seek lungo** — spostare la barra a metà video: riparte da lì (a meno di ~1 GOP: `-ss`
       atterra sul keyframe precedente) e il tempo mostrato è circa `start + currentTime`, **non zero**.
       **OK** (2026-09-14, live) — click al 70% della barra (`duration=213`) → richiesta
@@ -138,9 +173,11 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       resta sul keyframe precedente — **reintrodotto** in forma leggera (`read_intervals
       "target%+#3"`, 3 fotogrammi invece di una finestra): ~0.7-1s misurati su `start=30/90/150/200`
       (contro i 4-5s del vecchio probe), TTFB end-to-end 0.61s su un seek reale.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/player.spec.js`, `test_mux_stream.py`, `test_ffmpeg_cmd.py` — vedi «Copertura automatica».
 - [ ] **Seek corto** — tasti ← → e doppio tocco su telefono: il video si sposta di pochi secondi e
       **non torna all'inizio**. È la trappola di `seekable` vuoto: qui si vede o non si vede.
       **non verificabile** — serve un browser reale.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/player.spec.js`, solo il tasto → (il doppio tocco sul telefono resta a mano) — vedi «Copertura automatica».
 - [x] **Seek in avanti senza attesa / senza restare a caricare all'infinito** — un salto in avanti
       *singolo* riparte in ~1s (come aprire un video nuovo) e **non "rimane a caricare" per sempre**.
       Tre pezzi: (1) era `-copypriorss 0` che aspettava il keyframe successivo → oggi `-ss` grezzo e
@@ -188,6 +225,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       vedere); dopo, barra 67 → 84/84 esattamente a `ended=true`, `currentTime` iniziale 6.24
       (preroll saltato). Su 8 video, fine reale del flusso entro 0.4s dalla durata dichiarata.
       `fUuWhaQWhjs`: salto a 124.08 mostrato 124, poi ← riapre da 116.89 mostrato 117.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_keyframe.py`, solo l'arrotondamento per eccesso — vedi «Copertura automatica».
 - [x] **Il video non salta da solo alla fine quando finisce di scaricarsi** — guardando senza
       salti, quando il download arriva alla fine del video (~60s prima della fine,
       `MSE_TARGET_AHEAD_S`; a metà di un video corto) il playhead resta dov'è e il video si vede
@@ -213,6 +251,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       → nel buffer: prima un `pause` spurio su ogni salto, dopo nessuno, 0/6 fermi. Stallo vero
       (ffmpeg sospeso con `SIGSTOP`): `waiting` a `seeking` falso → pausa → ripresa da sola con
       6.9s di buffer dopo `SIGCONT`.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/player.spec.js`, solo → senza stallo di rete — vedi «Copertura automatica».
 - [x] **Sincronia audio/video dopo un salto (labiale)** — dopo qualunque salto (barra, ←/→,
       capitoli) la voce resta sul movimento delle labbra per tutto il resto del video, su ogni
       punto e ogni codec. Condizione osservabile: su `/api/mux?...&start=X&tempi=sorgente`
@@ -232,6 +271,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       con `captureStream`: `main` salto a 13.7 → audio avanti di 1800ms; questo ramo → uguale agli
       altri salti (148-165ms, lo scarto fisso della catena di registrazione in headless, uguale per
       `main` sui salti riusciti).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_ffmpeg_reale.py` (pacchetti accoppiati alla sorgente, VP9+Opus), `test_ffmpeg_cmd.py`, `test_mux_stream.py`, `e2e/player.spec.js` — vedi «Copertura automatica».
 - [x] **Barra di caricamento (buffer)** — `.player-progress-buffer` deve crescere mentre il video
       scarica, anche da fermo (video in pausa), non solo mentre scorre.
       **OK** (2026-09-15, live, Chromium bundled pilotato a mano) — risolto passando a MediaSource:
@@ -344,6 +384,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       ma nella forma leggera reintrodotta (`read_intervals` a 3 fotogrammi, ~0.7-1s misurati su un
       video 720p) — non la finestra intera del vecchio `_keyframe_before` (4-5s su un 4K); da
       confermare il costo esatto su un flusso 2160p reale.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_format_selectors.py`, solo il selettore (default 2160) — vedi «Copertura automatica».
 - [x] **Adatta la qualità allo schermo** — preferenza attiva di default (`GET /api/prefs` include
       `"fitScreen": true`). Con `quality` = `best`, il player chiede a `/api/mux` non `quality=best`
       ma il gradino YouTube più alto che il pannello regge — `qualityForScreen` in
@@ -374,6 +415,7 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       il VP9 4K e (b) la prova che il suo receiver riproduca un WebM in streaming senza
       `Content-Length` né Range (come già fa con l'MP4). Ramo ffmpeg: `-live 1 -cluster_time_limit
       1000 -f webm` in `_build_ffmpeg_cmd`.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_format_selectors.py`, `test_ffmpeg_cmd.py`, `test_mux_stream.py`, solo lato server — vedi «Copertura automatica».
 - [ ] **Velocità di riproduzione** — "Riproduzione veloce" dal menu e 2x tenendo premuto:
       funzionante quando la velocità **resta** dopo un salto (che riapre il flusso e chiama `load()`).
       **non verificabile** — serve un browser reale.
@@ -447,9 +489,11 @@ Le prove del 2026-09-24 sono state fatte con il Chromium di Playwright headless 
       Indietro: `/search?q=minecraft`, `data-mode="mini"`, tempo 1.5 → 4.0 s senza pause, widget
       `[187, 726, 195, 110]` (8px dal bordo destro e da quello basso a 390×844), nuove `/api/mux` e
       `/api/watch`: **nessuna**.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/miniplayer.spec.js` — vedi «Copertura automatica».
 - [x] **Tocco sul widget → pagina intera** — riapre il video a pagina intera allo stesso punto.
       **OK** — tempo 6.4 → 8.0 s, nessuna nuova `/api/mux`/`/api/watch`, voce `/watch` con `sotto`
       = la ricerca.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/miniplayer.spec.js` — vedi «Copertura automatica».
 - [x] **Da un correlato, Indietro** — torna alla schermata di partenza (non al video precedente)
       col correlato nel widget. **OK** — ricerca → A → correlato R (`history.length` resta 3: la
       voce è sostituita) → Indietro: ricerca, R nel widget, posizione 3 → 6 s, nessuna richiesta.
@@ -459,6 +503,7 @@ Le prove del 2026-09-24 sono state fatte con il Chromium di Playwright headless 
 - [x] **Apertura diretta di `/watch` sul web, poi Indietro** — home col widget, non uscita dal
       sito. **OK** — cronologia riscritta in `[home, video]` (`depth` 1, `sotto: "/"`), Indietro
       → `/`, widget, tempo 1.5 → 3.5 s, nessuna richiesta.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/miniplayer.spec.js` — vedi «Copertura automatica».
 - [x] **Home dalla barra laterale durante un video** — torna indietro invece di creare
       `[home, home]`, e la barra laterale si chiude. **OK** — `/watch` diretto → hamburger → Home:
       `/`, `history.length` invariata (3), `depth` 0, `data-sidebar="false"`.
@@ -469,6 +514,7 @@ Le prove del 2026-09-24 sono state fatte con il Chromium di Playwright headless 
       72 + 8, header 56 + 8); predefinita `[872, 567, 400, 225]`.
 - [x] **Pulsanti del widget** — pausa/play comandano il video, X lo chiude. **OK** — pausa →
       `paused: true`, play → `false`; X → nessun `<video>` in pagina.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/miniplayer.spec.js`, solo la X — vedi «Copertura automatica».
 - [x] **Tastiera col widget** — spazio e frecce restano alla pagina, `k` e `m` al video. **OK** —
       spazio: resta in riproduzione; `k`: pausa.
 - [x] **Schermo intero, poi Indietro (desktop)** — si esce dallo schermo intero, il video va nel
@@ -520,6 +566,7 @@ leggono con `adb logcat -s YtPip`:
       `content-disposition: attachment; filename="jNQXAC9IVRw.mp4"`, 745200 byte; `ffprobe` legge
       video **h264** + audio **aac** (non AV1+Opus, come da doc). `/tmp/ytproxy_cache` non esiste
       dopo la prova.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_format_selectors.py` (H.264+AAC a ogni qualità), `test_ffmpeg_cmd.py` (sola copia) — vedi «Copertura automatica».
 - [x] **Elenco sottotitoli** — `GET /api/subtitles/<vid>` elenca le lingue disponibili.
       **OK** — `curl -m40 http://127.0.0.1:8097/api/subtitles/dQw4w9WgXcQ` → 36 lingue con
       `code`/`name`/`auto`.
@@ -550,12 +597,14 @@ leggono con `adb logcat -s YtPip`:
       in `auth/lazy_feed.py`).
       **non verificabile — manca il cookie** (la home è vuota senza cookie, non c'è niente su cui
       scorrere).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_lazy_feed.py`, solo la logica con un yt-dlp finto — vedi «Copertura automatica».
 - [x] **Correlati** — `GET /api/related/<vid>` restituisce video e dichiara `source`: `mix` per un
       video normale, `ricerca` per un video poco visto o di canale piccolo, `nessuna` come ultimo caso.
       Funzionante quando lo scroll della sidebar continua a caricare.
       **OK** — `curl -m60 http://127.0.0.1:8097/api/related/dQw4w9WgXcQ` → 20 risultati,
       `source: "mix"`, `has_more: true`. `?offset=20&limit=20` → altri 20, **0** id in comune con la
       pagina precedente: la continuazione funziona (conferma indiretta dello scroll infinito).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_lazy_feed.py`, solo `escludi` — vedi «Copertura automatica».
 - [ ] **Feed iscrizioni** — `GET /api/feed/subscriptions` restituisce video e `source`
       (`cookies` / `local`). Con cookie assenti resta la cache su disco aggiornata da `sync/runner.py`.
       **non verificabile — manca il cookie e la cache su disco non è popolata** (coerente con §6
@@ -716,9 +765,11 @@ leggono con `adb logcat -s YtPip`:
       `{"theme": "light"}`. Server fermato e riavviato da zero (nuovo processo uvicorn): `GET
       /api/prefs` → ancora `{"theme":"light"}`, cioè la preferenza è sopravvissuta al riavvio, non
       solo rimasta in memoria. Rimesso subito a `{"theme":"dark"}` col valore originale.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_security_app.py`, solo la scrittura da origine locale — vedi «Copertura automatica».
 - [ ] **Tema** — cambiando tema l'attributo `data-theme` su `<html>` cambia, la palette segue in
       tutta l'app, e **il player resta scuro in entrambi i temi**.
       **non verificabile** — serve un browser reale.
+      🧪 **Automatica** (esito 2026-09-24: OK): `e2e/tema.spec.js` — vedi «Copertura automatica».
 
 ## 9. Autenticazioni (entrambe facoltative)
 
@@ -745,6 +796,7 @@ leggono con `adb logcat -s YtPip`:
       `/api/auth/status` → `"logged_in":true,"reason":null,"warning":false`. Esattamente la
       distinzione documentata in CLAUDE.md (`AUTH_COOKIE_NAMES` conta solo sul dominio
       `youtube.com`). Ripulito con `DELETE /api/cookies` a fine prova (vedi sotto).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_crea_ydl.py`, solo la distinzione solo-Google / YouTube — vedi «Copertura automatica».
 - [x] **Caricamento cookie** — `POST /api/cookies/upload` accetta il file e i feed si popolano.
       **OK** (solo la parte "accetta il file", con dati sintetici — vedi voce sopra per i comandi):
       l'endpoint valida il formato, conta i cookie, distingue la sessione YouTube. **non
@@ -777,6 +829,7 @@ leggono con `adb logcat -s YtPip`:
       `auth/cookie_session.py` (commento, non codice) e una sola istanza reale dentro `crea_ydl()`
       stessa (`auth/cookie_session.py:79`); nessun'altra occorrenza in `routers/`, `sync/`, `ytdlp/`.
       L'invariante "sempre `crea_ydl()`, mai `YoutubeDL()` nudo" è rispettato nel codice attuale.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_crea_ydl.py`, col vero yt-dlp su un `cookies.txt` sintetico — vedi «Copertura automatica».
 - [ ] **OAuth device flow** — `POST /api/auth/device/start` restituisce codice e URL,
       `POST /api/auth/device/poll` completa dopo l'inserimento su `google.com/device`. Funzionante
       quando **non c'è nessun redirect** e la procedura riesce con server e browser su macchine diverse
@@ -821,22 +874,27 @@ leggono con `adb logcat -s YtPip`:
       fix del giro precedente, `JSONResponse` mancante nell'import, è sopravvissuto allo
       spostamento) — stesso comando → **403**, `{"detail":"Origine non consentita"}`, nessun
       traceback nel log.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_security.py`, `test_security_app.py` — vedi «Copertura automatica».
 - [x] **Scritture da origine locale ammesse** — atteso **200**:
       `curl -s -X PATCH -H 'Origin: http://localhost:8097' -H 'Content-Type: application/json' -d '{"theme":"dark"}' localhost:8097/api/prefs`
       **OK** — 200, corpo `{"quality":"best","autoplay":true,"theme":"dark"}` (valore già quello
       originale, nessun cambiamento di stato).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_security.py`, `test_security_app.py` — vedi «Copertura automatica».
 - [x] **Origin assente = permesso** — la stessa `PATCH` senza header `Origin` (curl nudo, app nativa)
       passa: è voluto, non una svista.
       **OK** — stesso comando senza `-H 'Origin: ...'` → 200.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_security.py`, `test_security_app.py` — vedi «Copertura automatica».
 - [x] **Le GET restano aperte** — `/api/mux/<vid>` risponde anche senza `Origin`: serve al Chromecast,
       che scarica il video da sé.
       **OK** — `curl -m35 -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/api/mux/jNQXAC9IVRw?quality=360`
       (nessun header Origin) → 200.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_security_app.py` — vedi «Copertura automatica».
 - [x] **Endpoint di scrittura nuovi protetti da soli** — un `POST`/`DELETE` aggiunto di recente
       risponde 403 da origine ostile senza che nessuno gli abbia messo un decoratore.
       **OK** (riverificato) — `curl -o /dev/null -w '%{http_code}' -X DELETE -H 'Origin: https://evil.example.com'
       http://127.0.0.1:8097/api/prefs` → **403**, senza decoratore dedicato sull'endpoint (il
       middleware in `server/core/security.py` intercetta da solo).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_security_app.py` — vedi «Copertura automatica».
 - [x] **Permessi delle credenziali** — `ls -l data/oauth_token.json data/oauth_setup.json data/cookies.txt`
       mostra `-rw-------` (0600), **anche dopo** un'estrazione che ha riscritto `cookies.txt`.
       **OK** (verificata stavolta anche la parte `cookies.txt`, impossibile nel giro precedente per
@@ -844,6 +902,12 @@ leggono con `adb logcat -s YtPip`:
       `POST /api/cookies/upload`, vedi §9) — dopo l'upload: `ls -l data/cookies.txt` →
       `-rw-------` (0600). `data/oauth_token.json`/`oauth_setup.json` non esistono in questo giro
       (nessun OAuth), quindi non verificabili per quella parte — manca l'OAuth.
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_storage.py`, `test_crea_ydl.py` — vedi «Copertura automatica».
+- [x] **Salvataggio a prova di interruzione** — lo stato in `data/` si riscrive su un temporaneo e
+      si sposta con `os.replace`: un kill a metà salvataggio lascia il file vecchio, mai un JSON
+      troncato, e un file comunque illeggibile all'avvio viene messo da parte come `.corrotto`
+      invece di impedire la partenza del server (`auth/storage.py`).
+      🧪 **Automatica** (esito 2026-09-24: OK): `test_storage.py` — vedi «Copertura automatica».
 - [x] **Niente segreti nel repo** — `git status` non mostra file di `data/` da committare e il diff
       non contiene token, cookie o client secret.
       **OK** — `git status --porcelain --ignored` in questo worktree mostra solo file di `data/`

@@ -27,7 +27,7 @@ Prima di qualsiasi cosa leggi `CLAUDE.md`: contiene le trappole di questo proget
 2. **File da toccare**, in ordine, con `percorso:riga` per i punti d'innesto.
 3. **Passi**, numerati, ognuno verificabile da solo.
 4. **Trappole applicabili** — solo quelle che questa modifica può davvero far scattare, con la contromisura.
-5. **Come si verifica** — comandi concreti (`curl` sugli endpoint, cosa guardare nella UI). Non ci sono test automatici in questo repo: dillo esplicitamente invece di inventarne.
+5. **Come si verifica** — comandi concreti (`curl` sugli endpoint, cosa guardare nella UI). Indica quali test esistenti (`server/tests/`, `frontend/e2e/`, vedi "Test" in CLAUDE.md) coprono la modifica e quali vanno aggiunti o aggiornati; per ciò che non è automatizzabile, le voci di `DOCS/COLLAUDO.md`.
 6. **Alternative scartate**, una riga ciascuna, solo se la scelta non è ovvia.
 
 Se la richiesta è ambigua in un modo che cambierebbe il piano, dichiara l'assunzione che hai preso e vai avanti: non restituire un piano condizionale a due rami.

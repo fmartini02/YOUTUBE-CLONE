@@ -332,7 +332,8 @@ ytproxy/
 - `data/` — tutto lo stato persistente (cookie, token OAuth, iscrizioni, cronologia, preferenze): **non versionato**, vive solo sulla macchina che fa da server.
 - `scripts/` — script di avvio (`start_server.sh`/`.bat`), catena di build dell'APK Android, controllo automatico dello stile del codice (`norm_check.py`).
 - `docker/` — immagine, `docker-compose.yml` ed entrypoint per l'alternativa Docker a `scripts/start_server.sh`.
-- `DOCS/COLLAUDO.md` — l'elenco di tutte le feature con la condizione osservabile che deve valere perché funzionino: sostituisce una suite di test automatici, che qui non c'è.
+- `server/tests/`, `frontend/e2e/` — test automatici: pytest per il server (`python3 -m pytest`), smoke test Playwright per la UI (`cd frontend && npm run test:e2e`), entrambi senza bisogno di YouTube.
+- `DOCS/COLLAUDO.md` — l'elenco di tutte le feature con la condizione osservabile che deve valere perché funzionino, con in testa quali voci sono coperte dai test automatici: il resto (Cast, APK, hardware) si collauda a mano.
 
 ---
 
