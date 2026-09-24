@@ -31,7 +31,7 @@ function pulisciMse(objectUrl, risposta) {
 // il `<video>` restava agganciato a un blob morto, con una rejection mai
 // intercettata né da qui né da chi chiama (vedi il try/catch in
 // creaFlussoMse), spinner fisso senza alcun ripiego su <video src>.
-async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }, cb) {
+async function avviaMse(video, risposta, { mime, rawStart, keyframeStart, durata }, cb) {
   const ms = new MediaSource();
   const objectUrl = URL.createObjectURL(ms);
   video.src = objectUrl;
@@ -41,16 +41,24 @@ async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }
     const sb = ms.addSourceBuffer(mime);
     sb.mode = "sequence";
     // Durata reale del contenuto in arrivo: da `keyframeStart` (dove ffmpeg è
-    // atterrato per davvero), non da `offset` (il valore grezzo richiesto,
-    // usato solo per la posizione mostrata) — sennò gli ultimi secondi veri
+    // atterrato per davvero), non da `rawStart` (il valore grezzo
+    // richiesto) — sennò gli ultimi secondi veri
     // arriverebbero oltre la durata dichiarata al MediaSource.
     if (durata > keyframeStart) { try { ms.duration = durata - keyframeStart; } catch { /* solo cosmetico */ } }
+    // Salto preciso. In sola copia ffmpeg può partire solo da un inizio di
+    // segmento DASH <= il secondo chiesto (misurato: fino a ~6s prima, non
+    // "≤ 1 GOP"): ancorare la barra al secondo grezzo la teneva avanti di
+    // tutto quello scarto, e un salto vicino alla fine la portava in fondo
+    // con ancora secondi di video da riprodurre. Qui la timeline parte dal
+    // keyframe vero (`offset` = keyframeStart, sotto) e il playhead salta da
+    // sé al secondo chiesto dentro il buffer MSE, che è cercabile. Impostato
+    // a readyState 0 vale come posizione di partenza (spec HTML).
+    if (rawStart - keyframeStart > 0.05) video.currentTime = rawStart - keyframeStart;
     const chiuso = { current: false };
     const reader = risposta.body.getReader();
     pompa(reader, sb, video, chiuso, cb);
     return {
-      offset,
-      keyframeStart,
+      offset: keyframeStart,
       finalizza: () => { try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* già chiuso */ } },
       chiudi: () => {
         chiuso.current = true;
@@ -64,10 +72,11 @@ async function avviaMse(video, risposta, { mime, offset, keyframeStart, durata }
   } catch (e) { pulisciMse(objectUrl, risposta); throw e; }
 }
 
-// `rawStart` è il secondo grezzo richiesto (quello che il player mostra in
-// barra come `offset + currentTime`, con lo stesso scarto di ≤1 GOP già
-// accettato altrove — vedi CLAUDE.md); il vero punto di atterraggio arriva
-// dall'header `X-Mux-Start` e serve solo per calcolare `ms.duration`.
+// `rawStart` è il secondo grezzo richiesto; il vero punto di atterraggio
+// (inizio di segmento, fino a qualche secondo prima) arriva dall'header
+// `X-Mux-Start`: da lì parte la timeline (`offset`, cioè barra =
+// `offset + currentTime`) e la durata del MediaSource, mentre `rawStart`
+// serve solo al salto preciso dentro il buffer (vedi avviaMse).
 //
 // `ancoraValido()` (opzionale): controllata SUBITO PRIMA di toccare `video`
 // (chiamata sincrona, senza `await` in mezzo — così nessun'altra apertura può
@@ -99,7 +108,7 @@ export async function creaFlussoMse(video, url, { rawStart = 0, durata, onBuffer
   const viaLibera = mime && MediaSource.isTypeSupported(mime) && (!ancoraValido || ancoraValido());
   if (!viaLibera) { risposta.body.cancel().catch(() => {}); return null; }
   try {
-    return await avviaMse(video, risposta, { mime, offset: rawStart, keyframeStart, durata }, {
+    return await avviaMse(video, risposta, { mime, rawStart, keyframeStart, durata }, {
       onBufferChange: () => onBuffer?.(),
       // keyframeStart passato anche qui: chi chiama calcola se il flusso è
       // finito per davvero confrontando la durata reale del contenuto

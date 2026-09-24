@@ -125,7 +125,7 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
       // del video, fino a un GOP più lungo di quanto suggerisca `start`.
       const fineVera = durata > 0 && bufferedEnd >= durata - keyframeStart - 1;
       if (fineVera) { handleRef.current.finalizza?.(); return; }
-      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => start + bufferedEnd, onFineAnticipata });
+      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => keyframeStart + bufferedEnd, onFineAnticipata });
     },
     // Un fetch o un appendBuffer possono fallire a metà riproduzione (rete che
     // cade, tab in background su Android che sospende la pompa): senza questo
@@ -135,7 +135,7 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
     // riapertura dal punto vero letto da `video` (non da uno stato React che
     // in questo momento può essere stantio) — così un errore transitorio si
     // riprende da solo invece di restare fermo in attesa di un tocco.
-    onError: () => riapriOrinuncia(() => genRef.current === mia, retryRef, () => onAutoplayFailed?.(), { t: () => start + video.currentTime, onFineAnticipata, backoff: true }),
+    onError: () => riapriOrinuncia(() => genRef.current === mia, retryRef, () => onAutoplayFailed?.(), { t: () => (handleRef.current?.offset ?? start) + video.currentTime, onFineAnticipata, backoff: true }),
   });
   if (genRef.current !== mia) { mse?.chiudi(); return; }   // superato mentre aspettavo il fetch
 

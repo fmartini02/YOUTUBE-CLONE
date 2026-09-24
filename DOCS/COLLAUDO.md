@@ -176,6 +176,18 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **da confermare in un browser reale** — il meccanismo esatto del sintomo "perdo l'audio"
       (traccia video vuota che pianta l'elemento, oppure traccia audio più corta del video) non è
       isolabile senza browser; evitare il flusso vuoto è comunque corretto in entrambi i casi.
+- [x] **Seek vicino alla fine: la barra non scatta alla fine da sola** — dopo un salto negli
+      ultimi ~20s la barra parte dal secondo cliccato e arriva alla fine **insieme** al video
+      (`ended=true`), non secondi prima. Due cause, entrambe corrette: (1) `_keyframe_before`
+      arrotondava il keyframe al millesimo più vicino, e un 60.958333 scritto "60.958" faceva
+      atterrare ffmpeg un segmento prima (55.0) con `X-Mux-Start` a 60.958 → buco audio di 6s e
+      flusso più lungo del resto del video (3 video su 8 misurati, fine reale fino a +6s oltre la
+      durata); (2) il player MSE ancorava la barra al secondo grezzo, ma l'atterraggio è per inizio
+      di segmento (fino a ~6s prima). **OK** (2026-09-24, Chromium bundled + server reale):
+      `O8Yu1E8Blxs` salto a 67.2 → prima barra a 84/84 con `currentTime` 17.6/29.1 (11s ancora da
+      vedere); dopo, barra 67 → 84/84 esattamente a `ended=true`, `currentTime` iniziale 6.24
+      (preroll saltato). Su 8 video, fine reale del flusso entro 0.4s dalla durata dichiarata.
+      `fUuWhaQWhjs`: salto a 124.08 mostrato 124, poi ← riapre da 116.89 mostrato 117.
 - [x] **Barra di caricamento (buffer)** — `.player-progress-buffer` deve crescere mentre il video
       scarica, anche da fermo (video in pausa), non solo mentre scorre.
       **OK** (2026-09-15, live, Chromium bundled pilotato a mano) — risolto passando a MediaSource:

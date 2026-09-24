@@ -4,6 +4,7 @@ in tempo reale dei flussi video+audio adattivi di YouTube. Vedi CLAUDE.md
 ("Riproduzione: due selettori di formato, due scopi") per il quadro completo.
 """
 import asyncio
+import math
 import shutil
 import subprocess
 import time
@@ -108,6 +109,17 @@ def _keyframe_before(video_url: str, target: float) -> float:
     ripetuto sullo stesso punto (tasti freccia premuti in rapida sequenza,
     verificato dal vivo) ripagherebbe ogni volta un intero processo ffprobe
     invece di riusare il risultato appena calcolato.
+
+    Il risultato è arrotondato PER ECCESSO al millesimo, mai al più vicino: il
+    chiamante lo passa a ffmpeg come `-ss` con 3 decimali, e ffmpeg atterra
+    sull'inizio di segmento <= quel valore. Un keyframe a 60.958333 (tipico a
+    24 fps) scritto "60.958" cade un soffio PRIMA di sé stesso, e ffmpeg
+    torna indietro di un intero segmento DASH (misurato: a 55.0, 6s prima)
+    mentre `X-Mux-Start` e l'audio ricodificato restano su 60.958 — buco
+    audio iniziale di 6s e barra del player avanti di tutto lo scarto (12s
+    su un salto a 67.2), che arrivava alla fine del video con ancora 11s da
+    riprodurre: il "salto alla fine da solo" vicino alla fine del video.
+    Per eccesso basta un millisecondo, sempre meno di un fotogramma.
     """
     if target <= 0:
         return target
@@ -125,7 +137,7 @@ def _keyframe_before(video_url: str, target: float) -> float:
         for line in out.splitlines():
             pts, _, flag = line.partition(",")
             if flag.startswith("I"):
-                result = float(pts)
+                result = math.ceil(float(pts) * 1000) / 1000
                 break
     except Exception:
         pass
