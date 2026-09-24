@@ -1,4 +1,4 @@
-import { useState, createContext, useContext } from "react";
+import { useState, useRef, createContext, useContext } from "react";
 import { useCast } from "../hooks/useCast.jsx";
 import { useMobileLayout } from "../hooks/useMediaQuery";
 import { PrefsProvider } from "../hooks/usePrefs";
@@ -32,12 +32,16 @@ function AppInterno() {
   // etichetta), non quella larga — si espande solo cliccando l'hamburger.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const castSDK = useCast();
+  // Letto dalla navigazione al momento del cambio pagina (niente widget per
+  // un video in cast, vedi App/navHistory.js): un ref e non una dipendenza.
+  const castRef = useRef(castSDK);
+  castRef.current = castSDK;
   // Sul telefono la barra laterale non sta ACCANTO alla pagina ma SOPRA:
   // cambia il comportamento, non solo la larghezza, quindi va saputo anche in
   // JS e non solo nel CSS.
   const mobileLayout = useMobileLayout();
   const auth = useAuthStatusPolling();
-  const nav = useAppNavigation(mobileLayout, setSidebarOpen);
+  const nav = useAppNavigation(mobileLayout, setSidebarOpen, castRef);
   useBackButton(sidebarOpen, setSidebarOpen, nav.depthRef);
   const cookie = useCookieWarning(auth.authStatus);
 

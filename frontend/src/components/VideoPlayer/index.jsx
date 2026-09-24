@@ -9,6 +9,7 @@ import { useStreamSource } from "./useStreamSource";
 import PlayerOverlays from "./PlayerOverlays";
 import PlayerButtonsBar from "./PlayerButtonsBar";
 import PlayerSettingsMenu from "./PlayerSettingsMenu";
+import MiniPlayerOverlay from "./MiniPlayerOverlay";
 
 /**
  * Player con controlli propri, al posto di quelli nativi del browser.
@@ -71,6 +72,11 @@ export default function VideoPlayer({
   // qualità" selezionata, non chiede al server più della risoluzione che il
   // pannello regge davvero. Vedi qualityForScreen in videoPlayerHelpers.
   fitScreen = true,
+  // Mini-player (widget sopra un'altra pagina, vedi pages/VideoPage): stesso
+  // player, stesso <video>, stesso flusso — cambiano solo i comandi mostrati.
+  mini = false,
+  onExpand,
+  onClose,
 }) {
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
@@ -110,8 +116,23 @@ export default function VideoPlayer({
   // effect lascerebbe partire l'effetto di caricamento con il vecchio `start`,
   // cioè un video nuovo aperto a metà.
   const [prevId, setPrevId] = useState(videoId);
+
+  // ── Qualità effettiva del flusso ───────────────────────────────────────
+  // `quality` è la scelta (anche "best"); `sorgente` è quella che si chiede
+  // davvero al server, dopo qualityForScreen. Sta nello stato e si ricalcola
+  // SOLO quando cambia la scelta (quality, fitScreen) o il video — mai ad ogni
+  // render: qualityForScreen legge anche window.screen e devicePixelRatio, che
+  // cambiano da soli (finestra spostata su un altro monitor, forse il PiP di
+  // Android) e, letti ad ogni render, riaprirebbero il flusso a metà video.
+  const [sorgente, setSorgente] = useState(() => qualityForScreen(quality, fitScreen));
+  const [prevScelta, setPrevScelta] = useState({ quality, fitScreen });
   if (prevId !== videoId) {
     setPrevId(videoId);
+    // Video nuovo: la sorgente si ricalcola (lo schermo si legge quando si apre
+    // un video, come sempre) ma senza riaprire niente — parte comunque da 0.
+    // Vince su un eventuale cambio di qualità nella stessa passata.
+    setPrevScelta({ quality, fitScreen });
+    setSorgente(qualityForScreen(quality, fitScreen));
     setStream({ start: 0, n: 0 });
     setPosition(0);
     setBufferedStart(0);
@@ -119,6 +140,19 @@ export default function VideoPlayer({
     setActualHeight(0);
     setSettingsOpen(false);
     setSettingsPage("main");
+  } else if (prevScelta.quality !== quality || prevScelta.fitScreen !== fitScreen) {
+    // Scelta cambiata: dal menu del player (handleQuality) o dalle
+    // Impostazioni, che col widget si aprono a video in corso. Il flusso si
+    // riapre DA DOVE SI È ARRIVATI: l'effetto di caricamento da solo lo
+    // riaprirebbe da `stream.start`, cioè dall'ultimo salto (o da 0), e il
+    // video tornerebbe indietro. Se la sorgente non cambia (es. "best" che già
+    // valeva 1080) non si riapre niente.
+    setPrevScelta({ quality, fitScreen });
+    const nuova = qualityForScreen(quality, fitScreen);
+    if (nuova !== sorgente) {
+      setSorgente(nuova);
+      setStream(s => ({ start: position, n: s.n + 1 }));
+    }
   }
 
   // Vero solo dopo un `onPlaying` genuino sul flusso corrente: distingue il
@@ -187,7 +221,7 @@ export default function VideoPlayer({
     // della durata attesa (URL scaduto dopo una pausa lunghissima) riapre da
     // dove si era arrivati, non dall'inizio.
     flusso.apri(v, {
-      videoId, quality: qualityForScreen(quality, fitScreen), start: stream.start,
+      videoId, quality: sorgente, start: stream.start,
       durata: duration, rate, autoplay: deveAndare, muxUrl: api.muxUrl,
       // `onProgress` sul <video> (sotto) copre il ripiego <video src>, ma con
       // MediaSource l'evento nativo "progress" non è garantito ad ogni
@@ -207,9 +241,11 @@ export default function VideoPlayer({
       onAutoplayFailed: () => setBuffering(false),
     });
     if (!deveAndare) setBuffering(false);
-    // `fitScreen` è tra le dipendenze perché concorre a formare l'URL del
-    // flusso al pari di `quality` (di norma non cambia a player montato: le
-    // Impostazioni sono un'altra route e lo smontano). `flusso`/`rate`/
+    // `sorgente` e non `quality`/`fitScreen`: è l'unica parte della qualità
+    // che entra nell'URL, e cambia solo nei punti visti in cima — un cambio di
+    // `quality` che non la sposta non deve riaprire niente. Le Impostazioni
+    // NON smontano più il player (il widget resta vivo sopra di loro), quindi
+    // una qualità cambiata lì arriva a player aperto. `flusso`/`rate`/
     // `duration`/`playing` NON ci sono di proposito: `flusso.apri` è stabile e
     // legge `rate` al momento dell'apertura (non deve riaprire il flusso
     // quando cambia la sola velocità, ci pensa l'effetto "Velocità" sotto), e
@@ -218,7 +254,7 @@ export default function VideoPlayer({
     // solo per decidere `deveAndare` al momento della riapertura, non deve
     // farne scattare una nuova quando cambia da sé (altrimenti ogni singolo
     // play/pausa riaprirebbe il flusso).
-  }, [videoId, quality, stream, fitScreen]);
+  }, [videoId, sorgente, stream]);
 
   // ── Velocità ───────────────────────────────────────────────────────────
   // Dipende anche da `stream` perché `load()` riporta `playbackRate` a
@@ -233,7 +269,7 @@ export default function VideoPlayer({
     if (!v) return;
     v.defaultPlaybackRate = rate;
     v.playbackRate = rate;
-  }, [rate, videoId, quality, stream, fitScreen]);
+  }, [rate, videoId, sorgente, stream]);
 
   // ── Recupero da uno stallo di rete ───────────────────────────────────────
   // Lasciato a sé, il browser riprende non appena arriva un filo di dati:
@@ -270,7 +306,7 @@ export default function VideoPlayer({
   useEffect(() => {
     rebufferingRef.current = false;
     setRebuffering(false);
-  }, [videoId, quality, stream, fitScreen]);
+  }, [videoId, sorgente, stream]);
 
   // ── Salto nel tempo ────────────────────────────────────────────────────
   const seekTo = useCallback((target) => {
@@ -315,6 +351,21 @@ export default function VideoPlayer({
     setRebuffering(false);
     if (v.paused) v.play().catch(() => {});
     else v.pause();
+  }, []);
+
+  // Comandi espliciti per il widget (e la finestra PiP di Android): lì l'icona
+  // mostra "in riproduzione" anche durante uno stallo, quando il video è in
+  // realtà fermo — `togglePlay`, che guarda `v.paused`, al tocco su "pausa" lo
+  // farebbe ripartire. Qui "pausa" annulla l'attesa del buffer e resta fermo.
+  const riproduci = useCallback(() => {
+    rebufferingRef.current = false;
+    setRebuffering(false);
+    videoRef.current?.play().catch(() => {});
+  }, []);
+  const pausa = useCallback(() => {
+    rebufferingRef.current = false;
+    setRebuffering(false);
+    videoRef.current?.pause();
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -378,10 +429,11 @@ export default function VideoPlayer({
   useEffect(() => { applyTextTrack(); }, [applyTextTrack, stream]);
 
   // ── Qualità (mantiene il punto in cui si stava guardando) ──────────────
+  // La riapertura dal punto corrente la fa il confronto in fase di render
+  // (vedi "Qualità effettiva" in cima): farla anche qui aprirebbe il flusso due volte.
   function handleQuality(q) {
     setSettingsOpen(false);
     if (q === quality) return;
-    setStream(s => ({ start: position, n: s.n + 1 }));
     onQualityChange(q);
   }
 
@@ -474,6 +526,21 @@ export default function VideoPlayer({
     clearTimeout(flashTimer.current);
     clearTimeout(holdRef.current.timer);
   }, []);
+
+  // ── Entrata nel widget ─────────────────────────────────────────────────
+  // Quello che era aperto sul player intero non deve restare a metà: menu
+  // impostazioni, "tieni premuto" al 2x, doppio tocco in attesa di diventare un
+  // salto, schermo intero (Indietro del browser o del mouse mentre si è a
+  // schermo intero: il widget finirebbe a tutto schermo).
+  useEffect(() => {
+    if (!mini) return;
+    setSettingsOpen(false);
+    endHold();
+    clearTimeout(tapRef.current.timer);
+    clearTimeout(seekBurstRef.current.timer);
+    seekBurstRef.current.delta = 0;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }, [mini]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function flashSeek(side, seconds) {
     setSeekFlash({ side, seconds });
@@ -589,6 +656,10 @@ export default function VideoPlayer({
       if (el && el !== document.body && wrapRef.current?.contains(el)) el.blur();
 
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      // Nel widget la pagina sotto è un'altra (home, ricerca…): spazio e frecce
+      // devono farla scorrere, non comandare il video. Restano k (play/pausa)
+      // e m (muto), come nel mini-player di YouTube.
+      if (mini && key !== "k" && key !== "m") return;
       switch (key) {
         case " ":
         case "k": togglePlay(); break;
@@ -610,7 +681,7 @@ export default function VideoPlayer({
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [togglePlay, toggleFullscreen, skip, nudgeVolume, toggleMute, toggleSubtitles, onToggleTheater, bumpControls]);
+  }, [togglePlay, toggleFullscreen, skip, nudgeVolume, toggleMute, toggleSubtitles, onToggleTheater, bumpControls, mini]);
 
   // ── Barra di avanzamento ───────────────────────────────────────────────
   function timeFromPointer(e) {
@@ -817,6 +888,17 @@ export default function VideoPlayer({
           onSubtitleLangChange={onSubtitleLangChange}
           subtitleSize={subtitleSize}
           onSubtitleSizeChange={onSubtitleSizeChange}
+        />
+      )}
+
+      {/* Ultimo fratello del <video>, mai un contenitore attorno: vedi
+          MiniPlayerOverlay. Barra, menu e strato dei tocchi restano montati e
+          li nasconde il CSS (App.css, "MINI-PLAYER"), così passare da widget a
+          pagina intera non tocca nessun elemento prima di questo. */}
+      {mini && (
+        <MiniPlayerOverlay
+          inRiproduzione={playing || rebuffering} onPlay={riproduci} onPause={pausa}
+          onClose={onClose} onExpand={onExpand} pct={pct}
         />
       )}
     </div>

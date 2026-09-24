@@ -47,6 +47,12 @@
   --accent2: #cc0000;
   --green: #00c864;
   --sidebar-width: 240px;
+  /* Barra laterale stretta (icona sopra etichetta), sempre visibile su desktop.
+     Variabile perché serve anche al widget, che non deve finirci sotto. */
+  --sidebar-rail: 72px;
+  /* Larghezza del widget (mini-player): metà schermo sul telefono, come
+     nell'app di YouTube, al massimo 400px. */
+  --mini-w: min(400px, 50vw);
   /* +safe-area-inset-top: con `viewport-fit=cover` (index.html) il viewport CSS
      si estende sotto un eventuale notch/fotocamera a foro — necessario perché
      il player a schermo intero possa coprirlo (vedi .player-wrap:fullscreen più
@@ -157,7 +163,7 @@ body {
   min-width: 0;
 }
 
-.app[data-sidebar="false"] .main-content { margin-left: 72px; }
+.app[data-sidebar="false"] .main-content { margin-left: var(--sidebar-rail); }
 
 /* ── HEADER ────────────────────────────────────── */
 .header {
@@ -242,7 +248,7 @@ body {
   padding: 12px 0;
 }
 
-.sidebar.collapsed { width: 72px; }
+.sidebar.collapsed { width: var(--sidebar-rail); }
 
 .sidebar-item {
   display: flex; align-items: center; gap: 20px;
@@ -851,6 +857,88 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
 .subscribe-btn:disabled { opacity: 0.6; cursor: default; }
 .subscribe-btn.small { padding: 5px 12px; font-size: 12px; }
 
+/* ── MINI-PLAYER (widget) ───────────────────────────────────────────────
+   Tornando Indietro da un video (o aprendo un'altra pagina da lì) il video
+   continua in un widget sopra la pagina, come nell'app di YouTube. La pagina
+   video NON si smonta (vedi App/AppRoutes.jsx): il suo contenuto si nasconde
+   qui e il player diventa `fixed`.
+
+   Si nascondono i FRATELLI lungo il percorso fino al player, mai un suo
+   antenato: un antenato in `display: none` nasconderebbe anche il player, per
+   quanto `fixed`. Il `:not()` copre anche quello che verrà aggiunto dopo
+   (info, commenti, correlati, barra del cast…) senza doverlo elencare.
+
+   Area libera (--mini-*): sotto header e banner cookie (che hanno z-index
+   più alto e lo coprirebbero), a destra della barra laterale su desktop, a
+   8px dai bordi. Il widget ci si muove con due frazioni --mx/--my (0..1,
+   scritte da components/VideoPlayer/miniPosition.js): `left` porta il bordo
+   sinistro del widget a L + mx·A e `translate(-mx·100%)` lo riporta indietro
+   di mx·W, quindi L + mx·(A−W) — con mx=0 tocca il bordo sinistro dell'area,
+   con mx=1 quello destro, senza bisogno di conoscere W. Le percentuali di un
+   elemento fixed si riferiscono alla finestra SENZA barra di scorrimento
+   (100vw la includerebbe), quelle di translate al widget stesso. Rotazione,
+   banner chiuso, barra laterale aperta: il browser ricalcola da solo. */
+.app {
+  --mini-top: calc(var(--header-height) + var(--banner-height) + 8px);
+  --mini-left: calc(var(--sidebar-width) + 8px);
+  --mini-right: 8px;
+  --mini-bottom: 8px;
+}
+.app[data-sidebar="false"] { --mini-left: calc(var(--sidebar-rail) + 8px); }
+
+.video-page[data-mode="mini"] { margin: 0; max-width: none; }
+.video-page[data-mode="mini"] .video-page-layout > :not(.video-left),
+.video-page[data-mode="mini"] .video-left > :not(.video-main),
+.video-page[data-mode="mini"] .video-main > :not(.player-wrap) { display: none; }
+
+/* `.app` davanti per battere la modalità cinema
+   (`.video-page-layout.theater .player-wrap video`, max-height 78vh). */
+.app .video-page[data-mode="mini"] .player-wrap {
+  position: fixed; z-index: 80;   /* sotto barra laterale (90), sfondo del menu (96), header (100) */
+  width: var(--mini-w);
+  left: calc(var(--mini-left) + var(--mx, 1) * (100% - var(--mini-left) - var(--mini-right)));
+  top: calc(var(--mini-top) + var(--my, 1) * (100% - var(--mini-top) - var(--mini-bottom)));
+  transform: translate(calc(var(--mx, 1) * -100%), calc(var(--my, 1) * -100%));
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  cursor: auto;
+}
+.app .video-page[data-mode="mini"] .player-wrap video { max-height: none; }
+/* Barra dei comandi, menu, strato dei tocchi, tasto play grande: restano
+   montati (niente cambi nell'albero attorno al <video>) ma spariscono. */
+.app .video-page[data-mode="mini"] .player-wrap > :not(video):not(.mini-overlay):not(.player-spinner) {
+  display: none;
+}
+
+.mini-overlay {
+  position: absolute; inset: 0; z-index: 30;
+  /* Il dito sul widget lo trascina, non fa scorrere la pagina sotto. */
+  touch-action: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.mini-btn {
+  position: absolute; top: 6px;
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.mini-btn .material-symbols-outlined { font-size: 22px; }
+.mini-play { left: 6px; }
+.mini-close { right: 6px; }
+.mini-progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: rgba(255, 255, 255, 0.25); pointer-events: none;
+}
+.mini-progress > div { height: 100%; background: var(--accent); }
+
+/* Stessi bordi dell'area libera: invisibile, serve a misurarla durante il
+   trascinamento (miniPosition.js). Fuori dal player, perché dentro sarebbe
+   relativa al suo `transform` e non alla finestra. */
+.mini-area {
+  position: fixed; visibility: hidden; pointer-events: none;
+  top: var(--mini-top); left: var(--mini-left); right: var(--mini-right); bottom: var(--mini-bottom);
+}
+
 /* ── DESCRIZIONE: card chiusa + pannello a comparsa ───────────────────────
    La card non si espande più sul posto (spingeva i commenti a fondo pagina):
    apre il pannello qui sotto, che ha anche capitoli e trascrizione. */
@@ -1099,6 +1187,10 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
    cambia anche il comportamento, non solo l'aspetto. */
 @media (max-width: 900px) {
   .main-content { margin-left: 0 !important; padding: 12px; }
+  /* Qui la barra laterale è un pannello sopra la pagina, non una colonna:
+     il widget può arrivare fino al bordo. `[data-sidebar]` per pareggiare la
+     specificità della regola desktop, che questa segue nel file. */
+  .app[data-sidebar] { --mini-left: 8px; }
 
   /* Barra laterale = pannello a scomparsa, come su YouTube da telefono.
      Prima era `display: none` e basta: Home, Iscrizioni e Impostazioni non
