@@ -3,7 +3,7 @@ import { api } from "../../api";
 import { isCapacitor } from "../../api/device";
 import { useTouchDevice } from "../../hooks/useMediaQuery";
 import { formatTime, isBuffered, isSeekable, qualityForScreen, labelForHeight } from "./videoPlayerHelpers";
-import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, SEEK_BURST_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S } from "./playerConstants";
+import { SKIP_SECONDS, VOLUME_STEP, DOUBLE_TAP_MS, SEEK_BURST_MS, TAP_SLOP_PX, TAP_SIDE_RATIO, REBUFFER_MARGIN_S, FINE_VERA_S } from "./playerConstants";
 import { HOLD_SPEED, HOLD_MS } from "./speedMath";
 import { useStreamSource } from "./useStreamSource";
 import PlayerOverlays from "./PlayerOverlays";
@@ -78,6 +78,12 @@ export default function VideoPlayer({
   mini = false,
   onExpand,
   onClose,
+  // Fine VERA del video (playlist: si passa al successivo). Non ogni `ended`:
+  // il flusso si chiude con endOfStream() anche quando rinuncia dopo troppi
+  // errori di rete (vedi riapriOrinuncia in useStreamSource.js), e lì la
+  // posizione è ancora a metà — si passa oltre solo a meno di FINE_VERA_S
+  // dalla durata nota.
+  onEnded,
 }) {
   const wrapRef = useRef(null);
   const videoRef = useRef(null);
@@ -808,7 +814,11 @@ export default function VideoPlayer({
           setVolume(v.volume);
           setMuted(v.muted);
         }}
-        onEnded={() => { setPlaying(false); setControlsVisible(true); }}
+        onEnded={() => {
+          setPlaying(false); setControlsVisible(true);
+          const v = videoRef.current;
+          if (v && duration > 0 && flusso.tempo(v) >= duration - FINE_VERA_S) onEnded?.();
+        }}
         onError={() => onError?.()}
       >
         {subtitleLang && (

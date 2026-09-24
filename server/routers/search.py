@@ -1,4 +1,5 @@
 """search.py — ricerca YouTube e autocomplete."""
+import itertools
 import json
 import urllib.parse
 
@@ -7,15 +8,40 @@ from fastapi import APIRouter, HTTPException, Query
 
 from auth.cookie_session import crea_ydl
 from auth.mapping import is_video_entry, map_video_entry
+from auth.playlist_mapping import is_playlist_entry, map_playlist_entry
 from ytdlp.helpers import in_executor, ydl_opts_base
 
 router = APIRouter()
 
+# Il filtro "Tipo: playlist" della pagina risultati di YouTube (`sp`), così come
+# compare nel suo URL. ytsearchN restituisce solo video, quindi le playlist si
+# cercano aprendo quella pagina.
+_FILTRO_PLAYLIST = "EgIQAw%253D%253D"
+_PLAYLIST_PER_RICERCA = 20
+
+
+async def _cerca_playlist(q: str) -> dict:
+    """Le prime playlist che YouTube trova per `q` (una pagina sola, niente continuazioni)."""
+    url = (f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(q)}"
+           f"&sp={_FILTRO_PLAYLIST}")
+
+    def _estrai():
+        # Il generatore è pigro: va consumato finché l'istanza è aperta.
+        with crea_ydl(ydl_opts_base()) as ydl:
+            info = ydl.extract_info(url, download=False, process=False) or {}
+            return list(itertools.islice(iter(info.get("entries") or []), _PLAYLIST_PER_RICERCA))
+
+    entries = await in_executor(_estrai)
+    results = [map_playlist_entry(e) for e in entries if is_playlist_entry(e)]
+    return {"results": results, "query": q, "tipo": "playlist", "has_more": False}
+
 
 @router.get("/api/search")
-async def search(q: str = Query(...), page: int = 1):
-    """Search YouTube videos."""
+async def search(q: str = Query(...), page: int = 1, tipo: str = "video"):
+    """Ricerca: video (predefinito) o, con `tipo=playlist`, playlist."""
     try:
+        if tipo == "playlist":
+            return await _cerca_playlist(q)
         # ytsearchN chiede N risultati TOTALI: per la pagina 2 servono 40
         # risultati da cui prendere il secondo blocco.
         per_page = 20

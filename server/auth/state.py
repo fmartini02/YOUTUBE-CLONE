@@ -16,7 +16,7 @@ from typing import Optional
 
 from auth.storage import (
     TOKEN_FILE, SUBS_FILE, PREFS_FILE, HISTORY_FILE,
-    AVATAR_CACHE_FILE, SUBS_FEED_CACHE_FILE, CHANNEL_SEEN_FILE, _leggi_json,
+    AVATAR_CACHE_FILE, SUBS_FEED_CACHE_FILE, CHANNEL_SEEN_FILE, WATCH_LATER_FILE, _leggi_json,
 )
 
 
@@ -26,6 +26,8 @@ class AuthState:
     subs: list = field(default_factory=list)
     prefs: dict = field(default_factory=dict)
     history: list = field(default_factory=list)
+    # Coda "Guarda più tardi": in ordine di aggiunta, il primo è il più vecchio.
+    watch_later: list = field(default_factory=list)
     avatar_cache: dict = field(default_factory=dict)
     # Canale YouTube dell'account collegato (nome/avatar per la casella
     # "commenta come"): None = mai letto, {} = account senza canale.
@@ -52,6 +54,7 @@ def load_state() -> AuthState:
         subs=_leggi_json(SUBS_FILE, []),
         prefs=_leggi_json(PREFS_FILE, {}),
         history=_leggi_json(HISTORY_FILE, []),
+        watch_later=_leggi_json(WATCH_LATER_FILE, []),
         avatar_cache=_leggi_json(AVATAR_CACHE_FILE, {}),
         subs_feed_cache=_leggi_json(SUBS_FEED_CACHE_FILE, []),
         channel_seen=_leggi_json(CHANNEL_SEEN_FILE, {}),

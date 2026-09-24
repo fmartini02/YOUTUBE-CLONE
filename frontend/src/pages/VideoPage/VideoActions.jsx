@@ -1,4 +1,5 @@
 import LikeButton from "../../components/LikeButton";
+import { useWatchLaterToggle } from "../../hooks/useWatchLater";
 
 // Icona in un cerchio con l'etichetta sotto, come la striscia di comandi
 // dell'app YouTube. Non è un `action-btn`: lì il testo sta accanto all'icona e
@@ -32,8 +33,11 @@ function StopCastPill({ cast }) {
   );
 }
 
-/** Riga di azioni sotto il titolo: "mi piace", condividi, scarica. */
+/** Riga di azioni sotto il titolo: "mi piace", salva per dopo, condividi, scarica. */
 export default function VideoActions({ info, addToast, onDownload, videoId, canRate, cast, isCasting }) {
+  // "Salva" = coda locale "Guarda più tardi" (nessun account): i metadati
+  // vanno con il video, così la coda si mostra senza richiederli a YouTube.
+  const [salvato, toggleSalva] = useWatchLaterToggle({ ...info, id: videoId }, addToast);
   const condividi = () => {
     navigator.clipboard?.writeText(`https://youtube.com/watch?v=${videoId}`);
     addToast("Link copiato!");
@@ -44,6 +48,7 @@ export default function VideoActions({ info, addToast, onDownload, videoId, canR
       <LikeButton videoId={videoId} likes={info.likes} canRate={canRate} onNotice={addToast} />
       {isCasting && <StopCastPill cast={cast} />}
       <div className="video-actions-icons">
+        <ActionIcon icon={salvato ? "check" : "watch_later"} label={salvato ? "Salvato" : "Salva"} onClick={toggleSalva} />
         <ActionIcon icon="share" label="Condividi" onClick={condividi} />
         <ActionIcon icon="download" label="Scarica" onClick={onDownload} />
       </div>

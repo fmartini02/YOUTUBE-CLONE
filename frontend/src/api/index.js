@@ -9,6 +9,7 @@ export { proxyImg } from "./img";
 export { apiFetch, errorMessage } from "./core";
 export { resolveCastBase, checkServerReachable } from "./cast";
 export { isCapacitor } from "./device";
+export { WATCH_LATER_ID } from "./endpoints/playlists";
 export { formatDuration, formatCompact, formatViews, formatDate, timeAgo } from "./format";
 
 import { authEndpoints } from "./endpoints/auth";
@@ -16,6 +17,7 @@ import { commentsEndpoints } from "./endpoints/comments";
 import { cookiesEndpoints } from "./endpoints/cookies";
 import { feedsEndpoints } from "./endpoints/feeds";
 import { historyEndpoints } from "./endpoints/history";
+import { playlistsEndpoints } from "./endpoints/playlists";
 import { prefsEndpoints } from "./endpoints/prefs";
 import { searchEndpoints } from "./endpoints/search";
 import { streamingEndpoints } from "./endpoints/streaming";
@@ -34,5 +36,6 @@ export const api = {
   ...videosEndpoints,
   ...cookiesEndpoints,
   ...historyEndpoints,
+  ...playlistsEndpoints,
   ...prefsEndpoints,
 };

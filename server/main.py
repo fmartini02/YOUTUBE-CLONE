@@ -9,8 +9,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import (auth_oauth, channel_bubbles, comment_replies, comments,
-                      cookies, feeds, history, images, prefs, search, spa,
-                      status, streaming, subscriptions, videos, watch)
+                      cookies, feeds, history, images, playlists, prefs, search,
+                      spa, status, streaming, subscriptions, videos, watch,
+                      watch_later)
 from routers.spa import HashedStaticFiles, frontend_dist
 from core.security import ORIGINI_EXTRA, ORIGINI_LOCALI_RE, blocca_scritture_esterne
 from core.config import SERVER_PORT
@@ -45,7 +46,7 @@ app.add_middleware(
 
 for _router_module in (search, status, watch, streaming, comments, comment_replies,
                        auth_oauth, subscriptions, videos, feeds, channel_bubbles, images,
-                       cookies, history, prefs, spa):
+                       playlists, watch_later, cookies, history, prefs, spa):
     app.include_router(_router_module.router)
 
 app.on_event("startup")(on_startup)

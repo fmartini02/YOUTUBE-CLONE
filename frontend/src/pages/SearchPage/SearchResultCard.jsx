@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
-import { api, formatDuration, formatViews, formatDate, proxyImg } from "../api";
-import { useToast } from "../hooks/useToast";
-import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
+import { formatDuration, formatViews, formatDate, proxyImg } from "../../api";
+import ChannelLink, { daLinkCanale } from "../../components/ChannelLink";
+import { PlaylistBadge } from "../../components/PlaylistCard";
 
-function SearchSkeleton({ query }) {
+export function SearchSkeleton({ query }) {
   return (
     <div>
       <p style={{ color: "var(--text2)", marginBottom: 16 }}>Cerco "{query}"...</p>
@@ -37,7 +36,7 @@ function SearchMeta({ v, navigate }) {
   );
 }
 
-function SearchResultCard({ v, navigate }) {
+export default function SearchResultCard({ v, navigate }) {
   return (
     <div
       className="search-card"
@@ -55,31 +54,24 @@ function SearchResultCard({ v, navigate }) {
   );
 }
 
-export default function SearchPage({ query, navigate }) {
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const { addToast, ToastContainer } = useToast();
-
-  useEffect(() => {
-    if (!query) return;
-    setLoading(true);
-    api.search(query, 1)
-      .then(d => setResults(d.results || []))
-      .catch(() => addToast("Errore nella ricerca"))
-      .finally(() => setLoading(false));
-  }, [query]);
-
-  if (loading) return <SearchSkeleton query={query} />;
-
+/**
+ * Risultato di tipo playlist: stessa riga di un video, ma porta alla pagina
+ * della playlist e sulla copertina dice "Playlist" invece della durata.
+ */
+export function SearchPlaylistCard({ v, navigate }) {
   return (
-    <div>
-      <p style={{ color: "var(--text2)", marginBottom: 16, fontSize: 14 }}>
-        Risultati per "<strong style={{ color: "var(--text)" }}>{query}</strong>" — {results.length} video
-      </p>
-      <div className="search-results">
-        {results.map(v => <SearchResultCard key={v.id} v={v} navigate={navigate} />)}
+    <div className="search-card" onClick={e => { if (!daLinkCanale(e)) navigate("playlist", { listId: v.id }); }}>
+      <div className="search-thumb">
+        {v.thumbnail && <img src={proxyImg(v.thumbnail)} alt={v.title} />}
+        <PlaylistBadge count={v.count} />
       </div>
-      <ToastContainer />
+      <div className="search-meta">
+        <div className="search-title">{v.title}</div>
+        <div className="search-channel">
+          <ChannelLink channelId={v.channel_id} name={v.channel} navigate={navigate} />
+        </div>
+        <div className="search-stats" style={{ marginTop: 8 }}>Visualizza la playlist completa</div>
+      </div>
     </div>
   );
 }

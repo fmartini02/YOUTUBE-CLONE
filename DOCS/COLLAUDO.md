@@ -81,6 +81,15 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       music`, `lofi study`, `lofi jazz`, `lofi asmr`, `lofi study music`, `lofi chill`); `q=how+to`
       → 8 suggerimenti diversi e attinenti (`how to save a life`, `how to fish`, ...). Nessun
       traceback nel log.
+- [x] **Ricerca di playlist** — `GET /api/search?q=...&tipo=playlist` restituisce playlist (id
+      `PL…`, titolo, copertina, canale con `channel_id`), non video. Nella UI i filtri "Video" /
+      "Playlist" in cima ai risultati cambiano l'URL (`&tipo=playlist`) e i risultati playlist portano
+      a `/playlist?list=<id>`.
+      **OK** (2026-09-24, worktree `playlist-watch-later`, `data/` vuota) — `curl -m90
+      'http://127.0.0.1:8097/api/search?q=lofi+hip+hop&tipo=playlist'` → 20 playlist, es.
+      `PLAID2jaooX6MPalf-erM4S-mDDiZp6NDX` "Morning Coffee ☕️ [lofi hip hop/study beats]", canale
+      "Soul Lo Fi" con id. Chromium headless: clic sul filtro "Playlist" → URL
+      `/search?q=lofi%20hip%20hop&tipo=playlist`, 20 card con l'etichetta "Playlist".
 - [ ] **Pagina Ricerca** — la UI mostra i risultati e lo scroll infinito carica la pagina successiva.
       **non verificabile** — serve un browser reale (nessuna UI visiva in questo ambiente headless).
 
@@ -651,6 +660,66 @@ leggono con `adb logcat -s YtPip`:
 - [ ] **Pagina Iscrizioni** — le due metà (elenco da OAuth, feed da cookie) funzionano ognuna da sola;
       la pagina si dichiara vuota solo se mancano entrambe, e la scheda "Canali" c'è solo con l'OAuth.
       **non verificabile** — serve un browser reale.
+
+### Playlist e "Guarda più tardi"
+
+Verificato il 2026-09-24 (worktree `playlist-watch-later`, `data/` vuota, server su `:8097`,
+Chromium headless di Playwright pilotato da uno script `playwright-core`) sulla playlist
+`PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI` ("Popular Music Videos", 183 video).
+
+- [x] **`GET /api/playlist/<id>`** — video a pagine + `playlist` (titolo, autore, `count`,
+      visualizzazioni, data). Funzionante quando la seconda pagina **continua** la prima (stesso
+      `LazyFeed`, chiave `playlist:<id>`), un id con caratteri fuori da `[A-Za-z0-9_-]` dà 400 e una
+      playlist inesistente dà `reason: "playlist-non-trovata"` invece di un 500.
+      **OK** — `?limit=3` → titolo "Popular Music Videos", `count` 183, canale "Music", 3 video con
+      canale proprio; `?limit=3&offset=120` → 3 video nuovi in 0.5s (feed già aperto);
+      `/api/playlist/bad%26x=1` → 400; `/api/playlist/PLnonesistente1234567890` →
+      `reason: "playlist-non-trovata"`.
+- [x] **Video privati/eliminati esclusi** — nessuna voce `[Private video]`/`[Deleted video]` nei
+      risultati (filtro in `is_video_entry`, dentro `LazyFeed`: gli offset restano coerenti).
+      **OK per lettura del codice** — la playlist provata non ne conteneva; da riprovare su una
+      playlist che ne abbia (il `count` di YouTube deve risultare maggiore di `total`).
+- [x] **Pagina playlist** — `/playlist?list=<id>` (anche aperta direttamente o ricaricata: route in
+      `spa_routes()`) mostra copertina, titolo, autore cliccabile, "183 video • … visualizzazioni •
+      aggiornata il …", le righe numerate e lo scroll infinito.
+      **OK** — 50 righe, 100 dopo lo scorrimento in fondo; a 390px una colonna, nessuno scorrimento
+      orizzontale.
+- [x] **Riproduzione in sequenza** — "Riproduci tutto" apre `/watch?v=<primo>&list=<id>`; sopra i
+      correlati c'è il pannello con "Autore • 1 / N" e il video corrente evidenziato; a fine video
+      parte il successivo **da solo** e la voce di cronologia viene **sostituita** (`history.length`
+      invariato), come verso un correlato.
+      **OK** — pannello "Music • 1 / 183"; salto a 99.5% della barra → `ended` →
+      `/watch?v=NFvDHYMzj9U&list=…`, pannello "Music • 2 / 183", `history.length` 3 prima e dopo,
+      il nuovo video in riproduzione (`currentTime` 10.4 dopo 6s).
+- [x] **Fine vera, non rinuncia** — si avanza solo se la posizione è a meno di 3s dalla durata: un
+      flusso chiuso per errori di rete (endOfStream dopo i tentativi) non salta al video dopo.
+      **OK per lettura del codice** (`onEnded` in `components/VideoPlayer/index.jsx`, `FINE_VERA_S`);
+      il caso di rete che cade non è stato riprodotto.
+- [x] **Avanzamento nel widget** — tornando Indietro da un video in playlist il video continua nel
+      widget sopra la pagina; a fine video passa al successivo **restando** nel widget (nessun cambio
+      di pagina né di cronologia) ed Espandi riapre `/watch?v=<successivo>&list=<id>`.
+      **OK** — terzo video, salto a 97.5%, Indietro → `/playlist?list=…`, `data-mini="true"`;
+      dopo la fine `currentTime` riparte da 0 col quarto video, URL ancora `/playlist?list=…`;
+      tocco sul widget → `/watch?v=jWdxXdp8sZI&list=…`, pannello "Music • 4 / 183".
+- [x] **Scheda Playlist del canale** — nella pagina canale i filtri "Video" / "Playlist";
+      `GET /api/channel/<cid>/playlists` elenca le playlist col canale giusto (non "View full
+      playlist", il testo che yt-dlp mette al posto dell'autore).
+      **OK** — `UCsBjURrPoezykLs9EqgamOA` (Fireship) → 39 playlist, `channel: "Fireship"`; nella UI
+      39 card che portano a `/playlist?list=<id>`.
+- [x] **"Guarda più tardi": API** — `POST /api/watch-later` accoda (`added: true`), un secondo
+      POST dello stesso video risponde `added: false` e non lo duplica; `GET
+      /api/watch-later/<vid>` → `saved`; `/api/playlist/WL` è la coda nel formato playlist;
+      `DELETE /api/watch-later/<vid>` toglie; da un'origine esterna la scrittura è 403.
+      **OK** — sequenza sopra eseguita per intero, `data/watch_later.json` scritto; `DELETE` con
+      `Origin: https://evil.example` → 403, senza → `{"ok":true}`. ⚠️ tocca dati reali se `data/` è
+      quella vera: ripulire le voci di prova.
+- [x] **"Guarda più tardi": UI** — "Salva" fra le azioni sotto il video (diventa "Salvato", toast);
+      menu ⋮ sulle card (col mouse compare passando sopra, col dito sempre) → "Salva in Guarda più
+      tardi" senza aprire il video; voce "Guarda più tardi" nella barra laterale → `/playlist?list=WL`,
+      attiva solo lì, con la ✕ per togliere un video.
+      **OK** — "Salva" → "Salvato" + toast "Salvato in Guarda più tardi"; menu ⋮ su una card del
+      canale → "Salvato in Guarda più tardi", URL rimasto `/channel?id=…`; sidebar → 3 video in coda,
+      ✕ → 2.
 
 ## 7. Commenti
 

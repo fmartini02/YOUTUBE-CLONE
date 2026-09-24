@@ -25,7 +25,7 @@ export default function AppLayout({ nav, cookie, sidebarOpen, setSidebarOpen }) 
       )}
 
       <div className="app-body">
-        <Sidebar open={sidebarOpen} navigate={nav.navigate} currentPage={nav.page} authStatus={nav.authStatus} />
+        <Sidebar open={sidebarOpen} navigate={nav.navigate} currentPage={nav.page} currentParams={nav.pageParams} authStatus={nav.authStatus} />
         {/* Solo sul telefono (il CSS lo mostra solo lì): toccare fuori dal
             pannello lo chiude, come ci si aspetta da un menu che copre la pagina. */}
         <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />

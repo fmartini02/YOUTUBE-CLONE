@@ -1343,3 +1343,103 @@ html[data-pip] .player-wrap > :not(video):not(.player-spinner) { display: none !
   .history-thumb { width: 120px; border-radius: 8px; }
   .history-title { font-size: 13px; -webkit-line-clamp: 2; }
 }
+
+/* ── PLAYLIST E "GUARDA PIÙ TARDI" ───────────────
+   Pagina playlist (pages/PlaylistPage), pannello nella pagina video
+   (PlaylistPanel), card playlist (PlaylistCard, ricerca) e menu ⋮ delle card. */
+
+/* Etichetta "Playlist" sulla copertina, dove i video hanno la durata. */
+.playlist-badge {
+  position: absolute; bottom: 6px; right: 6px;
+  display: flex; align-items: center; gap: 2px;
+  background: rgba(0,0,0,0.85); color: #fff;
+  font-size: 12px; font-weight: 500; padding: 2px 6px 2px 4px; border-radius: 4px;
+}
+.playlist-badge .material-symbols-outlined { font-size: 16px; }
+
+/* Menu ⋮ della VideoCard: col mouse compare passando sopra la card (come su
+   YouTube), col dito resta sempre visibile — non c'è un "sopra". */
+.card-menu { position: relative; flex-shrink: 0; margin: -4px -8px 0 0; }
+.card-menu-btn {
+  width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer;
+  background: none; color: var(--text); display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity var(--transition), background var(--transition);
+}
+.card-menu-btn .material-symbols-outlined { font-size: 20px; }
+.video-card:hover .card-menu-btn, .card-menu-btn[aria-expanded="true"] { opacity: 1; }
+.card-menu-btn:hover { background: var(--bg3); }
+@media (hover: none) { .card-menu-btn { opacity: 1; } }
+.card-menu-list {
+  position: absolute; right: 0; top: 100%; z-index: 20; min-width: 230px;
+  background: var(--surface); border-radius: 12px; padding: 8px 0;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+.card-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; border: none; background: none; cursor: pointer;
+  color: var(--text); font-size: 14px; font-family: inherit; text-align: left;
+}
+.card-menu-item:hover:not(:disabled) { background: var(--bg3); }
+.card-menu-item:disabled { cursor: default; }
+.card-menu-item .material-symbols-outlined { font-size: 20px; }
+
+/* Pagina playlist: copertina a sinistra e informazioni accanto; sotto i 900px
+   una sopra l'altra. */
+.playlist-header { display: flex; gap: 24px; margin-bottom: 24px; align-items: flex-start; }
+.playlist-cover {
+  width: 360px; max-width: 100%; flex-shrink: 0; aspect-ratio: 16/9;
+  border-radius: var(--radius); overflow: hidden; background: var(--bg3);
+}
+.playlist-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.playlist-cover-vuota {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 64px; color: var(--text3);
+}
+.playlist-header-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.playlist-header-title { font-size: 26px; font-weight: 700; line-height: 1.25; }
+.playlist-header-sub { font-size: 13px; color: var(--text2); }
+.playlist-header-desc {
+  font-size: 13px; color: var(--text2); white-space: pre-wrap; max-width: 620px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.playlist-play-all { align-self: flex-start; margin-top: 8px; }
+.playlist-row { align-items: center; }
+.playlist-index { width: 24px; flex-shrink: 0; text-align: center; font-size: 13px; color: var(--text3); }
+
+@media (max-width: 900px) {
+  .playlist-header { flex-direction: column; gap: 12px; }
+  .playlist-cover { width: 100%; }
+  .playlist-header-title { font-size: 20px; }
+}
+@media (max-width: 600px) {
+  .playlist-index { width: 16px; font-size: 12px; }
+}
+
+/* Pannello playlist nella pagina video, sopra i correlati. La lista scorre da
+   sé (un riquadro alto al massimo 420px, come su YouTube): `position:
+   relative` serve a PlaylistPanel per portarci in vista la voce corrente. */
+.playlist-panel {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; margin-bottom: 16px;
+}
+.playlist-panel-head { padding: 12px 16px; background: var(--bg2); }
+.playlist-panel-title {
+  font-size: 16px; font-weight: 700; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.playlist-panel-title:hover { text-decoration: underline; }
+.playlist-panel-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.playlist-panel-list { max-height: 420px; overflow-y: auto; position: relative; padding: 4px 0; }
+.playlist-panel-item {
+  display: flex; gap: 8px; align-items: center; cursor: pointer;
+  padding: 6px 12px 6px 4px;
+}
+.playlist-panel-item:hover { background: var(--bg3); }
+.playlist-panel-item.corrente { background: var(--bg3); }
+.playlist-panel-index { width: 24px; flex-shrink: 0; text-align: center; font-size: 12px; color: var(--text2); }
+.playlist-panel-thumb { width: 100px; }
+.playlist-panel-loading { padding: 10px; text-align: center; font-size: 12px; color: var(--text3); }
+/* In modalità cinema i correlati diventano una griglia: il pannello resta
+   una riga intera sopra di loro. */
+.video-page-layout.theater .related-sidebar > .playlist-panel { grid-column: 1 / -1; }
+.playlist-panel-index .material-symbols-outlined { font-size: 18px; vertical-align: middle; }

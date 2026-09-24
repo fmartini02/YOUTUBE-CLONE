@@ -37,6 +37,7 @@ class HashedStaticFiles(StaticFiles):
 @router.get("/settings")
 @router.get("/channel")
 @router.get("/history")
+@router.get("/playlist")
 async def spa_routes():
     """
     Route "finte": il frontend naviga tra le pagine con la vera History API

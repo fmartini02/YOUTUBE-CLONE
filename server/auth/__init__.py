@@ -17,8 +17,12 @@ Mappa dei moduli:
   lazy_feed.py               LazyFeed: estrazione pigra a blocchi
   feed_cache.py              cache LRU dei LazyFeed aperti + lock
   feed_pager.py               paginazione pigra condivisa (home/correlati/canale)
-  feed_home.py, feed_related.py, feed_channel.py, feed_subscriptions.py
-                              le quattro sorgenti di feed
+  feed_home.py, feed_related.py, feed_channel.py, feed_subscriptions.py,
+  feed_playlist.py            le sorgenti di feed (home, correlati, canale,
+                              iscrizioni, playlist)
+  playlist_mapping.py         intestazione di una playlist, voci "playlist"
+  channel_playlists.py        scheda Playlist di un canale
+  watch_later.py              coda locale "Guarda più tardi" (id WL)
   oauth_flow.py               device flow: ottenere/rinnovare il token
   oauth_status.py             autenticato? può scrivere?
   yt_api.py                   chiamata autenticata generica alla Data API

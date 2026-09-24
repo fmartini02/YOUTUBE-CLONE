@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ascoltaPip, eseguiComandoPip, leggiStatoPip } from "../hooks/pipBridge";
+import { paramsVideo } from "./navHistory";
 
 // Entrando in PiP la WebView si rimpicciolisce e il player esce dal flusso
 // (diventa fixed a tutta finestra): il testo si ridispone e, al ritorno, la
@@ -36,7 +37,7 @@ function esci(ev, navRef, scroll) {
   delete root.dataset.pip;
   const n = navRef.current;
   if (ev?.esito === "espandi" && n.widget && n.page !== "video") {
-    n.navigate("video", { videoId: n.widget });
+    n.navigate("video", paramsVideo(n.widget, n.lista));
     return;
   }
   if (scroll.y != null) ripristinaScroll(scroll.y);

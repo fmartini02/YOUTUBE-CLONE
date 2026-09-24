@@ -1,5 +1,6 @@
 import { formatDuration, formatViews, formatDate, proxyImg } from "../api";
 import ChannelLink, { daLinkCanale } from "./ChannelLink";
+import VideoCardMenu, { daMenuCard } from "./VideoCardMenu";
 
 function Thumbnail({ video }) {
   return (
@@ -45,6 +46,7 @@ function VideoMeta({ video, navigate, avatar }) {
         </div>
         <div className="video-stats">{videoStatsLine(video)}</div>
       </div>
+      <VideoCardMenu video={video} />
     </div>
   );
 }
@@ -59,7 +61,8 @@ export default function VideoCard({ video, navigate, onPlay, avatarUrl }) {
         // Il tocco sul logo o sul nome del canale porta al canale, non al
         // video: qui si controlla la provenienza invece di fidarsi solo dello
         // stopPropagation del link (col dito quel click può non arrivare).
-        if (daLinkCanale(e)) return;
+        // Lo stesso per il menu ⋮ (vedi VideoCardMenu).
+        if (daLinkCanale(e) || daMenuCard(e)) return;
         navigate("video", { videoId: video.id });
       }}
     >

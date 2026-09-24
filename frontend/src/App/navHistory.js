@@ -25,6 +25,11 @@ import { pageToUrl } from "./routing";
  * c'è, quindi la stessa pagina risulterebbe diversa.
  */
 
+/** Parametri della pagina video: `listId` solo se c'è, così l'URL resta /watch?v=… fuori da una playlist. */
+export function paramsVideo(videoId, listId) {
+  return listId ? { videoId, listId } : { videoId };
+}
+
 /** "push" | "replace" | "back": cosa fare della cronologia andando da `corrente` (history.state) a `to`. */
 export function operazioneCronologia(corrente, to, params) {
   if (corrente?.page !== "video") return "push";
@@ -50,10 +55,16 @@ export function sottoPer(corrente, to) {
  * sta girando sulla TV, uscendo dalla pagina non resta nessun widget (il
  * player locale non c'è, al suo posto c'è il telecomando) — come prima di
  * questa funzione, quando uscire dalla pagina video la smontava sempre.
+ *
+ * `lista` è la playlist in cui si sta guardando il video del widget (il
+ * `&list=` dell'URL): segue il widget, non la pagina, perché tornando
+ * Indietro il video continua nel widget e deve poter passare al successivo
+ * anche lì.
  */
 export function prossimoStato(prec, page, params, castingVideoId) {
   let widget = prec.widget;
-  if (page === "video") widget = params.videoId || null;
+  let lista = prec.lista || null;
+  if (page === "video") { widget = params.videoId || null; lista = params.listId || null; }
   else if (prec.page === "video" && castingVideoId && castingVideoId === widget) widget = null;
-  return { page, params, widget };
+  return { page, params, widget, lista };
 }

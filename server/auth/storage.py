@@ -21,6 +21,8 @@ OAUTH_SETUP_FILE = DATA_DIR / "oauth_setup.json"
 # bollicine in home (vedi auth/channel_bubbles.py). Solo id di canale e di
 # video: nessuna credenziale, quindi NON va in FILE_RISERVATI.
 CHANNEL_SEEN_FILE = DATA_DIR / "channel_seen.json"
+# Coda "Guarda più tardi", locale come la cronologia: nessuna credenziale.
+WATCH_LATER_FILE = DATA_DIR / "watch_later.json"
 
 # File che contengono credenziali: refresh token Google, client secret e la
 # sessione YouTube. Vanno scritti a 0600 — con i permessi di default (0644)

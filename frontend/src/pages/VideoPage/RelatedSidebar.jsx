@@ -37,7 +37,9 @@ function RelatedItem({ v, navigate, onQueue }) {
 
 // Solo mentre si sta trasmettendo dall'APK (cast.remote presente e connesso)
 // i correlati mostrano il "＋" per accodare il video sul Chromecast.
-export default function RelatedSidebar({ related, navigate, sentinelRef, loading, cast, addToast }) {
+// `top`: cosa sta sopra i correlati — il pannello della playlist, se il video
+// si guarda dentro una (vedi PlaylistPanel).
+export default function RelatedSidebar({ related, navigate, sentinelRef, loading, cast, addToast, top }) {
   const canQueue = cast?.remote && cast?.connected;
   const onQueue = canQueue ? async (v) => {
     try {
@@ -49,6 +51,7 @@ export default function RelatedSidebar({ related, navigate, sentinelRef, loading
   } : null;
   return (
     <div className="related-sidebar">
+      {top}
       <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, color: "var(--text2)" }}>Video correlati</h3>
       {related.map(v => <RelatedItem key={v.id} v={v} navigate={navigate} onQueue={onQueue} />)}
       {/* Sentinella: entrando nel viewport carica il blocco successivo del mix */}

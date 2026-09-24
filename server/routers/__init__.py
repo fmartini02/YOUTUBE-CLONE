@@ -15,6 +15,9 @@ nell'app da main.py.
   subscriptions.py           iscrizioni: elenco, stato, iscriviti/disiscriviti
   videos.py                   azioni account su un video (oggi: "mi piace")
   feeds.py                    home, iscrizioni, correlati, canale, loghi
+  playlists.py                una playlist a pagine (WL = "Guarda più tardi"),
+                              scheda Playlist di un canale
+  watch_later.py              coda locale "Guarda più tardi"
   channel_bubbles.py          bollicine dei canali attivi + "canale visto"
   images.py                   proxy miniature/avatar di YouTube (LAN senza DNS)
   cookies.py                   cookies.txt manuale + import dal browser

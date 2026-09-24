@@ -27,9 +27,22 @@ def is_video_entry(e) -> bool:
     anche i "Mix" (playlist auto-generate, id tipo RD...): non hanno copertina
     — l'URL i.ytimg.com/vi/<id> dà 404 — e aprirli come video non funziona.
     Gli id dei video sono sempre di 11 caratteri, quelli di playlist più lunghi.
+
+    Scarta anche i video privati o eliminati: nelle playlist yt-dlp li
+    ripropone (ricarica la pagina con "mostra video non disponibili") con un
+    titolo segnaposto, e aprirli dà solo un errore — in una riproduzione in
+    sequenza fermerebbe la coda. Il filtro sta qui e non a valle perché il
+    conteggio delle pagine (offset) si fa su ciò che LazyFeed ha tenuto.
     """
     vid = (e or {}).get("id")
+    if (e or {}).get("title") in _TITOLI_NON_DISPONIBILI:
+        return False
     return bool(vid) and len(vid) == 11
+
+
+# Titoli segnaposto di yt-dlp per i video non più visibili (vedi is_video_entry).
+# yt-dlp chiede le pagine in inglese, quindi non dipendono dalla lingua.
+_TITOLI_NON_DISPONIBILI = {"[Private video]", "[Deleted video]"}
 
 
 def map_video_entry(e: dict) -> dict:
