@@ -33,6 +33,11 @@ export default function PreferencesSection({ prefs, salvaPrefs }) {
         label="Autoplay video" sublabel="Fa partire da solo un video appena aperto"
         value={prefs.autoplay !== false} onChange={v => salvaPrefs({ autoplay: v })}
       />
+      <PrefToggle
+        label="Riprendi da dove eri rimasto"
+        sublabel="Riapre i video dal punto in cui li avevi lasciati e mostra la barra rossa sulle miniature"
+        value={prefs.resume !== false} onChange={v => salvaPrefs({ resume: v })}
+      />
     </Section>
   );
 }

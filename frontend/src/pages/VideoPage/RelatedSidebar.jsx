@@ -1,5 +1,6 @@
 import { formatDuration, formatViews, proxyImg } from "../../api";
 import ChannelLink, { daLinkCanale } from "../../components/ChannelLink";
+import WatchProgressBar from "../../components/WatchProgressBar";
 import { queuePayloadFor } from "../../components/CastRemote/castRemoteHelpers";
 
 function RelatedQueueBtn({ onQueue, v }) {
@@ -22,6 +23,7 @@ function RelatedItem({ v, navigate, onQueue }) {
       <div className="related-thumb">
         <img src={proxyImg(v.thumbnail)} alt={v.title} />
         {v.duration && <span className="related-duration">{formatDuration(v.duration)}</span>}
+        <WatchProgressBar videoId={v.id} />
       </div>
       <div className="related-meta">
         <div className="related-title">{v.title}</div>

@@ -1,5 +1,6 @@
 import { formatDuration, formatViews, formatDate, proxyImg } from "../../api";
 import ChannelLink, { daLinkCanale } from "../../components/ChannelLink";
+import WatchProgressBar from "../../components/WatchProgressBar";
 
 function VideoMeta({ v, navigate }) {
   return (
@@ -31,6 +32,7 @@ export default function VideoResult({ v, navigate }) {
       <div className="search-thumb">
         <img src={proxyImg(v.thumbnail)} alt={v.title} />
         {v.duration && <span className="search-duration">{formatDuration(v.duration)}</span>}
+        <WatchProgressBar videoId={v.id} />
       </div>
       <VideoMeta v={v} navigate={navigate} />
     </div>

@@ -11,11 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import (auth_oauth, channel_bubbles, comment_replies, comments,
                       cookies, feeds, history, images, playlists, prefs, search,
                       spa, sponsorblock, status, streaming, subscriptions, videos,
-                      watch, watch_later)
+                      watch, watch_later, watch_progress)
 from routers.spa import HashedStaticFiles, frontend_dist
 from core.security import ORIGINI_EXTRA, ORIGINI_LOCALI_RE, blocca_scritture_esterne
 from core.config import SERVER_PORT
-from core.startup import on_startup
+from core.startup import on_shutdown, on_startup
 from ytdlp.patch import applica_patch_collaborazioni
 
 # Va applicata prima di qualsiasi estrazione: recupera l'id del canale nelle
@@ -46,10 +46,12 @@ app.add_middleware(
 
 for _router_module in (search, status, watch, streaming, comments, comment_replies,
                        auth_oauth, subscriptions, videos, feeds, channel_bubbles, images,
-                       playlists, watch_later, cookies, history, prefs, sponsorblock, spa):
+                       playlists, watch_later, cookies, history, watch_progress, prefs,
+                       sponsorblock, spa):
     app.include_router(_router_module.router)
 
 app.on_event("startup")(on_startup)
+app.on_event("shutdown")(on_shutdown)
 
 # Serve React frontend — mount ultimo: è un catch-all su "/" e deve restare
 # sotto le route API dichiarate sopra.

@@ -2,6 +2,7 @@ import { useState, useRef, createContext, useContext } from "react";
 import { useCast } from "../hooks/useCast.jsx";
 import { useMobileLayout } from "../hooks/useMediaQuery";
 import { PrefsProvider } from "../hooks/usePrefs";
+import { WatchProgressProvider } from "../hooks/useWatchProgress";
 import ServerSetup from "../components/ServerSetup";
 import { useAppNavigation } from "./useAppNavigation";
 import { useBackButton } from "./useBackButton";
@@ -51,14 +52,16 @@ function AppInterno() {
     return <ServerSetup onDone={() => auth.setServerReady(true)} />;
   }
 
+  // WatchProgressProvider solo da qui in giù: legge la cronologia dal server,
+  // che prima di ServerSetup (APK al primo avvio) non ha ancora un indirizzo.
   return (
     <CastContext.Provider value={castSDK}>
-      <AppLayout
-        nav={{ ...nav, authStatus: auth.authStatus, loadAuthStatus: auth.loadAuthStatus }}
-        cookie={cookie}
-        sidebarOpen={sidebarOpen}
-        setSidebarOpen={setSidebarOpen}
-      />
+      <WatchProgressProvider>
+        <AppLayout
+          nav={{ ...nav, authStatus: auth.authStatus, loadAuthStatus: auth.loadAuthStatus }}
+          cookie={cookie} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
+        />
+      </WatchProgressProvider>
     </CastContext.Provider>
   );
 }

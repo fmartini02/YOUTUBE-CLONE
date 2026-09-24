@@ -21,6 +21,11 @@ def get_prefs(state) -> dict:
         # salvato le altre.
         "sponsorBlock": state.prefs.get("sponsorBlock", True),
         "sponsorCategories": state.prefs.get("sponsorCategories", {}),
+        # Riapre i video dal punto in cui erano stati lasciati e mostra la
+        # barretta rossa sulle miniature. Spenta, la posizione si registra
+        # comunque (come la cronologia stessa): riaccenderla non riparte da zero.
+        # Vedi auth/watch_progress.py.
+        "resume": state.prefs.get("resume", True),
     }
 
 

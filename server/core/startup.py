@@ -2,6 +2,7 @@
 import tempfile
 from pathlib import Path
 
+from auth import watch_progress
 from auth.state import state
 from auth.storage import proteggi_file_riservati
 from sync.scheduler import scheduler
@@ -41,3 +42,11 @@ async def on_startup():
     # sync/scheduler.py), quindi non serve un altro force_sync qui:
     # raddoppierebbe le richieste.
     scheduler.start(state, ydl_opts_base)
+
+
+async def on_shutdown():
+    # Le posizioni di visione vanno su disco a intervalli (vedi
+    # auth/watch_progress.py): l'ultima, se è rimasta solo in memoria, si
+    # salva qui. Un kill -9 o una caduta di corrente la perdono comunque, ma
+    # al massimo sono PROGRESS_SAVE_MIN_S secondi di visione.
+    watch_progress.flush_progress(state)

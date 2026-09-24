@@ -1,6 +1,7 @@
 import { formatDuration, formatViews, formatDate, proxyImg } from "../api";
 import ChannelLink, { daLinkCanale } from "./ChannelLink";
 import VideoCardMenu, { daMenuCard } from "./VideoCardMenu";
+import WatchProgressBar from "./WatchProgressBar";
 
 function Thumbnail({ video }) {
   return (
@@ -10,6 +11,7 @@ function Thumbnail({ video }) {
           (le miniature ora passano comunque dal proxy locale, veloce). */}
       <img src={proxyImg(video.thumbnail)} alt={video.title} />
       {video.duration && <span className="duration">{formatDuration(video.duration)}</span>}
+      <WatchProgressBar videoId={video.id} />
       {/* Sulla copertina non c'è nessun comando: cliccare ovunque fa partire
           il video, come su YouTube. Il download sta solo nella pagina video. */}
     </div>

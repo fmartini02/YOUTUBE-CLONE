@@ -20,6 +20,7 @@ class PrefsUpdate(BaseModel):
     # sconosciuto salvato in prefs.json il player lo tratterebbe come "ignora"
     # senza che nessuno se ne accorga.
     sponsorCategories: Optional[Dict[str, Literal["salta", "mostra", "ignora"]]] = None
+    resume: Optional[bool] = None
 
 
 @router.get("/api/prefs")

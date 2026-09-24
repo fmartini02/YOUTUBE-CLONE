@@ -354,6 +354,20 @@ body {
   border-radius: 4px;
 }
 
+/* Barretta "visto fin qui" in fondo alla miniatura (WatchProgressBar.jsx):
+   vale per ogni contenitore di miniatura posizionato (.thumbnail-wrap,
+   .related-thumb, .search-thumb, .history-thumb). Il rosso resta lo stesso in entrambi i
+   temi, come la barra del player. La durata sale quanto basta a non coprirla. */
+.watch-progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
+  background: rgba(255,255,255,0.35); pointer-events: none;
+}
+.watch-progress-fill { height: 100%; background: #ff0000; }
+.thumbnail-wrap:has(.watch-progress) .duration,
+.related-thumb:has(.watch-progress) .related-duration,
+.search-thumb:has(.watch-progress) .search-duration,
+.history-thumb:has(.watch-progress) .duration { bottom: 10px; }
+
 .play-btn {
   background: var(--accent); border: none; color: #fff;
   padding: 8px 16px; border-radius: 18px; cursor: pointer;

@@ -17,7 +17,10 @@ import { api } from "../api";
 
 // `sponsorCategories` vuoto: i default per categoria stanno in
 // components/VideoPlayer/sponsorBlock.js (azioniSponsor).
-const DEFAULT = { quality: "best", autoplay: true, theme: "dark", fitScreen: true, sponsorBlock: true, sponsorCategories: {} };
+const DEFAULT = {
+  quality: "best", autoplay: true, theme: "dark", fitScreen: true, resume: true,
+  sponsorBlock: true, sponsorCategories: {},
+};
 
 const PrefsContext = createContext({ prefs: DEFAULT, pronte: false, salvaPrefs: async () => {} });
 

@@ -13,6 +13,7 @@ import MiniPlayerOverlay from "./MiniPlayerOverlay";
 import { usePipBridge } from "./usePipBridge";
 import { useSponsorBlock } from "./useSponsorBlock";
 import SponsorOverlay, { SponsorBarSegments } from "./SponsorOverlay";
+import { useRipresa, useSalvaProgresso } from "./useWatchResume";
 
 /**
  * Player con controlli propri, al posto di quelli nativi del browser.
@@ -135,6 +136,9 @@ export default function VideoPlayer({
   // Android) e, letti ad ogni render, riaprirebbero il flusso a metà video.
   const [sorgente, setSorgente] = useState(() => qualityForScreen(quality, fitScreen));
   const [prevScelta, setPrevScelta] = useState({ quality, fitScreen });
+  // Video di cui il punto di ripresa è già stato applicato (vedi "Ripresa"
+  // subito sotto): azzerato ad ogni cambio di video.
+  const [ripresaFatta, setRipresaFatta] = useState(null);
   if (prevId !== videoId) {
     setPrevId(videoId);
     // Video nuovo: la sorgente si ricalcola (lo schermo si legge quando si apre
@@ -143,6 +147,7 @@ export default function VideoPlayer({
     setPrevScelta({ quality, fitScreen });
     setSorgente(qualityForScreen(quality, fitScreen));
     setStream({ start: 0, n: 0 });
+    setRipresaFatta(null);
     setPosition(0);
     setBufferedStart(0);
     setBufferedEnd(0);
@@ -163,6 +168,21 @@ export default function VideoPlayer({
       setStream(s => ({ start: position, n: s.n + 1 }));
     }
   }
+
+  // ── Ripresa da dove si era rimasti ─────────────────────────────────────
+  // Un video appena aperto non apre il flusso finché non si sa da dove
+  // (useWatchResume.js: una lettura in memoria sul server, timeout 2s → da 0):
+  // aprirlo da 0 e saltare dopo vorrebbe dire due ffmpeg e l'inizio del video
+  // che lampeggia. Qui, in fase di render come il cambio video sopra (e DOPO
+  // di lui, che azzera `stream`), il secondo arrivato diventa lo `start` del
+  // flusso — lo stesso meccanismo di un salto. Dipende solo da `videoId`: il
+  // passaggio a widget (`mini`) non la rilegge, il video continua da dov'è.
+  const ripresa = useRipresa(videoId);
+  if (ripresa && ripresaFatta !== videoId) {
+    setRipresaFatta(videoId);
+    if (ripresa.t > 0) setStream(s => ({ start: ripresa.t, n: s.n + 1 }));
+  }
+  const ripresaPronta = ripresaFatta === videoId;
 
   // Vero solo dopo un `onPlaying` genuino sul flusso corrente: distingue il
   // buffering del primo caricamento (normale) da un vero stallo a metà
@@ -194,8 +214,12 @@ export default function VideoPlayer({
   // Durata sempre aggiornata per chi la legge DOPO l'apertura del flusso
   // (onEnd in useStreamSource.js): `duration` arriva da /api/watch di solito
   // dopo il flusso, e l'effetto di caricamento sotto non si riesegue per lei.
-  const durataRef = useRef(duration);
-  durataRef.current = duration;
+  // Finché /api/watch non risponde vale la durata salvata in cronologia, se il
+  // video c'è: senza durata il flusso MSE non sa partire dal punto di ripresa
+  // (vedi useRipresa in useWatchResume.js).
+  const durataNota = duration || ripresa?.durata || undefined;
+  const durataRef = useRef(durataNota);
+  durataRef.current = durataNota;
   // Riapertura del flusso chiesta e non ancora conclusa (da seekTo a quando
   // `flusso.apri()` ha finito): in quel tempo il <video> ha ancora il buffer
   // del flusso VECCHIO, che sta per essere sostituito. Un salto che lo
@@ -215,6 +239,16 @@ export default function VideoPlayer({
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
+    // In attesa del punto di ripresa (vedi "Ripresa" in cima): niente flusso
+    // ancora, e il video di prima (passando a un correlato) non deve
+    // continuare a suonare intanto. Prima di `caricatoRef`: l'apertura vera,
+    // quella che decide l'autoplay, è la prossima.
+    if (!ripresaPronta) {
+      flusso.chiudi();
+      v.pause();
+      setBuffering(true);
+      return;
+    }
     // Ogni salto o riapertura per errore di rete riapre il flusso (vedi
     // seekTo e useStreamSource.js), e prima qui c'era un play() incondizionato,
     // o un ref che restava vero anche dopo una pausa dell'utente: in entrambi
@@ -248,7 +282,7 @@ export default function VideoPlayer({
     // dove si era arrivati, non dall'inizio.
     flusso.apri(v, {
       videoId, quality: sorgente, start: stream.start,
-      durata: duration, durataOra: () => durataRef.current, rate, autoplay: deveAndare, muxUrl: api.muxUrl,
+      durata: durataNota, durataOra: () => durataRef.current, rate, autoplay: deveAndare, muxUrl: api.muxUrl,
       // `onProgress` sul <video> (sotto) copre il ripiego <video src>, ma con
       // MediaSource l'evento nativo "progress" non è garantito ad ogni
       // append: questa callback, chiamata dalla pompa dopo ogni scrittura
@@ -279,8 +313,10 @@ export default function VideoPlayer({
     // cambiasse a player già aperto non deve riaprirlo. `playing` si legge
     // solo per decidere `deveAndare` al momento della riapertura, non deve
     // farne scattare una nuova quando cambia da sé (altrimenti ogni singolo
-    // play/pausa riaprirebbe il flusso).
-  }, [videoId, sorgente, stream]);
+    // play/pausa riaprirebbe il flusso). `ripresaPronta` sì: passa a vero una
+    // volta per video, ed è l'unico segnale se la ripresa è da 0 (lì `stream`
+    // non cambia).
+  }, [videoId, sorgente, stream, ripresaPronta]);
 
   // ── Velocità ───────────────────────────────────────────────────────────
   // Dipende anche da `stream` perché `load()` riporta `playbackRate` a
@@ -418,6 +454,13 @@ export default function VideoPlayer({
   }, []);
   // PiP di Android: stato e comandi della finestra (no-op fuori dall'APK).
   usePipBridge(videoRef, playing || rebuffering, actualHeight, riproduci, pausa);
+  // Fin dove si è arrivati, per riprendere da lì e per le barrette sulle
+  // miniature (useWatchResume.js). Non prima che la ripresa sia applicata:
+  // fino ad allora `position` è 0 e sovrascriverebbe il punto da riprendere.
+  // `rebuffering` conta come riproduzione, come per il PiP: la pausa tecnica
+  // di uno stallo non è una pausa dell'utente, e con la rete lenta ogni
+  // stallo avrebbe mandato un salvataggio "finale" (scritto subito su disco).
+  useSalvaProgresso(videoId, position, durataNota, playing || rebuffering, ripresaPronta);
 
   const toggleMute = useCallback(() => {
     const v = videoRef.current;

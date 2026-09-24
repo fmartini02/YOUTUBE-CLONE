@@ -23,6 +23,7 @@ nell'app da main.py.
   sponsorblock.py             segmenti SponsorBlock (sponsor, intro…) con cache
   cookies.py                   cookies.txt manuale + import dal browser
   history.py                    cronologia locale
+  watch_progress.py             posizione di visione: salvataggio, ripresa, barrette
   prefs.py                      preferenze utente
   spa.py                         route "finte" del frontend + static files
 """
