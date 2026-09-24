@@ -33,6 +33,7 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
       onError={() => player.addToast("Errore stream — ricarica la pagina")} onNotice={player.addToast}
       autoplay={player.autoplay} fitScreen={player.fitScreen}
       cast={cast} castMedia={player.castMedia} seekRequest={player.seekRequest}
+      mini={player.widget?.mini} onExpand={player.widget?.onExpand} onClose={player.widget?.onClose}
     />
   );
 }
@@ -45,11 +46,11 @@ function PlayerOrCasting({ isCasting, cast, info, player }) {
  */
 export default function VideoMainPlayer({
   isCasting, cast, videoId, quality, cambiaQualita, info, subtitleLang, setSubtitleLang, subtitleLangs,
-  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia, seekRequest,
+  subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, castMedia, seekRequest, widget,
 }) {
   const player = {
     videoId, quality, cambiaQualita, subtitleLang, setSubtitleLang, subtitleLangs, castMedia, seekRequest,
-    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen,
+    subtitleSize, setSubtitleSize, theater, toggleTheater, addToast, autoplay, fitScreen, widget,
   };
   return (
     <>

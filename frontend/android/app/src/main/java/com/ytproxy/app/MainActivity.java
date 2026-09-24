@@ -1,5 +1,7 @@
 package com.ytproxy.app;
 
+import android.content.res.Configuration;
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.WebView;
 
@@ -7,9 +9,13 @@ import androidx.activity.OnBackPressedCallback;
 
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.PluginHandle;
 
 /**
- * Due cose che Capacitor da solo non fa: il tasto Indietro e lo schermo intero.
+ * Tre cose che Capacitor da solo non fa: il tasto Indietro, lo schermo intero e
+ * il Picture-in-Picture (quest'ultimo è spiegato in {@link PipPlugin}; qui ci
+ * sono solo gli agganci dell'activity: onUserLeaveHint,
+ * onPictureInPictureModeChanged e il ripiego del tasto Indietro).
  *
  * ── Schermo intero ─────────────────────────────────────────────────────────
  * Il WebChromeClient di Capacitor annulla la richiesta di schermo intero della
@@ -47,6 +53,8 @@ public class MainActivity extends BridgeActivity {
         // più accettato. Sblocca il Chromecast nativo nell'APK, dove il Cast Web
         // Sender di Google non esiste (vedi CastBridgePlugin e hooks/nativeCast.js).
         registerPlugin(CastBridgePlugin.class);
+        // Picture-in-Picture (vedi PipPlugin): stessa regola, prima di super.onCreate.
+        registerPlugin(PipPlugin.class);
         super.onCreate(savedInstanceState);
 
         Bridge bridge = getBridge();
@@ -70,9 +78,17 @@ public class MainActivity extends BridgeActivity {
                 webView.evaluateJavascript(
                     "(function(){try{return !!(window.ytproxyHandleBack && window.ytproxyHandleBack());}catch(e){return false;}})()",
                     value -> {
-                        if (!"true".equals(value)) {
-                            finish();
-                        }
+                        if ("true".equals(value)) return;
+                        // Niente più dove tornare (di solito la home) ma un
+                        // video in riproduzione nel widget: invece di
+                        // chiudere di colpo l'app e il video, lo si manda in
+                        // PiP — come il tasto Home. Direttamente, con
+                        // l'activity ancora in primo piano: dopo un
+                        // moveTaskToBack() la chiamata fallirebbe. Se il PiP
+                        // non parte (disattivato dall'utente, video in
+                        // pausa) si chiude come prima.
+                        PipPlugin pip = pip();
+                        if (pip == null || !pip.entraSeIdoneo()) finish();
                     }
                 );
             }
@@ -88,5 +104,36 @@ public class MainActivity extends BridgeActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus && chromeClient != null) chromeClient.reapplySystemBars();
+    }
+
+    /**
+     * Uscita dall'app (tasto o gesto Home) da API 26 a 30: si entra in PiP se
+     * c'è un video in riproduzione. Da API 31 no — lì entra da solo il sistema
+     * con setAutoEnterEnabled (vedi PipPlugin), e chiederlo anche qui
+     * farebbe partire l'entrata due volte. Scatta anche quando l'app apre
+     * un'altra activity (selettore file dei cookie, browser per il login):
+     * con un video in riproduzione si va in PiP, come fa YouTube.
+     */
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            PipPlugin pip = pip();
+            if (pip != null) pip.entraSeIdoneo();
+        }
+    }
+
+    /** Entrata e uscita dal PiP → alla pagina. Chi lo interpreta (X o Espandi) è PipPlugin.modoCambiato. */
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        PipPlugin pip = pip();
+        if (pip != null) pip.modoCambiato(isInPictureInPictureMode, getLifecycle().getCurrentState());
+    }
+
+    private PipPlugin pip() {
+        Bridge bridge = getBridge();
+        PluginHandle handle = bridge != null ? bridge.getPlugin("YtPip") : null;
+        return handle != null ? (PipPlugin) handle.getInstance() : null;
     }
 }

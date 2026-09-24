@@ -21,7 +21,14 @@
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="com.ytproxy.app.CastOptionsProvider" />
 
+        <!-- supportsPictureInPicture: senza, enterPictureInPictureMode()
+             lancia IllegalStateException e il PiP non parte mai (vedi
+             PipPlugin). configChanges comprende già screenSize,
+             smallestScreenSize, screenLayout e orientation: entrando e
+             uscendo dal PiP l'activity NON viene ricreata, quindi la pagina e
+             il video restano quelli di prima. Non toglierli. -->
         <activity
+            android:supportsPictureInPicture="true"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"

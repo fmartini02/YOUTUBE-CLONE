@@ -433,6 +433,83 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       nel testo. Controllo di non-regressione su sottotitoli **caricati a mano** (`5MgBikgcWnY`,
       TED, inglese): 329 cue → **329 righe**, cioè la deduplica non tocca niente dove non serve.
 
+### Mini-player (widget) e Picture-in-Picture
+
+Criterio comune a tutte le voci: passando tra pagina intera, widget e PiP **non parte nessuna nuova
+richiesta `/api/mux` né `/api/watch`** (il player non si rimonta). Le chiamate della pagina sotto
+(`/api/search`, `/api/feed/home`, `/api/img`…) invece ripartono, perché quella pagina si rimonta.
+Si controlla contando le richieste nel pannello rete (o con `page.on("request")` in Playwright).
+Le prove del 2026-09-24 sono state fatte con il Chromium di Playwright headless a 390×844 e
+1280×800, server di prova su :8097 con `data/` vuota.
+
+- [x] **Indietro dal video → widget** — dalla pagina video, Indietro torna alla schermata di
+      partenza e il video continua in un widget in basso a destra. **OK** — ricerca → video →
+      Indietro: `/search?q=minecraft`, `data-mode="mini"`, tempo 1.5 → 4.0 s senza pause, widget
+      `[187, 726, 195, 110]` (8px dal bordo destro e da quello basso a 390×844), nuove `/api/mux` e
+      `/api/watch`: **nessuna**.
+- [x] **Tocco sul widget → pagina intera** — riapre il video a pagina intera allo stesso punto.
+      **OK** — tempo 6.4 → 8.0 s, nessuna nuova `/api/mux`/`/api/watch`, voce `/watch` con `sotto`
+      = la ricerca.
+- [x] **Da un correlato, Indietro** — torna alla schermata di partenza (non al video precedente)
+      col correlato nel widget. **OK** — ricerca → A → correlato R (`history.length` resta 3: la
+      voce è sostituita) → Indietro: ricerca, R nel widget, posizione 3 → 6 s, nessuna richiesta.
+- [x] **Video → canale → altro video, due volte Indietro** — nessun ritorno a un video vecchio.
+      **OK** — ricerca → R → canale (R nel widget) → B → Indietro: canale con B nel widget →
+      Indietro: ricerca con B nel widget; R non si ricarica, nessuna richiesta.
+- [x] **Apertura diretta di `/watch` sul web, poi Indietro** — home col widget, non uscita dal
+      sito. **OK** — cronologia riscritta in `[home, video]` (`depth` 1, `sotto: "/"`), Indietro
+      → `/`, widget, tempo 1.5 → 3.5 s, nessuna richiesta.
+- [x] **Home dalla barra laterale durante un video** — torna indietro invece di creare
+      `[home, home]`, e la barra laterale si chiude. **OK** — `/watch` diretto → hamburger → Home:
+      `/`, `history.length` invariata (3), `depth` 0, `data-sidebar="false"`.
+- [x] **Trascinamento** — il widget si sposta, resta dentro l'area libera (sotto l'header, a
+      destra della barra laterale su desktop) e il rilascio non lo espande. **OK** — telefono:
+      trascinato a sinistra → `left` 8, posizione salvata `{"x":0,"y":0.43}`, resta `mini`.
+      Desktop 1280×800: trascinato oltre l'angolo in alto a sinistra → `[80, 64]` (barra stretta
+      72 + 8, header 56 + 8); predefinita `[872, 567, 400, 225]`.
+- [x] **Pulsanti del widget** — pausa/play comandano il video, X lo chiude. **OK** — pausa →
+      `paused: true`, play → `false`; X → nessun `<video>` in pagina.
+- [x] **Tastiera col widget** — spazio e frecce restano alla pagina, `k` e `m` al video. **OK** —
+      spazio: resta in riproduzione; `k`: pausa.
+- [x] **Schermo intero, poi Indietro (desktop)** — si esce dallo schermo intero, il video va nel
+      widget. **OK** — `f` → `fullscreenElement` presente; Indietro → nessuno, `mini`, nessuna richiesta.
+- [x] **Qualità cambiata nelle Impostazioni col widget** — il flusso si riapre dal punto
+      raggiunto, non dall'ultimo salto o da 0. **OK** — widget a 7.7 s, qualità predefinita → 720:
+      una sola nuova richiesta, `/api/mux/y7iNb-rdhJ0?quality=720&start=7.54`.
+- [ ] **Widget durante il cast** — uscendo dalla pagina di un video in cast non resta nessun
+      widget. **non verificabile** (serve un Chromecast).
+- [ ] **Rotazione e banner cookie** — ruotando il telefono o chiudendo il banner, il widget resta
+      dentro l'area libera. **non verificabile** in questo giro (la posizione è calcolata dal CSS
+      con le stesse variabili dell'header e del banner: da provare sul telefono).
+- [x] **Aspetto in PiP** — con `data-pip` su `<html>` il player copre tutta la finestra, sopra
+      header, pannelli e toast, senza barra dei comandi, da pagina intera **anche in modalità
+      cinema** e dal widget; togliendolo tutto torna com'era. **OK** (simulato nel browser:
+      finestra 320×180 + `data-pip`) — player e video `[0, 0, 320, 180]`, elemento in cima al punto
+      dell'header = il player, barra `display: none`; dopo: widget di nuovo a `[872, 567, 400, 225]`.
+      Sul web il ponte verso Android non fa niente: nessun errore in console.
+
+Le voci seguenti richiedono l'APK su un telefono vero (`./scripts/build_apk.sh --install`) e si
+leggono con `adb logcat -s YtPip`:
+
+- [ ] **Tasto Home col video in riproduzione → PiP** — il video continua nella finestrella, con
+      le proporzioni del video (non una finestra verticale). Pagina intera o widget, uguale.
+      **non verificabile** (serve il telefono).
+- [ ] **Espandi** — riporta nell'app sul video a pagina intera allo stesso secondo, nessuna nuova
+      `/api/mux`/`/api/watch`; se si era già sulla pagina del video niente voce doppia. Nel log:
+      `modoCambiato pip=false lifecycle=STARTED` (o `RESUMED`) → `espandi`.
+      **non verificabile** (serve il telefono).
+- [ ] **X della finestra** — il video si ferma (niente audio senza finestra); al tasto Home
+      successivo non si ferma niente di sbagliato. Nel log: `lifecycle=CREATED` → `chiudi`.
+      **non verificabile** (serve il telefono).
+- [ ] **Play/pausa nella finestra** — comandano il video; l'icona segue lo stato, anche durante
+      uno stallo di rete resta "pausa". **non verificabile** (serve il telefono).
+- [ ] **Indietro dalla home col widget** — in riproduzione: PiP invece di chiudere l'app; in
+      pausa, o con il PiP disattivato per l'app nelle impostazioni di Android: l'app si chiude come
+      prima (`enterPictureInPictureMode → false` nel log). **non verificabile** (serve il telefono).
+- [ ] **Video in pausa, tasto Home** — nessuna finestra, come prima. **non verificabile**.
+- [ ] **Scroll dopo il PiP** — entrando da pagina intera scorsa fino ai commenti, al ritorno la
+      pagina è allo stesso punto. **non verificabile** (serve il telefono).
+
 ## 4. Download e sottotitoli
 
 - [x] **`GET /api/download/<vid>`** — funzionante quando risponde con `Content-Disposition:
