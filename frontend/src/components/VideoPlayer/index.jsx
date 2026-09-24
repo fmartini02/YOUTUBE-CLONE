@@ -148,6 +148,11 @@ export default function VideoPlayer({
   // lo stato più recente da un ref stabile, quindi eseguirlo una volta sola
   // qui dentro resta corretto.
   useEffect(() => () => flusso.chiudi(), []);
+  // Durata sempre aggiornata per chi la legge DOPO l'apertura del flusso
+  // (onEnd in useStreamSource.js): `duration` arriva da /api/watch di solito
+  // dopo il flusso, e l'effetto di caricamento sotto non si riesegue per lei.
+  const durataRef = useRef(duration);
+  durataRef.current = duration;
 
   // Serve già qui (non solo nell'effetto "Velocità" sotto): l'apertura del
   // flusso deve impostare la velocità scelta fin da subito, non aspettare un
@@ -188,7 +193,7 @@ export default function VideoPlayer({
     // dove si era arrivati, non dall'inizio.
     flusso.apri(v, {
       videoId, quality: qualityForScreen(quality, fitScreen), start: stream.start,
-      durata: duration, rate, autoplay: deveAndare, muxUrl: api.muxUrl,
+      durata: duration, durataOra: () => durataRef.current, rate, autoplay: deveAndare, muxUrl: api.muxUrl,
       // `onProgress` sul <video> (sotto) copre il ripiego <video src>, ma con
       // MediaSource l'evento nativo "progress" non è garantito ad ogni
       // append: questa callback, chiamata dalla pompa dopo ogni scrittura

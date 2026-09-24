@@ -188,6 +188,17 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       vedere); dopo, barra 67 → 84/84 esattamente a `ended=true`, `currentTime` iniziale 6.24
       (preroll saltato). Su 8 video, fine reale del flusso entro 0.4s dalla durata dichiarata.
       `fUuWhaQWhjs`: salto a 124.08 mostrato 124, poi ← riapre da 116.89 mostrato 117.
+- [x] **Il video non salta da solo alla fine quando finisce di scaricarsi** — guardando senza
+      salti, quando il download arriva alla fine del video (~60s prima della fine,
+      `MSE_TARGET_AHEAD_S`; a metà di un video corto) il playhead resta dov'è e il video si vede
+      fino all'ultimo secondo: una sola richiesta `/api/mux`, niente riapertura. Causa: `onEnd`
+      (`useStreamSource.js`) confrontava la fine del buffer con la durata **al momento
+      dell'apertura**, 0 sul primo flusso (i metadati arrivano dopo), quindi scambiava la fine vera
+      per un taglio e riapriva dalla fine del buffer, portandoci il playhead. Ora legge la durata
+      attuale (`durataOra`) e un taglio vero riparte dalla posizione del playhead.
+      **OK** (2026-09-24, Chromium bundled): `O8Yu1E8Blxs` (84s), salto a 40 → prima (anche su
+      `main`) riapertura a `start=84.08` e fine immediata; dopo, playhead 42, buffer fino a 84.12,
+      nessuna riapertura. Salto a 67.2 → barra 84/84 insieme a `ended=true`.
 - [x] **Sincronia audio/video dopo un salto (labiale)** — dopo qualunque salto (barra, ←/→,
       capitoli) la voce resta sul movimento delle labbra per tutto il resto del video, su ogni
       punto e ogni codec. Condizione osservabile: su `/api/mux?...&start=X&tempi=sorgente`

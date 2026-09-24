@@ -88,7 +88,7 @@ function riapriOrinuncia(validoOra, retryRef, suRinuncia, opt) {
 // frattempo), questa chiamata si tira indietro da sola invece di scrivere su
 // `video`/`handleRef`, e chiude subito quello che aveva appena aperto.
 async function apriStream(handleRef, retryRef, genRef, video, opt) {
-  const { videoId, quality, start, durata, rate, autoplay, muxUrl, onBuffer, onFineAnticipata, onAutoplayFailed } = opt;
+  const { videoId, quality, start, durata, durataOra, rate, autoplay, muxUrl, onBuffer, onFineAnticipata, onAutoplayFailed } = opt;
   const mia = ++genRef.current;
   handleRef.current?.chiudi();
   const url = muxUrl(videoId, quality, start);
@@ -130,9 +130,21 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
       // `origine`, non `start`: la timeline MSE parte da lì (0 con la
       // timeline sorgente, dove `bufferedEnd` è già un tempo assoluto; il
       // keyframe di atterraggio con quella relativa di un server vecchio).
-      const fineVera = durata > 0 && bufferedEnd >= durata - origine - 1;
+      //
+      // `durataOra()`, non `durata`: quella è la durata al momento
+      // dell'apertura, e sul primo flusso di ogni video è quasi sempre 0 (i
+      // metadati arrivano dopo). Con quella, la fine vera del download —
+      // ~60s prima della fine del video (MSE_TARGET_AHEAD_S), o a metà di un
+      // video corto — passava per un taglio, e la riapertura portava il
+      // playhead in fondo: il video "scattava alla fine da solo" saltando gli
+      // ultimi secondi (verificato anche su main: O8Yu1E8Blxs, playhead a 40
+      // → riapertura a start=84.08, fine). Per lo stesso motivo un taglio
+      // vero si riprende dalla posizione del playhead (come onError sotto),
+      // non dalla fine del buffer: riaprire da lì saltava tutto il buffer non
+      // ancora visto.
+      const d = durataOra?.() || durata, fineVera = d > 0 && bufferedEnd >= d - origine - 1;
       if (fineVera) { handleRef.current.finalizza?.(); return; }
-      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => origine + bufferedEnd, onFineAnticipata });
+      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => origine + video.currentTime, onFineAnticipata });
     },
     // Un fetch o un appendBuffer possono fallire a metà riproduzione (rete che
     // cade, tab in background su Android che sospende la pompa): senza questo
