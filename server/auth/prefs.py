@@ -1,4 +1,4 @@
-"""prefs.py — preferenze utente (qualità, autoplay, tema, adatta allo schermo)."""
+"""prefs.py — preferenze utente (qualità, autoplay, tema, adatta allo schermo, SponsorBlock)."""
 from auth.storage import PREFS_FILE, _scrivi_json
 
 
@@ -13,6 +13,14 @@ def get_prefs(state) -> dict:
         # dello schermo del dispositivo. Attivo di default. Vedi
         # qualityForScreen in frontend/src/components/VideoPlayer/videoPlayerHelpers.js.
         "fitScreen": state.prefs.get("fitScreen", True),
+        # SponsorBlock: attivo di default (il senso dell'app è guardare senza
+        # pubblicità). Le categorie salvate sono solo quelle cambiate almeno
+        # una volta: i default per categoria stanno in un posto solo,
+        # frontend/src/components/VideoPlayer/sponsorBlock.js, così una
+        # categoria aggiunta dopo prende il suo default anche per chi ha già
+        # salvato le altre.
+        "sponsorBlock": state.prefs.get("sponsorBlock", True),
+        "sponsorCategories": state.prefs.get("sponsorCategories", {}),
     }
 
 

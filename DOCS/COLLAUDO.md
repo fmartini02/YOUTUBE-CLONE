@@ -518,6 +518,64 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       nel testo. Controllo di non-regressione su sottotitoli **caricati a mano** (`5MgBikgcWnY`,
       TED, inglese): 329 cue → **329 righe**, cioè la deduplica non tocca niente dove non serve.
 
+### SponsorBlock (salto delle sponsorizzazioni)
+
+Video di prova: `sk2r2zFyUhM` (segmento `sponsor` da 0 a 16.996, 9:34 di durata). Criterio comune:
+ogni salto fa **al più una** richiesta `/api/mux` in più (`start=17.00`), mai una serie — nel
+Network del browser o contando le richieste da Playwright. Voci provate il 2026-09-24 con Chromium
+headless (Playwright, profilo pulito) su un server di prova con `data/` temporanea.
+
+- [x] **Endpoint** — `GET /api/sponsorblock/<vid>` → `{"segments":[{start,end,category,uuid}],"ok":true,
+      "cached":false}`; la seconda chiamata ha `"cached":true` e non esce dalla LAN (~2 ms). Un
+      video senza segmenti → `segments: []`, `ok: true` (il 404 di SponsorBlock non è un errore).
+      Id malformato → 400. **Privacy:** verso `sponsor.ajay.app` parte solo il prefisso di 4
+      caratteri dello SHA-256 dell'id (`/api/skipSegments/<hash>`), il filtro sull'id vero è locale.
+      **OK** — `sk2r2zFyUhM` → un segmento `sponsor` 0–16.996, 0.20 s; ripetuta → `cached:true`,
+      0.002 s; `dQw4w9WgXcQ` → `[]`; `/api/sponsorblock/bad` → 400.
+- [x] **SponsorBlock irraggiungibile** — con il servizio giù (o senza internet sul server) la
+      risposta è `segments: []`, `ok: false`, stato 200, entro il timeout (4 s server, 6 s
+      frontend), **non** messa in cache; il video parte e scorre come prima, senza avvisi.
+      **OK** — endpoint con host che non risponde / non risolto → `{"segments":[],"ok":false}` in
+      0.1 s, cache vuota dopo. Nel browser con `/api/sponsorblock/**` bloccato: il video parte,
+      scorre da 0 a 45 s, **una** sola richiesta `/api/mux`, nessun segmento e nessun avviso.
+- [x] **Salto automatico (MSE)** — categoria su "Salta": appena la durata è nota il player salta a
+      fine segmento, mostra "Sponsor saltato — Annulla" per 6 s dentro il player (visibile anche
+      a schermo intero) e riprende da lì; il segmento non viene ri-saltato.
+      **OK** — richieste `/api/mux`: `start=0`, `start=17.00`, nient'altro; `currentTime` 17.11 →
+      23.17 in riproduzione, avviso comparso e sparito da solo.
+- [x] **Salto automatico sul ripiego `<video src>`** (niente `MediaSource`: Safari/iOS, codec rari)
+      — il flusso riapre dal keyframe ≤ fine segmento, ma la barra mostra `start + currentTime`
+      ≥ fine segmento: **nessun ciclo** di riaperture.
+      **OK** — `window.MediaSource` rimosso prima del caricamento: `start=0`, `start=17.00`, poi la
+      barra sale 18 → 24 senza altre richieste.
+- [x] **Annulla** — torna all'inizio del segmento e quel segmento, per questo video, non si salta
+      più. Anche premuto **subito**, prima che il salto sia atterrato.
+      **OK** — premuto con il vecchio flusso ancora a 0.24 s: `start=0`, `start=17.00`, `start=0`,
+      poi riproduzione 0 → 15.4 dentro lo sponsor senza nuovi salti. (Prima della correzione di
+      `seekTo`, vedi CLAUDE.md, il video finiva comunque a 17.)
+- [x] **Salto dell'utente durante la riapertura** — un salto a metà video non deve essere "rubato"
+      da un segmento a 0 mentre il flusso riaperto non ha ancora dati (`load()` riporta
+      `currentTime` a 0 per un istante).
+      **OK** — click a metà barra: `start=287.00` e nessuna richiesta `start=17.00` dopo.
+- [x] **Mostra solo** — il segmento resta colorato sulla barra, niente salto automatico; dentro il
+      segmento compare il pulsante "Salta: sponsor" e premerlo salta a fine segmento.
+      **OK** — pulsante comparso a 2.0 s, premuto: `start=17.00`, atterraggio a 17.40 (prima di
+      aspettare la durata atterrava sul keyframe, 11.19, di nuovo dentro il segmento).
+- [x] **Segmenti sulla barra** — un `div.player-progress-sponsor` per ogni segmento non "ignora",
+      col colore della categoria (legenda in Impostazioni).
+      **OK** — `left:0%; width:2.96%` = 16.996 / 574 s, `rgb(0, 212, 0)` (verde sponsor).
+- [x] **Impostazioni** — sezione "SponsorBlock": interruttore generale e, per categoria, Salta /
+      Mostra solo / Ignora; salvate in `/api/prefs` (`sponsorBlock`, `sponsorCategories`),
+      valore sconosciuto rifiutato con 422. Spento: nessuna richiesta `/api/sponsorblock`.
+      **OK** (server + aspetto) — `PATCH {"sponsorCategories":{"sponsor":"boh"}}` → 422;
+      `{"sponsorBlock":false,...}` salvato in `prefs.json`. Sezione leggibile in tema scuro e
+      chiaro (screenshot). **non verificabile** in questo giro: il cambio dal menu a tendina
+      guardato nel browser (provato via `PATCH`).
+- [ ] **Widget, PiP, APK, Cast** — nel widget e nel PiP l'avviso è nascosto dal CSS come gli
+      altri strati; su APK su rete solo-LAN i segmenti arrivano comunque (passano dal server);
+      in Cast non si salta (il player locale non c'è).
+      **non verificabile** — serve il telefono / un Chromecast.
+
 ### Mini-player (widget) e Picture-in-Picture
 
 Criterio comune a tutte le voci: passando tra pagina intera, widget e PiP **non parte nessuna nuova
@@ -859,7 +917,7 @@ Chromium headless di Playwright pilotato da uno script `playwright-core`) sulla 
       singola confermata sopra; per lo svuotamento totale: aggiunta una seconda voce di prova
       (`COLLAUDOTEST02`), poi `DELETE /api/history` → `{"ok":true}`, `GET /api/history` →
       `{"history":[]}`. **non verificabile** (riflesso nella UI) — serve un browser reale.
-- [x] **Preferenze** — `GET /api/prefs` torna almeno `quality`, `autoplay`, `theme`, `fitScreen`;
+- [x] **Preferenze** — `GET /api/prefs` torna almeno `quality`, `autoplay`, `theme`, `fitScreen`, `sponsorBlock`, `sponsorCategories`;
       `PATCH /api/prefs` le aggiorna e sopravvivono al riavvio del server.
       **OK** (stavolta verificato anche il riavvio vero, non solo la scrittura su disco) —
       `GET /api/prefs` → `{"quality":"best","autoplay":true,"theme":"dark"}` (prima di `fitScreen`;

@@ -9,6 +9,7 @@ import ChromecastGuideSection from "./ChromecastGuideSection";
 import AccountSection from "./AccountSection";
 import CookiesSection from "./CookiesSection";
 import PreferencesSection from "./PreferencesSection";
+import SponsorBlockSection from "./SponsorBlockSection";
 import HistorySection from "./HistorySection";
 
 export default function SettingsPage({ navigate }) {
@@ -29,6 +30,7 @@ export default function SettingsPage({ navigate }) {
       <AccountSection oauth={oauth} addToast={addToast} />
       <CookiesSection status={oauth.status} cookies={cookies} />
       <PreferencesSection prefs={prefs} salvaPrefs={salvaPrefs} />
+      <SponsorBlockSection prefs={prefs} salvaPrefs={salvaPrefs} />
       <HistorySection navigate={navigate} addToast={addToast} />
 
       <ToastContainer />

@@ -501,6 +501,12 @@ body {
   transition: transform 0.1s;
 }
 .player-progress:hover .player-progress-handle { transform: translateY(-50%) scale(1); }
+/* Segmenti SponsorBlock (VideoPlayer/SponsorOverlay.jsx): sopra buffer e
+   avanzamento, sotto la maniglia, come nell'estensione. Il colore è della
+   categoria, inline. */
+.player-progress-sponsor {
+  position: absolute; top: 0; bottom: 0; opacity: 0.85; pointer-events: none;
+}
 .player-progress-tip {
   position: absolute; bottom: 22px; transform: translateX(-50%);
   background: rgba(0,0,0,0.85); color: #fff; font-size: 12px;
@@ -856,6 +862,29 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
    il meno possibile ma non salta via, così la riga non si ricompone sotto il dito. */
 .subscribe-btn:disabled { opacity: 0.6; cursor: default; }
 .subscribe-btn.small { padding: 5px 12px; font-size: 12px; }
+
+/* ── SPONSORBLOCK ──────────────────────────────────────────────────────
+   Avviso "Sponsor saltato — Annulla" e pulsante "Salta" di un segmento
+   "mostra solo" (VideoPlayer/SponsorOverlay.jsx). In basso a destra sopra la
+   barra dei comandi, come il pulsante "Salta" dell'estensione; sopra lo
+   strato dei tocchi (10) così il dito lo raggiunge, sotto barra (20) e menu
+   impostazioni (21). Resta visibile anche coi comandi nascosti: è il solo
+   modo di annullare un salto a video in corso. */
+.sponsor-overlay {
+  position: absolute; right: 12px; bottom: 68px; z-index: 19;
+  display: flex; align-items: center; gap: 10px;
+  color: #fff; font-size: 14px; border-radius: 6px;
+  animation: toastIn 0.2s ease;
+}
+.sponsor-avviso { background: rgba(0, 0, 0, 0.8); padding: 6px 6px 6px 14px; }
+.sponsor-btn {
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(255, 255, 255, 0.15); color: #fff; border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px; padding: 6px 12px; font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.sponsor-salta .sponsor-btn { background: rgba(0, 0, 0, 0.8); }
+.sponsor-btn:hover { background: rgba(80, 80, 80, 0.9); }
+.sponsor-btn .material-symbols-outlined { font-size: 20px; }
 
 /* ── MINI-PLAYER (widget) ───────────────────────────────────────────────
    Tornando Indietro da un video (o aprendo un'altra pagina da lì) il video
