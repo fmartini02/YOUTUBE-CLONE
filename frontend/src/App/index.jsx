@@ -5,6 +5,7 @@ import { PrefsProvider } from "../hooks/usePrefs";
 import ServerSetup from "../components/ServerSetup";
 import { useAppNavigation } from "./useAppNavigation";
 import { useBackButton } from "./useBackButton";
+import { usePipMode } from "./usePipMode";
 import { useAuthStatusPolling } from "./useAuthStatusPolling";
 import { useCookieWarning } from "./useCookieWarning";
 import AppLayout from "./AppLayout";
@@ -42,6 +43,7 @@ function AppInterno() {
   const mobileLayout = useMobileLayout();
   const auth = useAuthStatusPolling();
   const nav = useAppNavigation(mobileLayout, setSidebarOpen, castRef);
+  usePipMode(nav);
   useBackButton(sidebarOpen, setSidebarOpen, nav.depthRef);
   const cookie = useCookieWarning(auth.authStatus);
 

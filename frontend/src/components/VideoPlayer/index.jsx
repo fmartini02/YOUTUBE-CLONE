@@ -10,6 +10,7 @@ import PlayerOverlays from "./PlayerOverlays";
 import PlayerButtonsBar from "./PlayerButtonsBar";
 import PlayerSettingsMenu from "./PlayerSettingsMenu";
 import MiniPlayerOverlay from "./MiniPlayerOverlay";
+import { usePipBridge } from "./usePipBridge";
 
 /**
  * Player con controlli propri, al posto di quelli nativi del browser.
@@ -367,6 +368,8 @@ export default function VideoPlayer({
     setRebuffering(false);
     videoRef.current?.pause();
   }, []);
+  // PiP di Android: stato e comandi della finestra (no-op fuori dall'APK).
+  usePipBridge(videoRef, playing || rebuffering, actualHeight, riproduci, pausa);
 
   const toggleMute = useCallback(() => {
     const v = videoRef.current;

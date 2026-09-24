@@ -179,6 +179,16 @@ Terza trappola dell'APK: il telefono e la Smart TV stanno spesso su una **rete s
 
 Quarta trappola dell'APK, sul Cast nativo: da **Android 13** (`targetSdk` è 36) il Cast SDK non scopre **nessun** dispositivo via mDNS finché l'app non ha il permesso **runtime** `NEARBY_WIFI_DEVICES` — dichiararlo nel manifest non basta, va anche *chiesto* a mano. `CastBridgePlugin.showDevicePicker()` lo chiede al primo tocco su "Trasmetti" (`@Permission(alias="nearbyWifi")` + `requestPermissionForAlias`, callback che riapre comunque il selettore). Manifest: aggiunti `NEARBY_WIFI_DEVICES` (`neverForLocation`), `CHANGE_WIFI_MULTICAST_STATE` (ricezione dei pacchetti mDNS) e `ACCESS_FINE_LOCATION` con `maxSdkVersion=32` (ripiego pre-13, senza far chiedere la posizione su 13+). Nota a parte: **le Smart TV senza Chromecast integrato** (Samsung, LG, Roku, Fire TV) non compaiono comunque nel selettore — non parlano il protocollo Google Cast; l'app YouTube ufficiale ci arriva con DIAL + il "lounge" di YouTube, non con Cast.
 
+Quinta trappola dell'APK, il **Picture-in-Picture** (uscendo dall'app col video in riproduzione, il video continua in una finestrella sopra le altre app): `PipPlugin.java` + gli agganci in `MainActivity`, lato pagina `hooks/pipBridge.js`, `App/usePipMode.js`, `components/VideoPlayer/usePipBridge.js`. In PiP va l'intera WebView: la pagina mette `data-pip` su `<html>` e il CSS porta il player a tutta finestra con regole `!important` (devono battere sia la modalità cinema sia il widget). Cose che sembrano dettagli e non lo sono:
+
+- serve `android:supportsPictureInPicture="true"` sull'activity, altrimenti `enterPictureInPictureMode()` lancia `IllegalStateException`; i `configChanges` esistenti evitano che l'activity venga ricreata entrando in PiP;
+- da API 31 l'entrata la decide il sistema (`setAutoEnterEnabled`), quindi la pagina manda lo stato "player montato e in riproduzione" **a ogni cambio** e il plugin aggiorna i parametri; `onUserLeaveHint` si usa solo da API 26 a 30, per non chiedere l'entrata due volte. "In riproduzione" comprende lo stallo di rete (`playing || rebuffering`), in cui il video è in pausa tecnica;
+- con il PiP disattivato dall'utente `enterPictureInPictureMode()` **restituisce false** invece di lanciare: il tasto Indietro controlla il valore e in quel caso chiude l'app come prima;
+- X ed Espandi arrivano entrambi come `onPictureInPictureModeChanged(false)`; con la X `onStop` arriva **prima** del callback, quindi si guarda lo stato del lifecycle dentro il callback (non ancora `STARTED` = X → pausa esplicita, perché con `KeepRunning` la WebView continua a suonare anche senza niente di visibile);
+- i pulsanti della finestra mandano "play" o "pause" espliciti, mai un "inverti" (durante uno stallo un toggle farebbe ripartire il video); il receiver è registrato con `ContextCompat.RECEIVER_NOT_EXPORTED` (targetSdk 36) e il `PendingIntent` è `FLAG_IMMUTABLE` con `setPackage()`.
+
+Log per verificare sul telefono: `adb logcat -s YtPip`.
+
 Il Cast lato **web** (`hooks/useCast.jsx`) funziona solo su Chrome/Edge/Brave desktop — non in Electron, non in Chromium open-source — e l'hook espone il motivo dell'indisponibilità per poterlo spiegare all'utente. L'unico comando è `CastButton` nella pagina video: sempre visibile, spiega il motivo invece di sparire quando il cast non è disponibile.
 
 ## Docker

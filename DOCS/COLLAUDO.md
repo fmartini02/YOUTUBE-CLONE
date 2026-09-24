@@ -437,6 +437,34 @@ Le prove del 2026-09-24 sono state fatte con il Chromium di Playwright headless 
 - [ ] **Rotazione e banner cookie** — ruotando il telefono o chiudendo il banner, il widget resta
       dentro l'area libera. **non verificabile** in questo giro (la posizione è calcolata dal CSS
       con le stesse variabili dell'header e del banner: da provare sul telefono).
+- [x] **Aspetto in PiP** — con `data-pip` su `<html>` il player copre tutta la finestra, sopra
+      header, pannelli e toast, senza barra dei comandi, da pagina intera **anche in modalità
+      cinema** e dal widget; togliendolo tutto torna com'era. **OK** (simulato nel browser:
+      finestra 320×180 + `data-pip`) — player e video `[0, 0, 320, 180]`, elemento in cima al punto
+      dell'header = il player, barra `display: none`; dopo: widget di nuovo a `[872, 567, 400, 225]`.
+      Sul web il ponte verso Android non fa niente: nessun errore in console.
+
+Le voci seguenti richiedono l'APK su un telefono vero (`./scripts/build_apk.sh --install`) e si
+leggono con `adb logcat -s YtPip`:
+
+- [ ] **Tasto Home col video in riproduzione → PiP** — il video continua nella finestrella, con
+      le proporzioni del video (non una finestra verticale). Pagina intera o widget, uguale.
+      **non verificabile** (serve il telefono).
+- [ ] **Espandi** — riporta nell'app sul video a pagina intera allo stesso secondo, nessuna nuova
+      `/api/mux`/`/api/watch`; se si era già sulla pagina del video niente voce doppia. Nel log:
+      `modoCambiato pip=false lifecycle=STARTED` (o `RESUMED`) → `espandi`.
+      **non verificabile** (serve il telefono).
+- [ ] **X della finestra** — il video si ferma (niente audio senza finestra); al tasto Home
+      successivo non si ferma niente di sbagliato. Nel log: `lifecycle=CREATED` → `chiudi`.
+      **non verificabile** (serve il telefono).
+- [ ] **Play/pausa nella finestra** — comandano il video; l'icona segue lo stato, anche durante
+      uno stallo di rete resta "pausa". **non verificabile** (serve il telefono).
+- [ ] **Indietro dalla home col widget** — in riproduzione: PiP invece di chiudere l'app; in
+      pausa, o con il PiP disattivato per l'app nelle impostazioni di Android: l'app si chiude come
+      prima (`enterPictureInPictureMode → false` nel log). **non verificabile** (serve il telefono).
+- [ ] **Video in pausa, tasto Home** — nessuna finestra, come prima. **non verificabile**.
+- [ ] **Scroll dopo il PiP** — entrando da pagina intera scorsa fino ai commenti, al ritorno la
+      pagina è allo stesso punto. **non verificabile** (serve il telefono).
 
 ## 4. Download e sottotitoli
 

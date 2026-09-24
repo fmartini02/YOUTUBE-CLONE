@@ -939,6 +939,32 @@ video.subtitle-size-large::cue { font-size: 3.4vw; }
   top: var(--mini-top); left: var(--mini-left); right: var(--mini-right); bottom: var(--mini-bottom);
 }
 
+/* ── PICTURE-IN-PICTURE (Android) ───────────────────────────────────────
+   In PiP ci va l'intera WebView: `data-pip` su <html> (App/usePipMode.js)
+   porta il player a coprire tutta la finestrella, sopra a tutto — header
+   (100), pannello descrizione (200/201), toast (9999). Non si nasconde il
+   resto della pagina: basta coprirlo. I comandi li disegna Android.
+
+   Tutto `!important`, come le regole di `:fullscreen` qui sopra: queste
+   devono vincere sia sulla modalità cinema (`.video-page-layout.theater
+   .player-wrap video`, 0-3-1, più specifica di `html[data-pip] .player-wrap
+   video`, 0-2-2) sia sulle regole del widget (larghezza, left/top, transform),
+   da qualunque dei due stati si entri e qualunque regola si aggiunga dopo.
+   `inset: 0` da solo non basta finché la larghezza del widget è impostata:
+   servono anche width/height auto. */
+html[data-pip] .player-wrap {
+  position: fixed !important; inset: 0 !important;
+  width: auto !important; height: auto !important;
+  transform: none !important; border-radius: 0 !important; box-shadow: none !important;
+  z-index: 10000 !important;
+  display: flex !important; align-items: center; justify-content: center; background: #000;
+}
+html[data-pip] .player-wrap video {
+  max-height: none !important; height: 100% !important; width: 100% !important;
+  aspect-ratio: auto !important; object-fit: contain !important;
+}
+html[data-pip] .player-wrap > :not(video):not(.player-spinner) { display: none !important; }
+
 /* ── DESCRIZIONE: card chiusa + pannello a comparsa ───────────────────────
    La card non si espande più sul posto (spingeva i commenti a fondo pagina):
    apre il pannello qui sotto, che ha anche capitoli e trascrizione. */
