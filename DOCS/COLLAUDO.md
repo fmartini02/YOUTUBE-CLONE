@@ -188,6 +188,25 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       vedere); dopo, barra 67 → 84/84 esattamente a `ended=true`, `currentTime` iniziale 6.24
       (preroll saltato). Su 8 video, fine reale del flusso entro 0.4s dalla durata dichiarata.
       `fUuWhaQWhjs`: salto a 124.08 mostrato 124, poi ← riapre da 116.89 mostrato 117.
+- [x] **Sincronia audio/video dopo un salto (labiale)** — dopo qualunque salto (barra, ←/→,
+      capitoli) la voce resta sul movimento delle labbra per tutto il resto del video, su ogni
+      punto e ogni codec. Condizione osservabile: su `/api/mux?...&start=X&tempi=sorgente`
+      l'header `X-Mux-Timeline: sorgente` c'è, e confrontando l'uscita con la sorgente (pacchetti
+      video accoppiati byte per byte, audio per correlazione incrociata) lo scarto fra le due tracce
+      è lo stesso della partenza da 0. Nel player: le richieste MSE contengono `tempi=sorgente` e
+      dopo un salto `video.currentTime` è il secondo assoluto del video (non un offset da 0).
+      Nota storica: la voce "Seek in avanti senza attesa" sopra dice che il muxer fMP4 rimappa
+      ciascuno stream a 0 indipendentemente — misurato, non è così: porta a 0 solo il primo campione
+      di ogni traccia **allungandolo**, e l'audio allungato è la desincronia (vedi CLAUDE.md,
+      "Sincronia audio/video sui salti").
+      **OK** (2026-09-24, server di prova + Chromium bundled). `dQw4w9WgXcQ` AV1+Opus, salti a
+      13.7/60.3/88.8/125.5/200.2 con timeline sorgente: stesso scarto della partenza da 0,
+      correlazione audio 1.0 (prima: 13.7 → **1.68s**, probe in timeout a 3s su una seek di 5.7s).
+      Stesso video H.264+AAC (ramo Cast, timeline relativa): +16.8ms (prima **5.2s/7s**, "dts
+      heuristic" di ffmpeg con B-frame); AV1 relativo −6.9ms. Nel browser, registrando il `<video>`
+      con `captureStream`: `main` salto a 13.7 → audio avanti di 1800ms; questo ramo → uguale agli
+      altri salti (148-165ms, lo scarto fisso della catena di registrazione in headless, uguale per
+      `main` sui salti riusciti).
 - [x] **Barra di caricamento (buffer)** — `.player-progress-buffer` deve crescere mentre il video
       scarica, anche da fermo (video in pausa), non solo mentre scorre.
       **OK** (2026-09-15, live, Chromium bundled pilotato a mano) — risolto passando a MediaSource:

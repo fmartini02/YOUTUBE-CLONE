@@ -98,7 +98,13 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
   const eraRetry = retryRef.current.viaRetry; if (!eraRetry) retryRef.current.tentativi = 0;
   retryRef.current.viaRetry = false;
 
-  const mse = await creaFlussoMse(video, url, {
+  // `tempi=sorgente` SOLO per MSE: ogni campione arriva col suo tempo vero
+  // nel video originale e il SourceBuffer allinea audio e video da sé — la
+  // sincronia non dipende più da dove ffmpeg atterra dopo un salto (vedi
+  // mux_stream in streaming.py e avviaMse in mseStream.js). Il ripiego
+  // <video src> sotto resta sull'URL relativo: un lettore nativo non saprebbe
+  // cosa fare di una timeline che parte da 57s in un flusso non cercabile.
+  const mse = await creaFlussoMse(video, `${url}&tempi=sorgente`, {
     // Un blocco arrivato con successo su una riapertura nata da un retry
     // dimostra che quel problema è superato: il tetto torna a zero per il
     // prossimo episodio scollegato. Senza, due cadute di rete indipendenti a
@@ -114,18 +120,19 @@ async function apriStream(handleRef, retryRef, genRef, video, opt) {
     // (verificato dal vivo: riproduzione bloccata in silenzio dopo un salto
     // rapido). Con questa, la scrittura non avviene proprio.
     ancoraValido: () => genRef.current === mia,
-    onEnd: (bufferedEnd, keyframeStart) => {
+    onEnd: (bufferedEnd, origine) => {
       if (genRef.current !== mia) return;   // superato da un'apertura più recente
       // `durata > 0`, non `!durata ||`: senza metadati (/api/watch non ha
       // ancora risposto, il caso normale nei primi 1-3s di QUALSIASI
       // apertura, non solo un salto) non c'è modo di sapere se il flusso è
       // finito per davvero o si è interrotto prima — trattarlo come "finito"
       // troncava silenziosamente il video su un blip di rete iniziale.
-      // `keyframeStart`, non `start`: il contenuto reale va da lì alla fine
-      // del video, fino a un GOP più lungo di quanto suggerisca `start`.
-      const fineVera = durata > 0 && bufferedEnd >= durata - keyframeStart - 1;
+      // `origine`, non `start`: la timeline MSE parte da lì (0 con la
+      // timeline sorgente, dove `bufferedEnd` è già un tempo assoluto; il
+      // keyframe di atterraggio con quella relativa di un server vecchio).
+      const fineVera = durata > 0 && bufferedEnd >= durata - origine - 1;
       if (fineVera) { handleRef.current.finalizza?.(); return; }
-      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => keyframeStart + bufferedEnd, onFineAnticipata });
+      riapriOrinuncia(() => genRef.current === mia, retryRef, () => handleRef.current.finalizza?.(), { t: () => origine + bufferedEnd, onFineAnticipata });
     },
     // Un fetch o un appendBuffer possono fallire a metà riproduzione (rete che
     // cade, tab in background su Android che sospende la pompa): senza questo

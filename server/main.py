@@ -36,9 +36,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     # Senza, un fetch() cross-origin (APK: WebView su un'origine, server su
-    # un'altra della LAN) legge questi due header come vuoti — il player MSE
-    # cadrebbe nel ripiego <video src> in silenzio, senza un errore visibile.
-    expose_headers=["X-Mux-Codecs", "X-Mux-Start"],
+    # un'altra della LAN) legge questi header come vuoti — il player MSE
+    # cadrebbe nel ripiego <video src> in silenzio, senza un errore visibile
+    # (X-Mux-Timeline: userebbe la timeline relativa, quella che può perdere
+    # la sincronia audio/video sui salti — vedi mux_stream in streaming.py).
+    expose_headers=["X-Mux-Codecs", "X-Mux-Start", "X-Mux-Timeline"],
 )
 
 for _router_module in (search, status, watch, streaming, comments, comment_replies,

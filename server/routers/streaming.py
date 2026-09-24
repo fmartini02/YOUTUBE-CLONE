@@ -20,7 +20,10 @@ router = APIRouter()
 
 _FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 _FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
-_KEYFRAME_PROBE_TIMEOUT = 3
+_KEYFRAME_PROBE_TIMEOUT = 8
+# 3/23s (l'arretramento della "dts heuristic" di ffmpeg sugli input con
+# B-frame) arrotondato per eccesso al millesimo — vedi _build_ffmpeg_cmd.
+_DTS_EURISTICA = 0.131
 
 # Cache degli URL di formato usati da /api/mux e /api/download. Serve al
 # seek: saltare in un altro punto del video significa riavviare ffmpeg, e
@@ -98,12 +101,27 @@ def _keyframe_before(video_url: str, target: float) -> float:
     semplice offset "barra avanti sul fotogramma" già accettato (vedi
     CLAUDE.md), un vero disallineamento udibile fra audio e video.
 
-    `read_intervals "target%+#3"` fa fare a ffprobe lo stesso salto al
-    keyframe che farebbe ffmpeg con `-ss`, leggendo solo 3 fotogrammi invece
-    di un'intera finestra: costa ~0.7-1s (misurato, contro i 4-5s del probe
-    rimosso, che leggeva secondi di dati indipendentemente dalla richiesta).
-    Fallisce silenziosamente sul valore grezzo: un salto un po' sfasato è
-    sempre meglio di un salto che non parte.
+    Serve SOLO al flusso "relativo" (ripiego `<video src>`, Cast): il player
+    MSE chiede `tempi=sorgente` e non ne ha bisogno — vedi `mux_stream`, dove
+    è spiegato perché quella strada è sincronizzata per costruzione e questa
+    no.
+
+    `read_intervals "target%+#1"` fa fare a ffprobe la seek del demuxer
+    (keyframe <= target, per inizio di segmento sugli URL DASH) e legge il
+    primo PACCHETTO che ne esce, col suo flag K: niente decoder da
+    inizializzare, a differenza dei 3 fotogrammi decodificati (`pict_type=I`)
+    letti prima. Attenzione però: ffmpeg NON fa la stessa seek quando
+    l'input video ha B-frame (H.264, ramo Cast) — cerca a `-ss − 3/23s` —
+    quindi il valore restituito qui non va passato così com'è all'input
+    video: ci pensa `_build_ffmpeg_cmd` (vedi `_DTS_EURISTICA`). Senza,
+    `-ss 121.72` faceva atterrare il video a 114.72 con l'audio a 121.72: 7s
+    di desincronia per tutto il resto del video.
+
+    Il timeout (`_KEYFRAME_PROBE_TIMEOUT`) è largo di proposito: la seek
+    stessa sugli URL googlevideo varia da 0.7 a 5.7s (misurato, stesso video,
+    punti diversi), e a timeout si ripiega sul valore grezzo — cioè sulla
+    desincronia di un intero segmento (1.7s misurati a 3s di timeout). Un
+    salto che parte un po' più tardi è meglio di un salto fuori sincrono.
 
     Cache come `_mux_fmt_cache` qui sopra e per lo stesso motivo: un salto
     ripetuto sullo stesso punto (tasti freccia premuti in rapida sequenza,
@@ -128,15 +146,15 @@ def _keyframe_before(video_url: str, target: float) -> float:
     if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
         return hit[1]
     cmd = [_FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
-           "-show_entries", "frame=pts_time,pict_type",
-           "-read_intervals", f"{target:.3f}%+#3", "-of", "csv=p=0", video_url]
+           "-show_entries", "packet=pts_time,flags",
+           "-read_intervals", f"{target:.3f}%+#1", "-of", "csv=p=0", video_url]
     result = target
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=_KEYFRAME_PROBE_TIMEOUT).stdout
         for line in out.splitlines():
             pts, _, flag = line.partition(",")
-            if flag.startswith("I"):
+            if flag.startswith("K"):
                 result = math.ceil(float(pts) * 1000) / 1000
                 break
     except Exception:
@@ -148,11 +166,11 @@ def _keyframe_before(video_url: str, target: float) -> float:
     return result
 
 
-def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4", audio_aac=False) -> list:
+def _build_ffmpeg_cmd(video_url: str, audio_url, seek=0.0, container="mp4", audio_aac=False) -> list:
     """
     Comando ffmpeg che unisce video+audio adattivi (o remuxa il progressivo).
-    Video sempre in sola copia; l'audio in copia tranne che sui salti — vedi
-    sotto.
+    Video sempre in sola copia; l'audio in copia tranne che sui salti della
+    timeline relativa — vedi sotto. `seek`: secondo da cui partire (0 = dall'inizio).
 
     Frammentazione a tempo fisso (frag_duration), non per keyframe: i video
     YouTube hanno spesso il secondo keyframe a 5-6s dall'inizio, e con
@@ -172,17 +190,45 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4", audio
     sparisce (verificato: 6/6 salti puliti contro 6/6 col buco). Senza salto
     (`start=0`, `/api/download`) resta tutto `-c copy` come prima. Il ramo
     `webm` (Cast 4K) è lasciato in copia: l'AAC non entra in un WebM e quel
-    percorso va provato con un ricevitore reale.
+    percorso va provato con un ricevitore reale. Sulla timeline sorgente
+    (`mp4_sorgente`, sotto) il buco non si presenta — misurato: distanza
+    massima fra due pacchetti video 0.040s, un fotogramma, su 8 salti — e
+    l'audio resta in copia anche sui salti: niente ricodifica, stesso codec
+    della partenza da 0.
 
-    Nessun probe del keyframe prima del salto: `-ss` in `-c:v copy` atterra da
-    sé sull'ultimo keyframe ≤ valore (primo pacchetto video sempre `K`), e un
-    `ffprobe` mirato per trovarlo costava 4-5s sul flusso 4K — tutto sul
-    percorso critico del salto. In più dare a ffmpeg un `-ss` *esatto* sul
-    keyframe rallentava il suo avvio di ~1.7s rispetto a un valore "largo"
-    (misurato, 3/3). Il player mostra comunque `start + currentTime`: dopo un
-    salto la barra può essere avanti di ≤ 1 GOP (qui ~3s) rispetto al
-    fotogramma, offset fisso che non deriva — come lo snap ai segmenti di
-    YouTube. Il probe (`_keyframe_before`, finestra `ffprobe`) è stato rimosso.
+    SALTI SULLA TIMELINE RELATIVA: video e audio devono condividere lo stesso
+    riferimento temporale E l'audio non deve partire dopo il video (il muxer
+    rappresenterebbe lo scarto "stirando" il primo campione audio, che il
+    browser suona per 21ms invece che per tutta la sua durata: audio in
+    anticipo di tutto lo scarto — vedi `mux_stream`). `seek` qui è il
+    keyframe di `_keyframe_before`, e all'input video si dà `seek +
+    _DTS_EURISTICA` con `-itsoffset` dello stesso valore. Perché: quando
+    l'input video ha B-frame (H.264, il ramo Cast), `fftools` non cerca a
+    `-ss` ma a `-ss − 3/23s` ("dts heuristic" in ffmpeg_demux.c), e un `-ss`
+    esattamente sul keyframe torna indietro di un intero segmento DASH
+    (misurato: 5.2s e 7s, audio avanti di altrettanto per tutto il video).
+    Il margine riporta la ricerca sul keyframe (AV1/VP9, senza euristica,
+    atterrano comunque su quell'inizio di segmento: il successivo è secondi
+    più in là) e `-itsoffset` sottrae lo stesso margine dalla timeline del
+    video, che resta allineata a quella dell'audio. Misurato: H.264 +16.8ms,
+    AV1 −6.9ms (prima, H.264: 5.2-7s).
+
+    `container="mp4_sorgente"`: stesso MP4 frammentato, ma con i TEMPI VERI
+    della sorgente su ogni campione di ogni traccia (lo chiede il player MSE,
+    vedi `mux_stream`). Tre opzioni, tutte necessarie — misurate una per una:
+    - `-copyts`: niente sottrazione del `-ss`, i pacchetti restano sul tempo
+      del video originale (video dal keyframe, audio dal secondo chiesto);
+    - `-avoid_negative_ts make_non_negative` + `frag_discont`: il muxer, di
+      suo, riporta a 0 il primo campione di OGNI traccia per conto proprio
+      (`make_zero` automatico senza edit list) — `frag_discont` gli fa
+      scrivere nel `tfdt` il tempo vero del primo pacchetto invece di 0, e
+      `make_non_negative` toglie quel `make_zero`;
+    - `-use_editlist 0`: altrimenti, con `frag_discont`, il muxer sposta in
+      avanti il video del ritardo di riordino dei B-frame (H.264: +40ms, il
+      primo campione usciva con pts 121.76 invece di 121.72).
+    Verificato sul contenuto (pacchetti video accoppiati alla sorgente,
+    correlazione dell'audio con quella originale): 0.0 ms su AV1+Opus e
+    H.264+AAC, anche dove il flusso relativo sbagliava di 1.7s e 7s.
 
     `container="webm"` è il ramo del Chromecast in 4K: Google Cast decodifica
     il VP9 solo dentro un WebM, mai in MP4. `-live 1` mette il muxer Matroska
@@ -190,24 +236,31 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=(), container="mp4", audio
     fine stream, come `empty_moov` per l'MP4); `cluster_time_limit` 1s dà lo
     stesso avvio rapido di `frag_duration`.
     """
-    base = [_FFMPEG_BIN, "-loglevel", "error"]
+    sorgente = container == "mp4_sorgente"
+    base = [_FFMPEG_BIN, "-loglevel", "error", *(["-copyts"] if sorgente else [])]
     # `audio_aac` arriva già decisa dal chiamante (non ricalcolata qui):
     # serve anche per l'header `X-Mux-Codecs` di `mux_stream`, che deve
     # sapere PRIMA di lanciare ffmpeg quale codec sta per uscire.
     acodec = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k"] if audio_aac else ["-c", "copy"]
+    ss = ["-ss", f"{seek:.3f}"] if seek > 0 else []
     if audio_url:
-        cmd = [*base, *seek, "-i", video_url, *seek, "-i", audio_url,
+        relativo = bool(ss) and container == "mp4"
+        ss_video = ["-ss", f"{seek + _DTS_EURISTICA:.3f}", "-itsoffset", f"{_DTS_EURISTICA:.3f}"] if relativo else ss
+        cmd = [*base, *ss_video, "-i", video_url, *ss, "-i", audio_url,
                "-map", "0:v:0", "-map", "1:a:0", *acodec]
     else:
-        cmd = [*base, *seek, "-i", video_url, *acodec]
+        cmd = [*base, *ss, "-i", video_url, *acodec]
     if container == "webm":
         return [*cmd, "-live", "1", "-cluster_time_limit", "1000", "-f", "webm", "pipe:1"]
-    return [*cmd, "-movflags", "empty_moov+default_base_moof",
+    if sorgente:
+        cmd += ["-avoid_negative_ts", "make_non_negative", "-use_editlist", "0"]
+    movflags = "empty_moov+default_base_moof" + ("+frag_discont" if sorgente else "")
+    return [*cmd, "-movflags", movflags,
             "-frag_duration", "1000000", "-f", "mp4", "pipe:1"]
 
 
 @router.get("/api/mux/{video_id}")
-async def mux_stream(video_id: str, quality: str = "best", compat: bool = False, start: float = 0):
+async def mux_stream(video_id: str, quality: str = "best", compat: bool = False, start: float = 0, tempi: str = ""):
     """
     Streaming ad alta qualità: unisce al volo con ffmpeg i flussi video e
     audio separati che YouTube offre oltre i 360p.
@@ -217,6 +270,31 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     cercare dentro un flusso non cercabile, il player ricomincia il flusso
     dal secondo richiesto (ffmpeg `-ss` prima degli input, sul Range degli
     URL googlevideo) e mostra `start + currentTime` come posizione.
+
+    SINCRONIA AUDIO/VIDEO SUI SALTI — `tempi=sorgente` (player MSE). Dopo un
+    `-ss` il video in copia parte dal keyframe (anche secondi prima), l'audio
+    dal secondo chiesto: la timeline interna di ffmpeg è comunque coerente
+    (verificato con `-debug_ts`), ma il muxer fMP4 senza edit list porta a 0
+    il primo campione di ogni traccia e rappresenta quella partita DOPO
+    "stirandone" il primo campione (una durata di 1.7s, 7s...). Il video
+    stirato è innocuo (un fotogramma tenuto più a lungo); l'audio no: il
+    browser suona i campioni uno dopo l'altro ignorando quella durata, e
+    l'audio anticipa il video esattamente dello scarto, per tutto il resto
+    del video. È la causa di OGNI desincronia vista finora su questo player
+    (probe in timeout → 1.7s; I-frame non IDR sull'H.264 → 7s; keyframe
+    arrotondato per difetto → 6s). Con `tempi=sorgente` ogni campione porta
+    il suo tempo vero (vedi `mp4_sorgente` in `_build_ffmpeg_cmd`) e il
+    `SourceBuffer` in modalità "segments" li mette in fila da sé, come fa il
+    player di YouTube coi segmenti DASH: sincronizzati per costruzione, senza
+    probe (quindi anche 1-5s più veloci a partire) e senza ipotesi sulla
+    distanza fra keyframe. L'header `X-Mux-Timeline: sorgente` dice al player
+    che la richiesta è stata onorata: un server vecchio non lo manda, e un
+    APK nuovo collegato a un server vecchio resta sulla timeline relativa.
+
+    Senza `tempi` (ripiego `<video src>`, Cast): la timeline resta relativa
+    (parte da 0), perché un lettore nativo che riceve tempi da 57s non la
+    mostra in modo prevedibile e non gli si può spostare il playhead in un
+    flusso non cercabile. Lì la sincronia dipende ancora dal probe qui sotto.
 
     Sul salto, `_keyframe_before` trova con un probe minimo il keyframe video
     <= al secondo richiesto (ffmpeg in `-c:v copy` ci atterrerebbe comunque
@@ -242,14 +320,13 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
 
     video_url, audio_url, container, vcodec, acodec = urls
     start = max(0.0, start)
-    seek_target = start
-    if start > 0 and audio_url and container == "mp4":
-        seek_target = await asyncio.get_running_loop().run_in_executor(
-            None, _keyframe_before, video_url, start
-        )
-    seek = ["-ss", f"{seek_target:.3f}"] if seek_target > 0 else []
-    audio_aac = bool(audio_url and seek and container == "mp4")
-    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek, container=container, audio_aac=audio_aac)
+    sorgente = tempi == "sorgente" and container == "mp4"
+    # Il probe serve solo alla timeline relativa: con quella sorgente il
+    # `-ss` resta il secondo grezzo e ogni traccia parte dove può.
+    probe = start > 0 and audio_url and container == "mp4" and not sorgente
+    seek_target = (await asyncio.get_running_loop().run_in_executor(None, _keyframe_before, video_url, start)) if probe else start
+    audio_aac = bool(audio_url and seek_target > 0 and container == "mp4" and not sorgente)
+    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek_target, container="mp4_sorgente" if sorgente else container, audio_aac=audio_aac)
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
     # "Range: bytes=0-" e riceve un 200 invece del 206 che si aspetta,
@@ -265,7 +342,10 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     # `creaFlussoMse` in modo pulito invece di dichiarare un mime sbagliato.
     headers = {"Accept-Ranges": "none"}
     if container == "mp4":
-        headers.update({"X-Mux-Start": f"{seek_target:.3f}", "X-Mux-Codecs": f"{vcodec},{'mp4a.40.2' if audio_aac else acodec}"})
+        headers["X-Mux-Codecs"] = f"{vcodec},{'mp4a.40.2' if audio_aac else acodec}"
+        # Con `tempi=sorgente` non c'è un "punto di atterraggio" da dichiarare:
+        # ogni campione porta già il suo tempo vero.
+        headers.update({"X-Mux-Timeline": "sorgente"} if sorgente else {"X-Mux-Start": f"{seek_target:.3f}"})
     return await ffmpeg_pipe_response(
         cmd, f"mux {video_id} (quality={quality}, start={start})",
         headers=headers, media_type=f"video/{container}",
