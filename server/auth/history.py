@@ -13,16 +13,22 @@ def _save_history(state):
 
 def add_to_history(state, video: dict):
     """Aggiunge un video in testa alla cronologia locale (più recente per primo)."""
+    precedente = next((h for h in state.history if h.get("id") == video.get("id")), {})
     state.history = [h for h in state.history if h.get("id") != video.get("id")]
     state.history.insert(0, {
         "id": video.get("id"),
         "title": video.get("title"),
         "channel": video.get("channel"),
         "channel_id": video.get("channel_id"),
-        "duration": video.get("duration"),
+        "duration": video.get("duration") or precedente.get("duration"),
         "thumbnail": video.get("thumbnail")
                      or f"https://i.ytimg.com/vi/{video.get('id')}/hqdefault.jpg",
         "watched_at": time.time(),
+        # Riaprire un video lo riporta in cima ma non deve fargli dimenticare
+        # fin dove era arrivato: è proprio da lì che il player lo ha appena
+        # ripreso (vedi auth/watch_progress.py) — questa aggiunta arriva dopo
+        # /api/watch, cioè a flusso già aperto da quel punto.
+        **{k: precedente[k] for k in ("position", "progress_at") if k in precedente},
     })
     # Il taglio va fatto anche in memoria, altrimenti la lista cresce senza
     # limite per tutta la vita del processo.

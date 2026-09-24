@@ -15,6 +15,7 @@ class PrefsUpdate(BaseModel):
     autoplay: Optional[bool] = None
     theme: Optional[str] = None
     fitScreen: Optional[bool] = None
+    resume: Optional[bool] = None
 
 
 @router.get("/api/prefs")

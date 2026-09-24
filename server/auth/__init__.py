@@ -28,6 +28,7 @@ Mappa dei moduli:
                               sync completa, copia locale, iscriviti/disiscriviti
   cookies.py, cookies_import.py    cookies.txt manuale e import dal browser
   history.py                  cronologia locale
+  watch_progress.py           fin dove è stato visto un video (ripresa, barrette)
   prefs.py                    preferenze utente
   channel_avatars.py          loghi canale in batch, con cache
   channel_bubbles.py          canali attivi per la home + stato "canale visto"

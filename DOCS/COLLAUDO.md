@@ -719,6 +719,36 @@ leggono con `adb logcat -s YtPip`:
 - [ ] **Tema** — cambiando tema l'attributo `data-theme` su `<html>` cambia, la palette segue in
       tutta l'app, e **il player resta scuro in entrambi i temi**.
       **non verificabile** — serve un browser reale.
+- [x] **Riprendi da dove eri rimasto** (`auth/watch_progress.py`, `routers/watch_progress.py`,
+      `components/VideoPlayer/useWatchResume.js`, `WatchProgressBar.jsx`, preferenza `resume`).
+      Condizioni osservabili:
+      1. mentre il video scorre il player manda `PATCH /api/history/<id>/progress` ogni ~15s
+         (`final:false`) e subito alla pausa, al cambio video, all'uscita/app in background
+         (`final:true`); uno stallo di rete **non** conta come pausa;
+      2. su disco (`history.json`) la posizione va al massimo ogni 10s, subito solo con `final`, e
+         quella rimasta in memoria si salva allo spegnimento del server;
+      3. `POST /api/history` dello stesso video (riapertura) **conserva** `position`;
+      4. `GET /api/history/<id>/progress` → `resume` = posizione salvata; `0` sotto i 5s, negli
+         ultimi 10s, o con la preferenza `resume:false`; `PATCH` da `Origin` esterna → 403,
+         posizione negativa → 422;
+      5. riaprendo il video parte **una sola** `/api/mux` con `start=<posizione>` (niente apertura da
+         0 seguita da un salto) e il playhead atterra sul punto salvato, non sul keyframe prima;
+      6. passare a widget e tornare a pagina intera **non** rilegge la ripresa né riapre il flusso;
+      7. le card (home/canale/iscrizioni, ricerca, correlati, Cronologia) mostrano la barretta
+         rossa in proporzione; niente barretta con la preferenza spenta; togliere il video dalla
+         Cronologia la fa sparire.
+      **OK** 2026-09-24 (worktree `resume-position`, server di prova su 8197 con `data/` temporanea,
+      Chromium di Playwright su `hsenKhlaA8w`, 6108s): (1) PATCH periodico a 127.9 e `final` alla
+      pausa col tasto `k` a 134.5; (2) PATCH a 200 entro 10s → file ancora a 123.5, `final` a 210 →
+      file a 210; PATCH non finale a 777 dopo un `final` a 500 → file a 500, dopo SIGTERM a 777;
+      (3) riapertura → `resume` ancora 210; (4) 595/600 → `resume:0`, preferenza spenta →
+      `resume:0`, `Origin: https://evil.com` → 403, `-3` → 422; (5) dalla ricerca: una sola
+      `GET /api/mux/...&start=137.00&tempi=sorgente`, `seeked t=138.01 dur=6108` (prima della
+      correzione sulla durata: `dur=Infinity` e atterraggio a 130.01, il keyframe); (6) Indietro →
+      widget presente, video ancora in pausa, zero richieste `mux`/`progress`; espandendo, ancora
+      zero; (7) ricerca: barretta `2.24%` sulla card del video, `[]` con `resume:false`.
+      Non provati: home/iscrizioni (servono cookie), sparizione dopo "togli dalla cronologia"
+      nella UI, APK in background.
 
 ## 9. Autenticazioni (entrambe facoltative)
 

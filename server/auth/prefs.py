@@ -13,6 +13,11 @@ def get_prefs(state) -> dict:
         # dello schermo del dispositivo. Attivo di default. Vedi
         # qualityForScreen in frontend/src/components/VideoPlayer/videoPlayerHelpers.js.
         "fitScreen": state.prefs.get("fitScreen", True),
+        # Riapre i video dal punto in cui erano stati lasciati e mostra la
+        # barretta rossa sulle miniature. Spenta, la posizione si registra
+        # comunque (come la cronologia stessa): riaccenderla non riparte da zero.
+        # Vedi auth/watch_progress.py.
+        "resume": state.prefs.get("resume", True),
     }
 
 

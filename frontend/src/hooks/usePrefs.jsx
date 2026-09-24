@@ -15,7 +15,7 @@ import { api } from "../api";
  * avviato.
  */
 
-const DEFAULT = { quality: "best", autoplay: true, theme: "dark", fitScreen: true };
+const DEFAULT = { quality: "best", autoplay: true, theme: "dark", fitScreen: true, resume: true };
 
 const PrefsContext = createContext({ prefs: DEFAULT, pronte: false, salvaPrefs: async () => {} });
 

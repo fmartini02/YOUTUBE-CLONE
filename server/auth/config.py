@@ -66,3 +66,16 @@ AVATAR_MISS_TTL = 86400
 # Quanti video tenere nella cronologia. È il taglio applicato sia in memoria
 # sia sul file, sulla lista ordinata dal più recente al più vecchio.
 HISTORY_MAX = 500
+
+# Posizione di visione nella cronologia (vedi auth/watch_progress.py). Il
+# player la manda ogni ~15s mentre il video scorre, ma su disco va al massimo
+# ogni PROGRESS_SAVE_MIN_S secondi: la cronologia è un unico JSON da centinaia
+# di voci, riscritto intero con fsync. Subito solo i salvataggi "finali"
+# (pausa, uscita dal video). Nel frattempo la posizione resta in memoria e la
+# porta su disco la scrittura successiva, qualunque sia, o lo spegnimento.
+PROGRESS_SAVE_MIN_S = 10
+# Sotto questa posizione non vale la pena riprendere: si riparte da 0.
+RESUME_MIN_S = 5
+# Negli ultimi secondi il video è da considerarsi finito: riaperto riparte da
+# 0, come su YouTube, e la barretta sulla miniatura resta piena.
+RESUME_END_MARGIN_S = 10

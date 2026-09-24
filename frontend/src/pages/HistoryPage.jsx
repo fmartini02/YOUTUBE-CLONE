@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, formatDuration, timeAgo, proxyImg } from "../api";
 import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
+import WatchProgressBar from "../components/WatchProgressBar";
+import { useWatchProgress } from "../hooks/useWatchProgress";
 import { useToast } from "../hooks/useToast";
 import { raggruppaPerGiorno } from "./historyGrouping";
 import { rimuoviVoce, svuotaCronologia } from "./historyActions";
@@ -20,6 +22,7 @@ function HistoryRow({ v, navigate, onRemove }) {
       <div className="history-thumb">
         <img src={proxyImg(v.thumbnail || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`)} alt={v.title} />
         {v.duration ? <span className="duration">{formatDuration(v.duration)}</span> : null}
+        <WatchProgressBar videoId={v.id} />
       </div>
       <div className="history-meta">
         <div className="history-title">{v.title}</div>
@@ -81,8 +84,11 @@ export default function HistoryPage({ navigate }) {
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const rimuovi = useCallback(id => rimuoviVoce(id, setVoci, addToast), [addToast]);
-  const svuota = () => svuotaCronologia(voci, setVoci, addToast);
+  // La posizione di visione sta nella voce stessa: tolta la voce, le barrette
+  // rosse di quel video (home, correlati…) devono sparire anche loro.
+  const { ricarica } = useWatchProgress();
+  const rimuovi = useCallback(id => rimuoviVoce(id, setVoci, addToast).then(ricarica), [addToast, ricarica]);
+  const svuota = () => svuotaCronologia(voci, setVoci, addToast).then(ricarica);
 
   if (loading) return <div style={{ color: "var(--text2)" }}>Caricamento cronologia...</div>;
   if (!voci.length) return <EmptyHistory />;

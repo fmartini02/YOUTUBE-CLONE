@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api, formatDuration, formatViews, formatDate, proxyImg } from "../api";
 import { useToast } from "../hooks/useToast";
 import ChannelLink, { daLinkCanale } from "../components/ChannelLink";
+import WatchProgressBar from "../components/WatchProgressBar";
 
 function SearchSkeleton({ query }) {
   return (
@@ -49,6 +50,7 @@ function SearchResultCard({ v, navigate }) {
       <div className="search-thumb">
         <img src={proxyImg(v.thumbnail)} alt={v.title} />
         {v.duration && <span className="search-duration">{formatDuration(v.duration)}</span>}
+        <WatchProgressBar videoId={v.id} />
       </div>
       <SearchMeta v={v} navigate={navigate} />
     </div>
