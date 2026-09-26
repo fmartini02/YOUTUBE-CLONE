@@ -148,12 +148,15 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       `?q=notizie&tipo=video&durata=lunga&ordina=visualizzazioni`, la ricarica mantiene i 3 chip e
       le durate sono tutte >20 min; Indietro → `?q=notizie&tipo=video&durata=lunga`; con Canale 8
       opzioni disattivate. A 390px pannello su 2 colonne, `scrollWidth` 390 (nessuno scroll orizzontale).
-- [ ] **Card canale e playlist** — il canale ha logo tondo, handle, iscritti, descrizione e Iscriviti,
+- [x] **Card canale e playlist** — il canale ha logo tondo, handle, iscritti, descrizione e Iscriviti,
       e il tocco apre `/channel?id=…`; la playlist ha la fascia "Playlist" e apre la pagina playlist
-      `/playlist?list=<id>` (issue #12). *(da riverificare dopo il merge di #12 e #14: prima del merge
-      la card di #14 apriva il video in copertina, `/watch?v=YOJsKatW-Ts`; il canale apriva
-      `/channel?id=UCSJ4gkVC6NrvII8umztf0Ow`.)* Una copertina può mancare perché YouTube stesso dà 404
+      `/playlist?list=<id>` (issue #12). Una copertina può mancare perché YouTube stesso dà 404
       (video in copertina rimosso): resta il riquadro grigio.
+      **OK** (2026-09-26, dopo il merge di #11-#14, Chromium di Playwright, porta 8191) —
+      `/search?q=lofi hip hop&tipo=playlist` → 20 card; clic → `/playlist?list=PLeY3OWvWpq2NZ1yVqYevCYIN5AQwsWXtj`
+      con "Riproduci tutto"; Indietro → `/search?q=lofi+hip+hop&tipo=playlist`; nessun errore JS.
+      Sui risultati video la barretta rossa di #11 c'è (`28.3%` per 60s su 212). Canale: verificato
+      prima del merge (`/channel?id=UCSJ4gkVC6NrvII8umztf0Ow`), codice non toccato dal merge.
 - [x] **Ricerca di playlist** — `GET /api/search?q=...&tipo=playlist` restituisce solo playlist (id
       `PL…`, titolo, copertina, canale con `channel_id`). **OK** (2026-09-24, prima del merge, branch
       `playlist-watch-later`) — `q=lofi+hip+hop&tipo=playlist` → 20 playlist, es.
