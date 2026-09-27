@@ -2,8 +2,13 @@
 
 _QUALITY_HEIGHTS = {"2160": 2160, "1440": 1440, "1080": 1080, "720": 720, "480": 480, "360": 360}
 
+# Codec che il player può chiedere (`codec=` di /api/mux) → prefisso del
+# `vcodec` di yt-dlp. Il VP9 è "vp" perché yt-dlp lo scrive `vp9` nei flussi
+# DASH e `vp09.…` negli HLS: `vp` li prende entrambi.
+CODEC_PREFISSI = {"av1": "av01", "vp9": "vp", "h264": "avc1"}
 
-def adaptive_format_selector(quality: str) -> str:
+
+def adaptive_format_selector(quality: str, codec: str = "") -> str:
     """
     Coppia video+audio separati alla qualità più alta disponibile: oltre i
     360p YouTube quasi mai offre un unico file già combinato, e il player
@@ -13,9 +18,19 @@ def adaptive_format_selector(quality: str) -> str:
     `quality="best"` (il default) sale fino a 2160p (4K): il remux è in sola
     copia, quindi il costo lato server è solo I/O; a decodificare il 4K
     (AV1/VP9) ci pensa il browser.
+
+    `codec` è la scelta del dispositivo (`frontend/src/api/codecDevice.js`):
+    il "migliore" per yt-dlp è quasi sempre l'AV1, che su un telefono senza
+    decoder AV1 hardware va in software — un 1080p a 60 fps si blocca ogni
+    pochi secondi anche col buffer pieno (misurato). Si prende il codec chiesto
+    alla stessa altezza e, se il video non lo offre (l'H.264 su YouTube si
+    ferma al 1080p, molti video non hanno AV1), il migliore come prima. Un
+    valore sconosciuto è ignorato, così un client più nuovo non rompe niente.
     """
     h = _QUALITY_HEIGHTS.get(quality, 2160)
-    return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
+    generico = f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
+    prefisso = CODEC_PREFISSI.get(codec)
+    return f"bestvideo[height<={h}][vcodec^={prefisso}]+bestaudio/{generico}" if prefisso else generico
 
 
 def cast_format_selector(quality: str, allow_hq: bool = False) -> str:

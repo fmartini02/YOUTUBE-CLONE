@@ -9,6 +9,7 @@ export { proxyImg } from "./img";
 export { apiFetch, errorMessage } from "./core";
 export { resolveCastBase, checkServerReachable } from "./cast";
 export { isCapacitor } from "./device";
+export { CODEC_ORDINE, codecScelto, leggiCodec, rilevaCodec } from "./codecDevice";
 export { WATCH_LATER_ID } from "./endpoints/playlists";
 export { formatDuration, formatCompact, formatViews, formatDate, timeAgo } from "./format";
 
