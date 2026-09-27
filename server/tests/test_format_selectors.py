@@ -43,6 +43,13 @@ def _scegli(selettore: str) -> str:
     (adaptive_format_selector("best"), "401+251"),        # il meglio assoluto: AV1 4K + Opus
     (adaptive_format_selector("720"), "398+251"),
     (adaptive_format_selector("sconosciuta"), "401+251"),  # default 2160
+    # codec scelto dal dispositivo (api/codecDevice.js), alla stessa altezza
+    (adaptive_format_selector("1080", "vp9"), "248+251"),
+    (adaptive_format_selector("1080", "h264"), "137+251"),
+    (adaptive_format_selector("2160", "h264"), "137+251"),   # H.264 si ferma al 1080p
+    (adaptive_format_selector("720", "vp9"), "398+251"),     # niente VP9 a 720: il migliore
+    (adaptive_format_selector("1080", "av1"), "399+251"),
+    (adaptive_format_selector("1080", "xyz"), "399+251"),    # sconosciuto: ignorato
     (cast_format_selector("720"), "136+140"),
     (cast_format_selector("2160"), "137+140"),             # senza hq: tetto H.264 1080
     (cast_format_selector("1080", True), "137+140"),       # hq conta solo oltre il 1080p

@@ -43,6 +43,7 @@ lo dicono anche nel proprio testo, con 🧪. Chi automatizza una voce nuova aggi
 | Salto lontano su un video lungo (§3) | `test_proxy_blocchi.py`, `test_ffmpeg_pipe.py` | Con googlevideo finto: solo file DASH googlevideo passano dal proxy (non HLS, non altri host, non `x.googlevideo.com@altro`), richieste sempre chiuse ≤ `BLOCCO`, ripresa dal byte raggiunto dopo un taglio, calendario raffica + `RITMO`, 206/416/400 via HTTP come li vede ffmpeg. Il processo muore anche se il client se ne va mentre non legge. La velocità vera contro YouTube e il telefono no. |
 | Seek vicino alla fine: la barra non scatta alla fine (§3) | `test_keyframe.py` | Solo la causa (1): keyframe arrotondato per eccesso. La (2), la barra nel player, no. |
 | Qualità fino a 4K (§3), `/api/download` (§4), 4K sul Cast (§3) | `test_format_selectors.py`, `test_ffmpeg_cmd.py`, `test_mux_stream.py` | Lato server: il selettore adattivo sale a 2160 (AV1+Opus), il Cast resta H.264+AAC a ogni qualità e passa al VP9+Opus in WebM solo in 4K con `hq`; ramo `webm` senza header MSE. Nessun ricevitore reale. |
+| Codec del dispositivo (§3) | `e2e/codec.spec.js`, `test_mux_codec.py`, `test_format_selectors.py`, `test_codec_strings.py` | Test salvato una volta in `localStorage`, `codec=` del primo booleano acceso, selettore alla stessa altezza con ricaduta, stringa `vp09…` per MSE, sezione delle Impostazioni. La risposta vera di `mediaCapabilities` su un telefono no: in Chromium headless tutti e tre risultano "fluidi". |
 | Indietro dal video → widget; Tocco sul widget → pagina intera; Apertura diretta di `/watch` poi Indietro; Pulsanti del widget (solo X) (§3, mini-player) | `e2e/miniplayer.spec.js` | Nessuna nuova `/api/mux` né `/api/watch` fra pagina intera e widget, il video continua, URL giusti. Trascinamento, tastiera, schermo intero, PiP no. |
 | Home, scroll lungo (§5) | `test_lazy_feed.py` | Logica di `LazyFeed` con un yt-dlp finto: paginazione pigra, Mix che non contano, riapertura che salta i doppioni, freni alle riaperture. Il feed vero coi cookie no. |
 | Correlati (§5) | `test_lazy_feed.py` | Solo `escludi` (il video aperto non toglie un posto alla pagina). |
@@ -546,6 +547,39 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       **478 righe** dopo la deduplica, **0** duplicati consecutivi e nessun `<c>`/`<00:00:01.234>`
       nel testo. Controllo di non-regressione su sottotitoli **caricati a mano** (`5MgBikgcWnY`,
       TED, inglese): 329 cue → **329 righe**, cioè la deduplica non tocca niente dove non serve.
+
+### Codec del dispositivo (AV1 / VP9 / H.264)
+
+Il "migliore" di yt-dlp è quasi sempre l'AV1, che senza decoder hardware va in software: su
+"INSIDE a Nuclear Reactor Core" (`pXypQ6d_iDg`, 60 fps) a 2160p si perdeva il 44% dei fotogrammi
+con un blocco ogni ~4s **a buffer pieno** (20-60s scaricati). Da qui un test per dispositivo
+(`frontend/src/api/codecDevice.js`) e il parametro `codec=` di `/api/mux`.
+
+- [x] **Test una volta sola, salvato per dispositivo** — al primo avvio dell'app `localStorage`
+      contiene `ytproxy.codec` con tre booleani `av1`/`vp9`/`h264`; ai successivi avvii non si
+      rifà (il valore salvato resta identico).
+      **OK** (`e2e/codec.spec.js`, test 1 e 2).
+- [x] **Si usa il più efficiente acceso** — con `av1:false, vp9:true, h264:true` la prima
+      `/api/mux` ha `codec=vp9`; ordine AV1 → VP9 → H.264; niente test = niente parametro.
+      **OK** (`e2e/codec.spec.js`, test 2; `test_mux_codec.py`: `codec` arriva a `_mux_formats`).
+- [x] **Il server rispetta il codec alla stessa altezza** — `curl -D - "localhost:8097/api/mux/pXypQ6d_iDg?quality=1080&tempi=sorgente&codec=…"`:
+      vuoto e `av1` → `av01.0.09M.08,opus`, `vp9` → `vp09.00.41.08,opus`, `h264` → `avc1.64002a,opus`.
+      Codec assente per quel video (H.264 sopra i 1080p, VP9 mancante) → il migliore come prima.
+      **OK** (2026-09-27, curl sopra; `test_format_selectors.py`).
+- [x] **Il VP9 entra in MSE** — yt-dlp scrive `vp9` nudo, che Chrome rifiuta in MP4
+      (`isTypeSupported('video/mp4; codecs="vp9,opus"')` → `false`): `X-Mux-Codecs` deve portare
+      `vp09.PP.LL.DD` e il player deve partire da `blob:`, non dal ripiego.
+      **OK** (`test_codec_strings.py`, livelli uguali a quelli HLS di YouTube; nel browser il video
+      del reattore con `codec=vp9` parte con `currentSrc` `blob:`).
+- [x] **Il video che si bloccava ora scorre** — reattore a 1080p60 per 40s in Chromium con VP9 e con
+      H.264: `blob:`, 1080p, un solo `waiting` (l'avvio), ~1% di fotogrammi persi.
+      **OK** sul PC (2026-09-27). Sul telefono: **non verificabile** qui (nessun telefono collegato).
+- [x] **Impostazioni → "Codec video del dispositivo"** — mostra i tre booleani, quale codec è in uso,
+      il criterio (hardware / fluido) e l'altezza provata; "Ripeti il test" riscrive il risultato.
+      **OK** (`e2e/codec.spec.js`, test 3).
+- [ ] **APK sul telefono** — sul telefono che si bloccava, Impostazioni mostra AV1 ❌ (criterio
+      "hardware") se il chip non ha il decoder AV1, e il video del reattore scorre a 1080p60.
+      **non verificabile** (serve il telefono: `./scripts/build_apk.sh --install`).
 
 ### SponsorBlock (salto delle sponsorizzazioni)
 

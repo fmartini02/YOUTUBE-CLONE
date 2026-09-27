@@ -8,10 +8,13 @@ import math
 import shutil
 import subprocess
 import time
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from auth.cookie_session import crea_ydl
+from ytdlp.codec_strings import codec_mse
 from ytdlp.format_selectors import adaptive_format_selector, cast_format_selector
 from routers.ffmpeg_pipe import ffmpeg_pipe_response
 from ytdlp.helpers import ydl_opts_base
@@ -40,7 +43,7 @@ _MUX_FMT_CACHE_TTL = 1800
 _keyframe_cache: dict = {}
 
 
-def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
+def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False, codec: str = ""):
     """
     URL video+audio (o singolo URL progressivo), contenitore e codec sorgente,
     con cache. I codec (stringhe RFC6381, es. `av01.0.05M.08`/`opus`) li dà
@@ -48,7 +51,7 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
     (serve un `SourceBuffer` col codec ESATTO, sennò `appendBuffer` fallisce)
     — vedi l'header `X-Mux-Codecs` in `mux_stream`.
     """
-    key = (video_id, quality, compat, hq)
+    key = (video_id, quality, compat, hq, codec)
     hit = _mux_fmt_cache.get(key)
     if hit and time.time() - hit[0] < _MUX_FMT_CACHE_TTL:
         return hit[1]
@@ -56,7 +59,7 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
     # compat=1 (usato dal Chromecast): forza H.264+AAC invece del meglio
     # assoluto, che sarebbe AV1+Opus e la TV non lo riprodurrebbe. hq=1 (solo
     # la riproduzione Cast) sblocca il 4K in VP9, che però va servito in WebM.
-    selector = cast_format_selector(quality, hq) if compat else adaptive_format_selector(quality)
+    selector = cast_format_selector(quality, hq) if compat else adaptive_format_selector(quality, codec)
     opts = {**ydl_opts_base(), "extract_flat": False, "format": selector}
     with crea_ydl(opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
@@ -72,12 +75,12 @@ def _mux_formats(video_id: str, quality: str, compat: bool, hq: bool = False):
         # `empty_moov`, ricodifica audio sui salti). Instradarla su `-f webm`
         # rompeva i salti su ogni video con sorgente webm.
         webm = compat and hq and video_fmt.get("ext") == "webm"
-        urls = (video_fmt["url"], audio_fmt["url"], "webm" if webm else "mp4", video_fmt.get("vcodec") or "", audio_fmt.get("acodec") or "")
+        urls = (video_fmt["url"], audio_fmt["url"], "webm" if webm else "mp4", codec_mse(video_fmt), audio_fmt.get("acodec") or "")
     else:
         url = info.get("url")
         if not url:
             return None
-        urls = (url, None, "mp4", info.get("vcodec") or "", info.get("acodec") or "")
+        urls = (url, None, "mp4", codec_mse(info), info.get("acodec") or "")
 
     _mux_fmt_cache[key] = (time.time(), urls)
     # Potatura opportunistica: senza, la cache cresce per tutta la vita del
@@ -260,8 +263,22 @@ def _build_ffmpeg_cmd(video_url: str, audio_url, seek=0.0, container="mp4", audi
             "-frag_duration", "1000000", "-f", "mp4", "pipe:1"]
 
 
+class MuxQuery(BaseModel):
+    """
+    Parametri di /api/mux, raggruppati in un modello query di FastAPI (stessi
+    nomi e default di quando erano argomenti) perché con `codec` sarebbero
+    stati sei: la regola dei 5 argomenti. `codec` (`av1`/`vp9`/`h264`, vuoto =
+    il migliore) è la scelta del dispositivo — vedi `adaptive_format_selector`.
+    """
+    quality: str = "best"
+    compat: bool = False
+    start: float = 0
+    tempi: str = ""
+    codec: str = ""
+
+
 @router.get("/api/mux/{video_id}")
-async def mux_stream(video_id: str, quality: str = "best", compat: bool = False, start: float = 0, tempi: str = ""):
+async def mux_stream(video_id: str, p: Annotated[MuxQuery, Query()]):
     """
     Streaming ad alta qualità: unisce al volo con ffmpeg i flussi video e
     audio separati che YouTube offre oltre i 360p.
@@ -312,7 +329,7 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     """
     try:
         urls = await asyncio.get_running_loop().run_in_executor(
-            None, _mux_formats, video_id, quality, compat, compat
+            None, _mux_formats, video_id, p.quality, p.compat, p.compat, p.codec
         )
     except Exception as ex:
         raise HTTPException(500, str(ex))
@@ -320,8 +337,8 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
         raise HTTPException(404, "Nessun formato disponibile")
 
     video_url, audio_url, container, vcodec, acodec = urls
-    start = max(0.0, start)
-    sorgente = tempi == "sorgente" and container == "mp4"
+    start = max(0.0, p.start)
+    sorgente = p.tempi == "sorgente" and container == "mp4"
     # Il probe serve solo alla timeline relativa: con quella sorgente il
     # `-ss` resta il secondo grezzo e ogni traccia parte dove può.
     probe = start > 0 and audio_url and container == "mp4" and not sorgente
@@ -352,7 +369,7 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
         # ogni campione porta già il suo tempo vero.
         headers.update({"X-Mux-Timeline": "sorgente"} if sorgente else {"X-Mux-Start": f"{seek_target:.3f}"})
     return await ffmpeg_pipe_response(
-        cmd, f"mux {video_id} (quality={quality}, start={start})",
+        cmd, f"mux {video_id} (quality={p.quality}, codec={p.codec or '-'}, start={start})",
         headers=headers, media_type=f"video/{container}",
     )
 
