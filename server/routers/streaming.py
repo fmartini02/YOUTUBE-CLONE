@@ -15,6 +15,7 @@ from auth.cookie_session import crea_ydl
 from ytdlp.format_selectors import adaptive_format_selector, cast_format_selector
 from routers.ffmpeg_pipe import ffmpeg_pipe_response
 from ytdlp.helpers import ydl_opts_base
+from ytdlp.proxy_blocchi import via_proxy
 
 router = APIRouter()
 
@@ -147,7 +148,7 @@ def _keyframe_before(video_url: str, target: float) -> float:
         return hit[1]
     cmd = [_FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
            "-show_entries", "packet=pts_time,flags",
-           "-read_intervals", f"{target:.3f}%+#1", "-of", "csv=p=0", video_url]
+           "-read_intervals", f"{target:.3f}%+#1", "-of", "csv=p=0", via_proxy(video_url)]
     result = target
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
@@ -326,7 +327,11 @@ async def mux_stream(video_id: str, quality: str = "best", compat: bool = False,
     probe = start > 0 and audio_url and container == "mp4" and not sorgente
     seek_target = (await asyncio.get_running_loop().run_in_executor(None, _keyframe_before, video_url, start)) if probe else start
     audio_aac = bool(audio_url and seek_target > 0 and container == "mp4" and not sorgente)
-    cmd = _build_ffmpeg_cmd(video_url, audio_url, seek=seek_target, container="mp4_sorgente" if sorgente else container, audio_aac=audio_aac)
+    # Gli URL googlevideo passano dal proxy a blocchi locale: chiesti da
+    # ffmpeg così come sono ("da qui alla fine") YouTube li strozza a ~2x il
+    # bitrate, e ogni salto aspettava ~10 s — vedi ytdlp/proxy_blocchi.py.
+    cmd = _build_ffmpeg_cmd(via_proxy(video_url), via_proxy(audio_url), seek=seek_target,
+                            container="mp4_sorgente" if sorgente else container, audio_aac=audio_aac)
 
     # Accept-Ranges: none dichiarato esplicitamente — senza, il browser manda
     # "Range: bytes=0-" e riceve un 200 invece del 206 che si aspetta,
@@ -371,7 +376,9 @@ async def download_video(video_id: str, quality: str = "best"):
         raise HTTPException(404, "Nessun formato disponibile")
 
     video_url, audio_url, _cont, _vcodec, _acodec = urls
-    cmd = _build_ffmpeg_cmd(video_url, audio_url)
+    # Proxy a blocchi senza ritmo: un file da scaricare lo si vuole tutto e
+    # subito (vedi RITMO in ytdlp/proxy_blocchi.py).
+    cmd = _build_ffmpeg_cmd(via_proxy(video_url, ritmo=False), via_proxy(audio_url, ritmo=False))
 
     # Il nome del file lo mette il frontend con l'attributo `download` del
     # link (è il titolo del video); qui basta un ripiego sicuro.

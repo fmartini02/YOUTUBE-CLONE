@@ -40,6 +40,7 @@ lo dicono anche nel proprio testo, con 🧪. Chi automatizza una voce nuova aggi
 | Seek corto (§3) | `e2e/player.spec.js` | Tasto →: +10s dentro il buffer, nessuna nuova `/api/mux`, non torna all'inizio. Il doppio tocco sul telefono no. |
 | Dopo un salto corto il video non resta in pausa (§3) | `e2e/player.spec.js` | Dopo → il video continua a scorrere da solo. Lo stallo di rete vero no. |
 | Sincronia audio/video dopo un salto (§3) | `test_ffmpeg_reale.py`, `test_ffmpeg_cmd.py`, `test_mux_stream.py` | Sul contenuto, con ffmpeg vero: sulla timeline sorgente ogni pacchetto video e audio in uscita ha tempo e dimensione del pacchetto sorgente a quel tempo; sulla relativa le due tracce partono insieme da 0 sul keyframe. Opzioni (`-copyts`, `frag_discont`, `-use_editlist 0`, dts heuristic, AAC solo sui salti relativi) e scelta probe/header. Solo VP9+Opus: l'H.264 coi B-frame resta da provare a mano (o con `-m rete`). |
+| Salto lontano su un video lungo (§3) | `test_proxy_blocchi.py`, `test_ffmpeg_pipe.py` | Con googlevideo finto: solo file DASH googlevideo passano dal proxy (non HLS, non altri host, non `x.googlevideo.com@altro`), richieste sempre chiuse ≤ `BLOCCO`, ripresa dal byte raggiunto dopo un taglio, calendario raffica + `RITMO`, 206/416/400 via HTTP come li vede ffmpeg. Il processo muore anche se il client se ne va mentre non legge. La velocità vera contro YouTube e il telefono no. |
 | Seek vicino alla fine: la barra non scatta alla fine (§3) | `test_keyframe.py` | Solo la causa (1): keyframe arrotondato per eccesso. La (2), la barra nel player, no. |
 | Qualità fino a 4K (§3), `/api/download` (§4), 4K sul Cast (§3) | `test_format_selectors.py`, `test_ffmpeg_cmd.py`, `test_mux_stream.py` | Lato server: il selettore adattivo sale a 2160 (AV1+Opus), il Cast resta H.264+AAC a ogni qualità e passa al VP9+Opus in WebM solo in 4K con `hq`; ramo `webm` senza header MSE. Nessun ricevitore reale. |
 | Indietro dal video → widget; Tocco sul widget → pagina intera; Apertura diretta di `/watch` poi Indietro; Pulsanti del widget (solo X) (§3, mini-player) | `e2e/miniplayer.spec.js` | Nessuna nuova `/api/mux` né `/api/watch` fra pagina intera e widget, il video continua, URL giusti. Trascinamento, tastiera, schermo intero, PiP no. |
@@ -248,6 +249,30 @@ cambiano lo stato vero — rimettere a posto il valore precedente e dirlo nel re
       (325 pacchetti continui su 12s di test). L'allineamento audio/video esatto non è verificabile
       a orecchio in headless: il meccanismo (stesso keyframe passato a entrambi gli input) è
       verificato a livello ffmpeg/ffprobe, non nel player.
+- [ ] **Salto lontano su un video lungo, anche dal telefono** — su un video di 40+ minuti, un salto
+      a metà o oltre riparte in **pochi secondi** (non 10-30) con il buffer che si riempie subito
+      (`video.buffered` avanti di ~60s entro pochi secondi dal salto), e a browser chiuso o dopo un
+      salto **nessun ffmpeg resta vivo** sul server. Cause, entrambe misurate: (1) googlevideo
+      strozza le richieste a range aperto (`bytes=N-`, quelle di ffmpeg) a ~2x il bitrate — ~100 KB/s
+      video, ~28 KB/s audio, contro 10-26 MB/s a blocchi chiusi — e ogni salto ripartiva da zero a
+      quella velocità; cura: `server/ytdlp/proxy_blocchi.py` (blocchi chiusi da 10 MB, raffica di 120s
+      di contenuto, poi 2x il bitrate medio). (2) ffmpeg orfano se il client se ne va mentre non legge
+      (buffer pieno, pausa): Starlette non chiudeva il generatore; cura: `_RispostaFfmpeg` in
+      `server/routers/ffmpeg_pipe.py` (e svuotare lo stdout prima di `proc.wait()`, che altrimenti non
+      tornava mai).
+      **OK lato server e in Chromium con viewport da telefono** (2026-09-27, server di prova, Chromium
+      bundled in emulazione Pixel 7; `Hxund7HGv9c` 70 min AV1+Opus 1080p, `hytZusfpZrY` 2h17 H.264+Opus):
+      audio e video fino a +3s dopo un salto: prima 8.9-12.1s su qualunque punto, ora 0.3s; nel
+      player, salto al 57%: prima ~10s di rotellina e poi 2-3s di vantaggio, ora `t=2449.6` con
+      `buf=[2440-2510]` al primo campione (2s dopo il salto); 4 salti in 3s: l'ultimo riparte in 2s.
+      **Sincronia invariata**: uscita di ffmpeg identica byte per byte (SHA uguali) con e senza proxy,
+      AV1 e H.264, timeline sorgente e relativa, salti a 1500/2500/4000; keyframe del probe identici
+      (probe 1.2-1.6s → 0.2s). Accumulo nel browser col lettore fermo 30s: senza ritmo 98.4 MB, con
+      ritmo 18.6 MB. ffmpeg vivi a browser chiuso: prima 1 dopo quasi 3 minuti (fermo in scrittura,
+      ~50 MB), ora 0.
+      **non verificabile**: un telefono vero (Wi-Fi, decoder AV1 del telefono, WebView dell'APK) —
+      nessun dispositivo collegato via adb.
+      🧪 **Automatica** (esito 2026-09-27: OK): `test_proxy_blocchi.py`, `test_ffmpeg_pipe.py` — vedi «Copertura automatica».
 - [ ] **Seek vicino alla fine** — spostare la barra o premere → negli ultimi secondi del video:
       l'audio **non sparisce** e il player non si pianta. Era `-copypriorss 0` nell'ultimo GOP (nessun
       keyframe dopo il punto) a produrre un flusso **con 0 pacchetti video** che bloccava anche
@@ -670,6 +695,10 @@ leggono con `adb logcat -s YtPip`:
       `content-disposition: attachment; filename="jNQXAC9IVRw.mp4"`, 745200 byte; `ffprobe` legge
       video **h264** + audio **aac** (non AV1+Opus, come da doc). `/tmp/ytproxy_cache` non esiste
       dopo la prova.
+      **Velocità** (2026-09-27, dopo il proxy a blocchi `server/ytdlp/proxy_blocchi.py`, senza ritmo
+      per il download): `curl -m10 .../api/download/Hxund7HGv9c?quality=720` → 144 MB in 10s
+      (14.4 MB/s; prima strozzato da googlevideo a ~130 KB/s, cioè ore per un video lungo), e dopo
+      l'interruzione nessun ffmpeg resta vivo.
       🧪 **Automatica** (esito 2026-09-24: OK): `test_format_selectors.py` (H.264+AAC a ogni qualità), `test_ffmpeg_cmd.py` (sola copia) — vedi «Copertura automatica».
 - [x] **Elenco sottotitoli** — `GET /api/subtitles/<vid>` elenca le lingue disponibili.
       **OK** — `curl -m40 http://127.0.0.1:8097/api/subtitles/dQw4w9WgXcQ` → 36 lingue con
