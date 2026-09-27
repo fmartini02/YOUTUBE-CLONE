@@ -96,6 +96,42 @@ Dentro `.claude/` sono versionati (le uniche eccezioni alla riga `.claude/*` del
 
 Chi clona il repo eredita gli hook così come sono. Chi non usa Claude Code lancia `rebuild_frontend.sh` / `norm_check.py` a mano (o il solito `npm run build`).
 
+## Git
+
+**Mai lavorare su `main`.** Ogni task ha il suo branch, creato prima della prima modifica: `feat/<breve-descrizione>`, `fix/<...>`, `refactor/<...>`, `docs/<...>` (in italiano, minuscolo, trattini: `fix/seek-fine-video`). Se all'inizio di una sessione il branch corrente è `main`, crealo prima di toccare qualunque file. L'integrazione in `main` (merge o PR) la fa l'utente, non Claude.
+
+**Commit piccoli, ognuno funzionante.** Un commit = un passo logico concluso, non "tutto il lavoro della sessione". Ogni commit deve lasciare il repo in uno stato avviabile e verde: `norm_check.py` pulito, `pytest` verde, e, se si è toccato il frontend, `dist/` ricostruito. Così `git bisect` resta utile, e i bug di questo progetto (sincronia A/V, seek, MSE) si prestano molto alla bisezione. Prima di proporre un commit: `/commit-ready`, e per modifiche non banali il subagent `revisore`.
+
+**Solo la sessione principale committa.** I subagent (`backend-python`, `frontend-react`…) implementano, `revisore` e `collaudo-api` verificano; `git add`/`git commit` restano alla sessione principale, che ha il quadro di tutte le modifiche.
+
+**Cosa entra in un commit:**
+- `frontend/dist/` va **nello stesso commit** dei sorgenti `frontend/src/` che l'hanno generato: il server, l'APK e l'immagine Docker usano `dist/`, quindi un commit con `src/` nuovo e `dist/` vecchio non è avviabile. Per leggere il diff senza il rumore del build: `git diff -- . ':!frontend/dist'`.
+- `DOCS/COLLAUDO.md` (e il test, se la voce è automatizzabile) nello stesso commit della feature che cambia, come da regola sopra.
+- **Mai** `data/` (cookie, token OAuth, iscrizioni), `.claude/settings.local.json`, `.env`, media di prova. Aggiungere i file per percorso (`git add server/routers/streaming.py frontend/src/... frontend/dist`), mai `git add -A` / `git add .`, e guardare `git status` prima di committare.
+
+**Messaggi di commit**: Conventional Commits, descrizione in italiano. Il tipo è uno fra `feat`, `fix`, `refactor`, `test`, `docs`, `build`, `chore`. Lo scope segue le aree del progetto: `server`, `auth`, `feed`, `player`, `frontend`, `apk`, `electron`, `docker`, `scripts`.
+```
+fix(player): riapre il flusso quando seekable è vuoto
+
+Su /api/mux Chrome espone seekable come [0,0] e schiaccia currentTime
+a zero invece di fallire: la scorciatoia "già nel buffer" riportava il
+video all'inizio. Ora si rilegge currentTime dopo averlo scritto.
+```
+Il corpo spiega il **perché** e, quando c'è, il dato misurato, con lo stesso stile delle note di questo file. Il cosa lo dice già il diff.
+
+**Operazioni vietate senza richiesta esplicita dell'utente:** `git push` (qualunque), `push --force`, `reset --hard`, `clean`, `rebase` o `commit --amend` di commit già pushati, cancellazione di branch, `checkout -- <file>` / `restore` su modifiche non committate. Se serve annullare qualcosa, meglio un `git revert` o un nuovo commit. Le principali sono bloccate anche in `.claude/settings.json` (`permissions`).
+
+**Sessioni parallele: un worktree per sessione.** Due sessioni di Claude Code nella stessa cartella si sovrascrivono a vicenda. Per lavorare su due task insieme:
+```bash
+git worktree add ../ytproxy-<task> -b feat/<task>
+```
+Tre cose da sistemare in un worktree nuovo, specifiche di questo progetto:
+- **Porta**: il server del secondo worktree va avviato con `YTPROXY_PORT` diverso (es. `8091`). Il proxy di `vite.config.js` punta a 8090, quindi per `npm run dev` in quel worktree bisogna tenerne conto. Anche i test e2e usano la porta fissa `8098`: non lanciarli in due worktree contemporaneamente.
+- **Dati**: `data/` è ignorato, quindi il worktree parte senza cookie né OAuth. Usa una copia (`cp -r ../ytproxy/data ./data`), **non** la stessa cartella via `YTPROXY_DATA`: due server che salvano gli stessi JSON (`state` caricato all'import, riscritto a ogni salvataggio) si cancellano a vicenda le modifiche.
+- **Dipendenze**: `node_modules/` non c'è, quindi va fatto `cd frontend && npm install` prima del primo build.
+
+A lavoro integrato: `git worktree remove ../ytproxy-<task>`.
+
 ## Architettura
 
 Un unico processo FastAPI fa sia API sia hosting dei file statici. Non esiste database: tutto lo stato sta in file JSON dentro `data/`.
