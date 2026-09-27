@@ -4,6 +4,7 @@ import time
 from auth.cookie_session import segnala_logout_youtube, youtube_auth_cookies
 from auth.feed_cache import invalidate_feeds
 from auth.storage import COOKIE_FILE, scrivi_privato
+from auth.subscriptions_state import scade_feed_cookie
 
 
 def _parse_netscape(content: str):
@@ -25,6 +26,7 @@ def save_cookies(state, content: str) -> dict:
     logged_in=False.
     """
     invalidate_feeds(state)  # prima di scrivere: vedi feed_cache.invalidate_feeds
+    scade_feed_cookie(state)  # il feed Iscrizioni in memoria è della sessione di prima
     scrivi_privato(COOKIE_FILE, content)  # è la sessione YouTube dell'utente, vale quanto una password
     segnala_logout_youtube(False)  # sessione nuova: l'avviso può tornare utile
     pairs = list(_parse_netscape(content))
@@ -71,3 +73,6 @@ def delete_cookies(state):
     if COOKIE_FILE.exists():
         COOKIE_FILE.unlink()
     invalidate_feeds(state)
+    # Senza cookie il feed non si riscarica più: la copia resterebbe per
+    # sempre nelle bollicine della home (auth/channel_bubbles.py).
+    scade_feed_cookie(state)

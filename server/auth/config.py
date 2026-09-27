@@ -2,9 +2,17 @@
 config.py — costanti di tuning: feed pigri, OAuth, cache dei loghi canale.
 """
 
-# 5 minuti: evita di ri-scaricare da YouTube ad ogni "carica altri" il feed
-# iscrizioni letto dai cookie.
-COOKIE_FEED_CACHE_TTL = 300
+# Feed iscrizioni letto dai cookie (vedi auth/cookie_feed.py): dopo 30 minuti
+# la copia in memoria è "scaduta", ma si continua a servirla mentre la si
+# riscarica in background — scaricarlo costa ~5s di yt-dlp, e con 5 minuti di
+# vita ogni video guardato faceva pagare quell'attesa al ritorno sulla pagina.
+# Un video nuovo di un canale compare quindi con al massimo 30 minuti di
+# ritardo; iscriversi/disiscriversi e cambiare i cookie la buttano subito.
+COOKIE_FEED_CACHE_TTL = 1800
+# Dopo un aggiornamento fallito (rete, YouTube che rifiuta, sessione caduta) si
+# riprova fra 10 minuti invece che a ogni pagina aperta: si tiene la copia che
+# c'è, e un errore che dura non diventa una raffica di estrazioni.
+COOKIE_FEED_RIPROVA_S = 600
 
 # Il feed home viene estratto PIGRAMENTE, un blocco alla volta, man mano che
 # l'utente scorre (vedi lazy_feed.LazyFeed): scaricarlo tutto in anticipo

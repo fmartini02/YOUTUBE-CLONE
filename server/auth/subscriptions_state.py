@@ -21,12 +21,21 @@ def scade_feed_cookie(state):
     Fa scadere la cache in memoria del feed iscrizioni letto dai cookie.
 
     Quel feed lo calcola YouTube, quindi la copia locale non lo tocca: senza
-    scaderla, per qualche minuto le Iscrizioni continuerebbero a mostrare i
+    scaderla, per fino a mezz'ora le Iscrizioni continuerebbero a mostrare i
     video di un canale appena lasciato — o a non mostrare quelli di uno
-    appena aggiunto.
+    appena aggiunto. Chiamata anche quando cambiano i cookie (auth/cookies.py,
+    auth/cookies_import.py): la copia sarebbe il feed di un'altra sessione.
+
+    Qui la cache si svuota davvero, invece di segnarla solo come scaduta: la
+    prossima richiesta aspetta il feed nuovo, perché servire quello vecchio
+    mostrerebbe proprio il cambiamento che l'utente ha appena annullato.
+    `cookie_feed_gen` e il task dimenticato fanno sì che un aggiornamento già
+    in corso (partito col feed di prima) non la riempia di nuovo finendo.
     """
     state.cookie_feed_cache = []
     state.cookie_feed_cache_at = 0
+    state.cookie_feed_gen += 1
+    state.cookie_feed_task = None
 
 
 def remember_sub(state, entry: dict):

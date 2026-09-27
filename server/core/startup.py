@@ -5,6 +5,7 @@ from pathlib import Path
 from auth import watch_progress
 from auth.state import state
 from auth.storage import proteggi_file_riservati
+from sync import feed_cookie
 from sync.scheduler import scheduler
 from ytdlp.helpers import ydl_opts_base
 
@@ -42,6 +43,9 @@ async def on_startup():
     # sync/scheduler.py), quindi non serve un altro force_sync qui:
     # raddoppierebbe le richieste.
     scheduler.start(state, ydl_opts_base)
+    # Il feed Iscrizioni dei cookie ha un ciclo suo (vedi sync/feed_cookie.py):
+    # lo riscarica allo scadere, così la pagina non aspetta mai yt-dlp.
+    feed_cookie.avvia(state, ydl_opts_base)
 
 
 async def on_shutdown():

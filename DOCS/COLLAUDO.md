@@ -47,6 +47,7 @@ lo dicono anche nel proprio testo, con 🧪. Chi automatizza una voce nuova aggi
 | Correlati (§5) | `test_lazy_feed.py` | Solo `escludi` (il video aperto non toglie un posto alla pagina). |
 | Preferenze (§8) | `test_security_app.py` | `PATCH /api/prefs` da origine locale e senza Origin. La persistenza al riavvio no. |
 | Tema (§8) | `e2e/tema.spec.js` | `data-theme` su `<html>` per chiaro/scuro/auto, anche dopo un ricaricamento; testo dei comandi del player bianco col tema chiaro. |
+| Feed Iscrizioni in cache, aggiornato in background (§6) | `test_feed_cookie.py` | Con un'estrazione finta: copia scaduta servita subito e riscaricata in background, una sola estrazione per richieste concorrenti, una scadenza forzata non riscritta da un aggiornamento in volo, aggiornamento fallito che tiene la copia e rimanda di `COOKIE_FEED_RIPROVA_S`. Il ciclo vero allo scadere dei 30 min e il feed coi cookie veri no. |
 | Stato cookie (§9) | `test_crea_ydl.py` | Un profilo solo-Google è anonimo (`youtube_auth_cookies`). |
 | Sessione non invalidata (§9) | `test_crea_ydl.py` | Col vero yt-dlp: il logout nel jar non riscrive `cookies.txt`, la rotazione sì (a 0600). |
 | Sicurezza: scritture ostili bloccate, locali ammesse, Origin assente, GET aperte, endpoint nuovi protetti (§10) | `test_security.py`, `test_security_app.py` | Matrice Origin/Host (reti private, same-origin, `YTPROXY_ALLOWED_ORIGINS`, travestimenti tipo `192.168.1.11.evil.com`), middleware su tutti i metodi, cablaggio in `main.py`, `expose_headers` per `X-Mux-*`. |
@@ -804,6 +805,11 @@ leggono con `adb logcat -s YtPip`:
 - [ ] **Pagina Iscrizioni** — le due metà (elenco da OAuth, feed da cookie) funzionano ognuna da sola;
       la pagina si dichiara vuota solo se mancano entrambe, e la scheda "Canali" c'è solo con l'OAuth.
       **non verificabile** — serve un browser reale.
+- [ ] **Iscrizioni senza attesa dopo un video** — coi cookie, aperte le Iscrizioni una volta, guardare un
+      video per più di 5 minuti e tornare: la pagina compare subito (niente ~5s di "Caricamento
+      iscrizioni..."). Nel log del server, allo scadere dei 30 minuti, parte da sola un'estrazione di
+      `feed/subscriptions` senza nessuna pagina aperta. Iscriversi o disiscriversi da un canale si vede
+      subito nel feed. Logica coperta da `test_feed_cookie.py` (2026-09-27); coi cookie veri da provare.
 
 ### Playlist e "Guarda più tardi"
 

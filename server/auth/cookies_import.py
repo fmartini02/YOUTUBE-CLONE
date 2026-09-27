@@ -12,6 +12,7 @@ import os
 
 from auth.cookie_session import segnala_logout_youtube, youtube_auth_cookies
 from auth.feed_cache import invalidate_feeds
+from auth.subscriptions_state import scade_feed_cookie
 from auth.storage import COOKIE_FILE, proteggi_file
 
 _SNAP_PROFILE_HINTS = {
@@ -75,6 +76,7 @@ def import_cookies_from_browser(state, browser: str) -> dict:
     if not auth:
         return {"valid": False, "cookie_count": count, "logged_in": False}
     invalidate_feeds(state)  # prima di scrivere: vedi feed_cache.invalidate_feeds
+    scade_feed_cookie(state)  # il feed Iscrizioni in memoria è della sessione di prima
     out_jar.save(str(COOKIE_FILE), ignore_discard=True, ignore_expires=True)
     proteggi_file(COOKIE_FILE)
     segnala_logout_youtube(False)  # sessione nuova: l'avviso può tornare utile

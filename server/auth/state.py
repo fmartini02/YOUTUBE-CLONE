@@ -36,8 +36,16 @@ class AuthState:
     # {channel_id: {"video_id": <ultimo id visto>, "at": <unix>}} — serve alle
     # bollicine dei canali in home per sapere chi ha un video ancora da vedere.
     channel_seen: dict = field(default_factory=dict)
+    # Feed iscrizioni dei cookie (vedi auth/cookie_feed.py). `_at` è quando è
+    # stato scaricato — o, dopo un aggiornamento fallito, spostato in modo che
+    # il prossimo tentativo cada fra COOKIE_FEED_RIPROVA_S secondi.
     cookie_feed_cache: list = field(default_factory=list)
     cookie_feed_cache_at: float = 0
+    # Aumenta ad ogni scadenza forzata (subscriptions_state.scade_feed_cookie):
+    # un aggiornamento partito prima non deve riscrivere la cache dopo.
+    cookie_feed_gen: int = 0
+    # L'asyncio.Task dell'aggiornamento in corso, se c'è: uno solo alla volta.
+    cookie_feed_task: object = None
     # Estrattori pigri tenuti vivi fra una richiesta e l'altra per poter
     # continuare ogni feed da dove era arrivato (vedi lazy_feed.LazyFeed): la
     # home e il mix dei video aperti di recente. Dict ordinato = cache LRU.

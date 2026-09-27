@@ -21,6 +21,8 @@ Mappa dei moduli:
   feed_home.py, feed_related.py, feed_channel.py, feed_subscriptions.py,
   feed_playlist.py            le sorgenti di feed (home, correlati, canale,
                               iscrizioni, playlist)
+  cookie_feed.py              feed Iscrizioni dei cookie: copia in memoria
+                              servita anche scaduta, aggiornata in background
   playlist_mapping.py         intestazione di una playlist, voci "playlist"
   channel_playlists.py        scheda Playlist di un canale
   watch_later.py              coda locale "Guarda più tardi" (id WL)
