@@ -5,4 +5,5 @@ ytdlp/ — tutto ciò che riguarda yt-dlp in sé, non un endpoint.
   format_selectors.py    selettori di formato per la riproduzione
   patch.py                correzioni locali all'estrattore YouTube
   search_filters.py       filtri della ricerca -> parametro `sp` di YouTube
+  proxy_blocchi.py        proxy locale: ffmpeg/ffprobe scaricano googlevideo a blocchi chiusi
 """
