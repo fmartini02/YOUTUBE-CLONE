@@ -31,6 +31,16 @@ MAX_FUNZIONI_PER_FILE = 5
 MAX_RIGHE_PER_FUNZIONE = 25
 MAX_ARGOMENTI = 5
 
+# Eccezioni dichiarate (CLAUDE.md: "la correttezza vince sul conteggio"):
+# (percorso dalla radice, nome) che può superare le 25 righe — solo quella
+# regola. Sono elencate ma non fanno fallire il controllo: senza, ogni
+# esecuzione senza argomenti usciva con 1 e il pre-push non poteva usarla.
+# Chi ne aggiunge una spiega il perché in un commento nel file stesso.
+ECCEZIONI_RIGHE = [
+    # l'ordine degli effect "caricamento" e "velocità" deve restare nello stesso componente
+    ("frontend/src/components/VideoPlayer/index.jsx", "VideoPlayer"),
+]
+
 
 def _righe_di_codice(source_lines: list, node) -> int:
     """Righe non vuote/non-commento del corpo, escluso il blocco docstring."""
@@ -112,6 +122,11 @@ def main():
     for f in sorted(file_js):
         tutti_i_problemi.extend(controlla_file_js(f))
 
+    dichiarate = [p for p in tutti_i_problemi if any(
+        f"{percorso}:" in p and f": {nome} ha " in p and " righe " in p for percorso, nome in ECCEZIONI_RIGHE)]
+    tutti_i_problemi = [p for p in tutti_i_problemi if p not in dichiarate]
+    for p in dichiarate:
+        print(f"  (eccezione dichiarata) {p}")
     if tutti_i_problemi:
         print(f"{len(tutti_i_problemi)} violazioni:\n")
         for p in tutti_i_problemi:
