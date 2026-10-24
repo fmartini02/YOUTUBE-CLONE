@@ -37,6 +37,15 @@ def media_finti():
     return genera_media(Path(tempfile.gettempdir()) / "ytproxy-media-finti")
 
 
+@pytest.fixture(scope="session", params=["vp9", "h264"])
+def coppia_finta(request):
+    """(codec, video, audio): ogni prova che la usa gira su VP9+Opus e su H.264+AAC."""
+    if not ffmpeg_disponibile():
+        pytest.skip("ffmpeg/ffprobe non installati")
+    cartella = Path(tempfile.gettempdir()) / "ytproxy-media-finti"
+    return (request.param, *genera_media(cartella, request.param))
+
+
 @pytest.fixture
 def ydl_finto(monkeypatch):
     """

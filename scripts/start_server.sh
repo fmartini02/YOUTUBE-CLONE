@@ -140,6 +140,14 @@ else
   echo "✓  Dipendenze Python già installate"
 fi
 
+# ── Hook pre-push ─────────────────────────────────────────────
+# Prima di ogni push i test (scripts/verifica.sh, vedi .githooks/pre-push).
+# Solo in un clone git e solo se nessuno ha già scelto altri hook.
+if git -C "$DIR" rev-parse --git-dir &>/dev/null && [ -z "$(git -C "$DIR" config core.hooksPath)" ]; then
+  git -C "$DIR" config core.hooksPath .githooks
+  echo "✓  Hook pre-push attivato (.githooks/pre-push)"
+fi
+
 # ── Aggiornamento yt-dlp ──────────────────────────────────────
 # yt-dlp si aggiorna spesso per stare al passo con i cambiamenti di YouTube.
 # Controlliamo se c'è una versione più recente (max una volta al giorno).

@@ -1,11 +1,12 @@
 // Aiuti comuni agli smoke test: finti YouTube per l'id sintetico, conteggio
 // delle richieste, lettura dello stato del player.
 //
-// ID_FINTO e DURATA devono coincidere con server/tests/media_finti.py: per
-// quell'id il server offline serve da /api/mux due file locali di 10 minuti.
+// ID_FINTO, ID_LAMPO e DURATA devono coincidere con server/tests/media_finti.py:
+// per quegli id il server offline serve da /api/mux due file locali di 10 minuti.
 import { expect } from "@playwright/test";
 
 export const ID_FINTO = "ytproxyTEST";
+export const ID_LAMPO = "ytproxyLAMP";
 export const DURATA = 600;
 
 const METADATI = {
@@ -17,12 +18,12 @@ const METADATI = {
 // Tutto ciò che per l'id finto andrebbe comunque su YouTube: metadati,
 // correlati, commenti, sottotitoli, miniature. /api/mux invece NON è finto:
 // è il pezzo da provare, e il server offline lo serve davvero con ffmpeg.
-export async function fingiYouTube(page) {
+export async function fingiYouTube(page, id = ID_FINTO) {
   const json = body => route => route.fulfill({ json: body });
-  await page.route(`**/api/watch/${ID_FINTO}`, json(METADATI));
-  await page.route(`**/api/related/${ID_FINTO}*`, json({ results: [], total: 0, has_more: false, source: "nessuna" }));
-  await page.route(`**/api/comments/${ID_FINTO}*`, json({ comments: [], comment_count: 0, next_page_token: "", source: "ytdlp" }));
-  await page.route(`**/api/subtitles/${ID_FINTO}`, json({ languages: [] }));
+  await page.route(`**/api/watch/${id}`, json({ ...METADATI, id }));
+  await page.route(`**/api/related/${id}*`, json({ results: [], total: 0, has_more: false, source: "nessuna" }));
+  await page.route(`**/api/comments/${id}*`, json({ comments: [], comment_count: 0, next_page_token: "", source: "ytdlp" }));
+  await page.route(`**/api/subtitles/${id}`, json({ languages: [] }));
   await page.route("**/api/img?*", route => route.fulfill({ status: 404, body: "" }));
 }
 

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# pre-push — prima di ogni push lancia scripts/verifica.sh e blocca il push
+# se qualcosa non è verde. Attivo con `git config core.hooksPath .githooks`
+# (lo fa scripts/start_server.sh, o `make hooks`). In emergenza:
+# `git push --no-verify`.
+#
+# I test girano sui file della cartella, quindi devono essere esattamente il
+# commit che parte: per questo l'hook rifiuta un push con modifiche non
+# committate (anche file nuovi non aggiunti, che i test vedrebbero e il
+# remoto no) o di un ramo diverso da quello in cui si è.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+head="$(git rev-parse HEAD)"
+zero="0000000000000000000000000000000000000000"
+da_provare=0
+
+# git passa su stdin una riga per ref: <ref locale> <sha locale> <ref remoto> <sha remoto>
+while read -r ref_locale sha_locale _ _; do
+  [ "$sha_locale" = "$zero" ] && continue          # cancellazione di un ramo remoto
+  if [ "$(git rev-parse "$sha_locale^{commit}")" != "$head" ]; then
+    echo "pre-push: stai pushando $ref_locale, ma la cartella è su un altro commit." >&2
+    echo "          I test proverebbero il codice sbagliato: fai checkout di quel ramo." >&2
+    exit 1
+  fi
+  da_provare=1
+done
+[ "$da_provare" = 1 ] || exit 0
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: ci sono modifiche non committate, i test non proverebbero ciò che pushi:" >&2
+  git status --short >&2
+  exit 1
+fi
+
+scripts/verifica.sh
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: il build ha cambiato questi file, quindi il dist/ committato non era aggiornato:" >&2
+  git status --short >&2
+  echo "          git add frontend/dist && git commit, poi ripeti il push." >&2
+  exit 1
+fi

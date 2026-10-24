@@ -6,7 +6,8 @@ Tutto il percorso della riproduzione resta quello vero: routing SPA, guardia
 sulle scritture, `/api/mux` con ffmpeg, header `X-Mux-*`, timeline sorgente.
 L'unica cosa sostituita è `_mux_formats`, cioè l'estrazione yt-dlp degli URL
 googlevideo: per l'id `ID_FINTO` restituisce i due file sintetici di
-media_finti.py (VP9 + Opus separati, come i flussi adattivi veri). Ogni altro
+media_finti.py (VP9 + Opus separati, come i flussi adattivi veri), per
+`ID_LAMPO` la coppia coi lampi e i bip della prova di sincronia. Ogni altro
 id passa all'originale, così le prove `@rete` usano lo stesso server.
 
 I metadati di `/api/watch/ID_FINTO` e le chiamate che andrebbero comunque su
@@ -30,22 +31,24 @@ sys.path[:0] = [str(Path(__file__).resolve().parent.parent), str(Path(__file__).
 import uvicorn  # noqa: E402
 
 import main  # noqa: E402
-from media_finti import ACODEC, ID_FINTO, VCODEC, genera_media  # noqa: E402
+from media_finti import ACODEC, ID_FINTO, ID_LAMPO, VCODEC, genera_media  # noqa: E402
 from routers import streaming  # noqa: E402
 
 
-def _mux_formats_offline(originale, video: Path, audio: Path):
-    """`_mux_formats` che per ID_FINTO risponde con i file locali, per il resto chiama l'originale."""
+def _mux_formats_offline(originale, coppie: dict):
+    """`_mux_formats` che per gli id di `coppie` risponde con i file locali, per il resto chiama l'originale."""
     def mux_formats(video_id, *resto):
-        if video_id == ID_FINTO:
+        if video_id in coppie:
+            video, audio = coppie[video_id]
             return (str(video), str(audio), "mp4", VCODEC, ACODEC)
         return originale(video_id, *resto)
     return mux_formats
 
 
 def avvia():
-    video, audio = genera_media(Path(tempfile.gettempdir()) / "ytproxy-media-finti")
-    streaming._mux_formats = _mux_formats_offline(streaming._mux_formats, video, audio)
+    cartella = Path(tempfile.gettempdir()) / "ytproxy-media-finti"
+    coppie = {ID_FINTO: genera_media(cartella), ID_LAMPO: genera_media(cartella, "lampo")}
+    streaming._mux_formats = _mux_formats_offline(streaming._mux_formats, coppie)
     print(f"[e2e] server offline su 127.0.0.1:{PORTA}, dati in {DATI}")
     try:
         uvicorn.run(main.app, host="127.0.0.1", port=int(PORTA), log_level="warning")
