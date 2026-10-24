@@ -29,23 +29,34 @@ KEYFRAME_OGNI = 2
 VCODEC = "vp09.00.10.08"   # stringa RFC6381, come la dà yt-dlp (X-Mux-Codecs)
 ACODEC = "opus"
 
+_VIDEO = ["-f", "lavfi", "-i", f"testsrc2=size=160x90:rate=15:duration={DURATA}",
+          "-g", str(15 * KEYFRAME_OGNI), "-b:v", "60k"]
+_AUDIO = ["-f", "lavfi", "-i", f"sine=frequency=440:duration={DURATA}", "-b:a", "32k"]
+
+# La coppia "h264" serve solo ai test del server (il Chromium di Playwright
+# non la decodificherebbe): è il caso che si rompeva di più sui salti. Due
+# B-frame come i flussi H.264 di YouTube, quindi dts negativo all'inizio e
+# pts fuori ordine — la "dts heuristic" e l'edit list di CLAUDE.md nascono
+# da qui. `-sc_threshold 0`: keyframe solo ogni KEYFRAME_OGNI, mai sui tagli.
 _SORGENTI = {
-    "video.webm": ["-f", "lavfi", "-i", f"testsrc2=size=160x90:rate=15:duration={DURATA}",
-                   "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8",
-                   "-g", str(15 * KEYFRAME_OGNI), "-b:v", "60k"],
-    "audio.webm": ["-f", "lavfi", "-i", f"sine=frequency=440:duration={DURATA}",
-                   "-c:a", "libopus", "-b:a", "32k"],
+    "vp9": {"video.webm": [*_VIDEO, "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8"],
+            "audio.webm": [*_AUDIO, "-c:a", "libopus"]},
+    "h264": {"video-h264.mp4": [*_VIDEO, "-c:v", "libx264", "-preset", "veryfast", "-bf", "2",
+                                "-keyint_min", str(15 * KEYFRAME_OGNI), "-sc_threshold", "0"],
+             "audio-aac.m4a": [*_AUDIO, "-c:a", "aac"]},
 }
+# Le stringhe che yt-dlp darebbe per questi file (X-Mux-Codecs).
+CODEC_MSE = {"vp9": (VCODEC, ACODEC), "h264": ("avc1.640009", "mp4a.40.2")}
 
 
 def ffmpeg_disponibile() -> bool:
     return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 
-def genera_media(cartella: Path) -> tuple:
-    """(video, audio) dentro `cartella`, generati solo se mancano."""
+def genera_media(cartella: Path, codec: str = "vp9") -> tuple:
+    """(video, audio) della coppia `codec` dentro `cartella`, generati solo se mancano."""
     cartella.mkdir(parents=True, exist_ok=True)
-    for nome, argomenti in _SORGENTI.items():
+    for nome, argomenti in _SORGENTI[codec].items():
         finale = cartella / nome
         if finale.exists():
             continue
@@ -53,7 +64,7 @@ def genera_media(cartella: Path) -> tuple:
         subprocess.run(["ffmpeg", "-v", "error", "-y", *argomenti, str(tmp)],
                        check=True, timeout=180)
         tmp.replace(finale)
-    return cartella / "video.webm", cartella / "audio.webm"
+    return tuple(cartella / nome for nome in _SORGENTI[codec])
 
 
 def pacchetti(percorso: Path, flusso: str, quanti: int = 0) -> list:
