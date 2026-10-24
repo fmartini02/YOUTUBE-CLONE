@@ -4,7 +4,7 @@
 
 DC := docker compose -f docker/docker-compose.yml
 
-.PHONY: help up down build restart logs ps sh clean
+.PHONY: help up down build restart logs ps sh clean hooks verifica
 
 help: ## Elenco dei target disponibili
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -32,3 +32,9 @@ sh: ## Shell dentro il container in esecuzione
 
 clean: down ## Ferma e rimuove anche l'immagine buildata localmente
 	$(DC) down --rmi local
+
+hooks: ## Attiva il pre-push che lancia scripts/verifica.sh (una volta per clone)
+	git config core.hooksPath .githooks
+
+verifica: ## Lancia a mano i controlli del pre-push (norm_check, build, pytest, Playwright)
+	scripts/verifica.sh

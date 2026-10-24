@@ -16,6 +16,7 @@ make up / make logs / make down                # Docker (file in docker/, dati i
 python3 -m pytest                              # backend, offline (-m rete per YouTube vero)
 cd frontend && npm run test:e2e                # Playwright su server offline :8098, usa dist/
 python3 scripts/norm_check.py [percorso]       # regola di stile
+scripts/verifica.sh [--rete]                   # tutto quanto sopra in fila: lo lancia il pre-push
 ```
 
 ## Regole
@@ -32,9 +33,10 @@ python3 scripts/norm_check.py [percorso]       # regola di stile
 ## Git
 
 - Mai lavorare su `main`: un branch per task (`feat/`, `fix/`, `refactor/`, `docs/` + descrizione in italiano con trattini), creato prima della prima modifica. Il merge lo fa l'utente.
-- Commit piccoli e ognuno verde (`norm_check`, `pytest`, `dist/` aggiornato). Prima: `/commit-ready`, e `revisore` per modifiche non banali. Committa solo la sessione principale.
+- Commit piccoli, ognuno lascia il repo funzionante (`norm_check`, `pytest`, `dist/` aggiornato). Prima: `/commit-ready`, e `revisore` per modifiche non banali. Committa solo la sessione principale.
 - `git add` per percorso, mai `-A`/`.`. Mai committare `data/`, `.env`, `.claude/settings.local.json`, media di prova.
 - Conventional Commits in italiano; scope: `server`, `auth`, `feed`, `player`, `frontend`, `apk`, `electron`, `docker`, `scripts`. Il corpo spiega il perché.
+- **Pre-push** (`.githooks/pre-push`, attivo con `git config core.hooksPath .githooks`, che fa `start_server.sh` o `make hooks`): lancia `scripts/verifica.sh` e blocca il push se non è verde, se ci sono modifiche non committate o se il build cambia `dist/`. Una regressione nuova (sincronia, seek...) si chiude prima con un test che la riproduce, poi con la correzione.
 - Vietati senza richiesta esplicita: `push`, `reset --hard`, `clean`, rebase/amend di commit pushati, cancellare branch, scartare modifiche non committate.
 - Sessioni parallele: `git worktree add ../ytproxy-<task> -b feat/<task>`, con `YTPROXY_PORT` diverso, una copia di `data/` (non condivisa) e `npm install`.
 
